@@ -52,4 +52,8 @@ public class RouteVersionJpaEntity {
 
     @Column(name = "valid_to")
     private OffsetDateTime validTo;
+
+    public Long id() {
+        return id;
+    }
 }
