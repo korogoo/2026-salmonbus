@@ -14,7 +14,7 @@ public enum GbisResultCode {
     private final Integer code;
 
     GbisResultCode(
-        final Integer code
+        Integer code
     ) {
         this.code = code;
     }

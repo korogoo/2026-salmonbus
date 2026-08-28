@@ -63,13 +63,13 @@ class VehicleObservationTableTest {
     @Test
     void KST로_넣든_UTC로_넣든_한국_시간으로_조회할_수_있다() {
         // given
-        final OffsetDateTime inKst = OffsetDateTime.parse("2026-08-19T11:14:04.911+09:00");
-        final OffsetDateTime inUtc = OffsetDateTime.parse("2026-08-19T02:14:04.911Z");
+        OffsetDateTime inKst = OffsetDateTime.parse("2026-08-19T11:14:04.911+09:00");
+        OffsetDateTime inUtc = OffsetDateTime.parse("2026-08-19T02:14:04.911Z");
 
         // when
         insertObservation(batchId, VEHICLE_204000206, 0, inKst);
         insertObservation(batchId, VEHICLE_204003542, 1, inUtc);
-        final List<LocalDateTime> actual = jdbcClient
+        List<LocalDateTime> actual = jdbcClient
             .sql("""
                 SELECT observed_at AT TIME ZONE 'Asia/Seoul'
                 FROM vehicle_observation
@@ -138,9 +138,9 @@ class VehicleObservationTableTest {
 
     private void insertObservation(
         final long targetBatchId,
-        final String vehicleId,
+        String vehicleId,
         final int sourceRowNumber,
-        final OffsetDateTime observedAt
+        OffsetDateTime observedAt
     ) {
         jdbcClient.sql("""
                 INSERT INTO vehicle_observation (
