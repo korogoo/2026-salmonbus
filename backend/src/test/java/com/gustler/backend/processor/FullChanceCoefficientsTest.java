@@ -1,5 +1,6 @@
 package com.gustler.backend.processor;
 
+import com.gustler.backend.processor.seatdistribution.SameDayFullOutcomes;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
@@ -19,11 +20,16 @@ import org.junit.jupiter.api.Test;
  * 밖에서 배운 계수가 들어온다. 값이 맞는지는 그때 golden vector 가 본다.
  */
 class FullChanceCoefficientsTest {
+    /** 오늘 확정된 결과가 없는 자리. 그때는 만석 확률을 안 옮긴다. */
+    private static final SameDayFullOutcomes NO_SAME_DAY_OUTCOMES = null;
+
 
     private static final Clock KOREAN_CLOCK =
         Clock.fixed(Instant.parse("2026-08-19T00:00:00Z"), ZoneId.of("Asia/Seoul"));
 
     private static final long ROUTE_VERSION_3330 = 1L;
+
+    private static final String UPSTREAM_ROUTE_3330 = "204000057";
     private static final long ANY_OBSERVATION_ID = 7L;
     private static final Instant MORNING_AT = Instant.parse("2026-08-19T08:30:00+09:00");
 
@@ -120,7 +126,7 @@ class FullChanceCoefficientsTest {
             MAXIMUM_SEATS_44);
         VehicleStopTarget target = new VehicleStopTarget(
             observation, new RouteStop(ROUTE_VERSION_3330, TARGET_STOP_49, "20400049", true));
-        return new SeatForecastInput(target, trajectory, statistics(), stops(), TimeSlot.MORNING);
+        return new SeatForecastInput(target, trajectory, statistics(), stops(), TimeSlot.MORNING, NO_SAME_DAY_OUTCOMES);
     }
 
     private static StopDemandStatistics statistics() {
@@ -133,6 +139,6 @@ class FullChanceCoefficientsTest {
         for (int stopOrder = 1; stopOrder <= LAST_STOP_60; stopOrder++) {
             stops.add(new RouteStop(ROUTE_VERSION_3330, stopOrder, "204000%02d".formatted(stopOrder), true));
         }
-        return new RouteStops(ROUTE_VERSION_3330, stops);
+        return new RouteStops(ROUTE_VERSION_3330, UPSTREAM_ROUTE_3330, stops);
     }
 }

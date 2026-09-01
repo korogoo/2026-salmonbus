@@ -1,5 +1,6 @@
 package com.gustler.backend.processor;
 
+import com.gustler.backend.processor.seatdistribution.SameDayFullOutcomes;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -14,9 +15,15 @@ import org.junit.jupiter.api.Test;
  * 그때의 예보가 그대로 다시 나온다. DB 도 배치도 필요 없다.
  */
 class SeatForecastInputTest {
+    /** 오늘 확정된 결과가 없는 자리. 그때는 만석 확률을 안 옮긴다. */
+    private static final SameDayFullOutcomes NO_SAME_DAY_OUTCOMES = null;
+
 
     private static final long ROUTE_VERSION_3330 = 1L;
     private static final long ROUTE_VERSION_1650 = 2L;
+
+    private static final String UPSTREAM_ROUTE_3330 = "204000057";
+    private static final String UPSTREAM_ROUTE_1650 = "234000050";
     private static final long ANY_OBSERVATION_ID = 7L;
 
     private static final Instant MORNING_AT = Instant.parse("2026-08-19T08:30:00+09:00");
@@ -36,7 +43,7 @@ class SeatForecastInputTest {
     void 손으로_만든_재료_넷만으로_모델_입력이_선다() {
         // when
         SeatForecastInput actual = new SeatForecastInput(
-            target(), trajectoryOf(observed(VEHICLE_204000206)), statisticsOf(ROUTE_VERSION_3330), stops(), TimeSlot.MORNING);
+            target(), trajectoryOf(observed(VEHICLE_204000206)), statisticsOf(ROUTE_VERSION_3330), stops(), TimeSlot.MORNING, NO_SAME_DAY_OUTCOMES);
 
         // then
         assertThat(actual.maximumSeatsEverObserved()).isEqualTo(MAXIMUM_SEATS_EVER_OBSERVED);
@@ -49,7 +56,7 @@ class SeatForecastInputTest {
 
         // when, then
         assertThatThrownBy(() -> new SeatForecastInput(
-            target(), otherVehicle, statisticsOf(ROUTE_VERSION_3330), stops(), TimeSlot.MORNING))
+            target(), otherVehicle, statisticsOf(ROUTE_VERSION_3330), stops(), TimeSlot.MORNING, NO_SAME_DAY_OUTCOMES))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -60,7 +67,7 @@ class SeatForecastInputTest {
 
         // when, then
         assertThatThrownBy(() -> new SeatForecastInput(
-            target(), trajectoryOf(observed(VEHICLE_204000206)), otherVersion, stops(), TimeSlot.MORNING))
+            target(), trajectoryOf(observed(VEHICLE_204000206)), otherVersion, stops(), TimeSlot.MORNING, NO_SAME_DAY_OUTCOMES))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -68,11 +75,13 @@ class SeatForecastInputTest {
     void 정류장_목록이_다른_노선_판본의_것이면_모델_입력을_만들_수_없다() {
         // given
         RouteStops otherVersion = new RouteStops(
-            ROUTE_VERSION_1650, List.of(new RouteStop(ROUTE_VERSION_1650, TARGET_STOP_49, "20400049", true)));
+            ROUTE_VERSION_1650,
+            UPSTREAM_ROUTE_1650,
+            List.of(new RouteStop(ROUTE_VERSION_1650, TARGET_STOP_49, "20400049", true)));
 
         // when, then
         assertThatThrownBy(() -> new SeatForecastInput(
-            target(), trajectoryOf(observed(VEHICLE_204000206)), statisticsOf(ROUTE_VERSION_3330), otherVersion, TimeSlot.MORNING))
+            target(), trajectoryOf(observed(VEHICLE_204000206)), statisticsOf(ROUTE_VERSION_3330), otherVersion, TimeSlot.MORNING, NO_SAME_DAY_OUTCOMES))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -83,7 +92,7 @@ class SeatForecastInputTest {
 
         // when, then 한 예보 행이 두 시간대의 값을 섞지 않는다
         assertThatThrownBy(() -> new SeatForecastInput(
-            target(), trajectoryOf(observed(VEHICLE_204000206)), morning, stops(), TimeSlot.EVENING))
+            target(), trajectoryOf(observed(VEHICLE_204000206)), morning, stops(), TimeSlot.EVENING, NO_SAME_DAY_OUTCOMES))
             .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -125,6 +134,7 @@ class SeatForecastInputTest {
     private static RouteStops stops() {
         return new RouteStops(
             ROUTE_VERSION_3330,
+            UPSTREAM_ROUTE_3330,
             List.of(
                 new RouteStop(ROUTE_VERSION_3330, TARGET_STOP_49, "20400049", true),
                 new RouteStop(ROUTE_VERSION_3330, LAST_STOP_60, "20400060", true)));

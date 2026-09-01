@@ -1,9 +1,13 @@
 package com.gustler.backend.processor;
 
+import com.gustler.backend.processor.seatdistribution.RuntimeSnapshot;
+import com.gustler.backend.processor.seatdistribution.SameDayFullOutcomes;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,13 +48,16 @@ public class ForecastBatchWriter {
     public void writeForecastsOf(
         PendingForecastBatch batch,
         RouteStops stops,
-        ActiveModelDeployment deployment,
-        SeatForecastModel model
+        RuntimeSnapshot runtime
     ) {
         Instant generatedAt = clock.instant();
         TimeSlot timeSlot = ForecastTimeSlot.of(batch, clock);
-        StopDemandStatistics statistics = stopDemandStatisticsOf(batch, deployment, timeSlot);
-        seatForecastRepository.save(forecastsOf(batch, stops, statistics, deployment, model, generatedAt));
+        StopDemandStatistics statistics = stopDemandStatisticsOf(batch, runtime, timeSlot);
+        Map<Integer, SameDayFullOutcomes> sameDayOutcomes =
+            seatForecastRepository.readSameDayFullOutcomes(
+                batch.routeVersionId(), batch.responseReceivedAt());
+        seatForecastRepository.save(
+            forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt));
         seatForecastRepository.markForecastCompleted(batch.observationBatchId(), generatedAt);
     }
 
@@ -71,30 +78,37 @@ public class ForecastBatchWriter {
      */
     private StopDemandStatistics stopDemandStatisticsOf(
         PendingForecastBatch batch,
-        ActiveModelDeployment deployment,
+        RuntimeSnapshot runtime,
         TimeSlot timeSlot
     ) {
         return stopDemandStatisticsRepository.readAsOf(
-            batch.routeVersionId(), timeSlot, deployment.calculationVersion(), batch.responseReceivedAt());
+            batch.routeVersionId(), timeSlot, runtime.featureContractVersion(), batch.responseReceivedAt());
     }
 
     private List<SeatForecast> forecastsOf(
         PendingForecastBatch batch,
         RouteStops stops,
         StopDemandStatistics statistics,
-        ActiveModelDeployment deployment,
-        SeatForecastModel model,
+        Map<Integer, SameDayFullOutcomes> sameDayOutcomes,
+        RuntimeSnapshot runtime,
         Instant generatedAt
     ) {
         List<SeatForecast> forecasts = new ArrayList<>();
+        SeatForecastModel model = runtime.model();
         for (VehicleTrajectory trajectory : vehicleTrajectoryRepository.readTrajectories(batch.observationBatchId())) {
             for (VehicleStopTarget target : stops.targetsAheadOf(trajectory.observation())) {
                 forecasts.add(SeatForecast.of(
                     trajectory.vehicleObservationId(),
                     target,
                     model.predict(
-                        new SeatForecastInput(target, trajectory, statistics, stops, statistics.timeSlot())),
-                    deployment,
+                        new SeatForecastInput(
+                            target,
+                            trajectory,
+                            statistics,
+                            stops,
+                            statistics.timeSlot(),
+                            sameDayOutcomes.get(target.distance().stopCount()))),
+                    runtime.deploymentId(),
                     statistics.revision(),
                     generatedAt));
             }
