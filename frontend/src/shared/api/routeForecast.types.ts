@@ -1,11 +1,18 @@
 export type ErrorCode =
-  "INVALID_ROUTE_ID" | "ROUTE_NOT_FOUND" | "MODEL_OUT_OF_SCOPE" | "NO_RECENT_OBSERVATION" | "SERVICE_UNAVAILABLE";
+  | "INVALID_ROUTE_ID"
+  | "ROUTE_NOT_FOUND"
+  | "MODEL_OUT_OF_SCOPE"
+  | "NO_RECENT_OBSERVATION"
+  | "SERVICE_UNAVAILABLE"
+  | "INVALID_REQUEST"
+  | "ENDPOINT_NOT_FOUND"
+  | "METHOD_NOT_ALLOWED"
+  | "INTERNAL_ERROR";
 
 export interface ErrorResponse {
   code: ErrorCode;
   message: string;
   requestId: string;
-  retryable: boolean;
 }
 
 export type Direction = "UP" | "DOWN";
