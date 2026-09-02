@@ -20,6 +20,12 @@ spring:
     hibernate:
       ddl-auto: validate # 스키마의 주인은 Flyway 다. Hibernate 는 대조만 한다.
 
+# 오류 응답에 실어 보낸 requestId 로 서버 로그를 찾을 수 있게 한다.
+# 이 줄이 없으면 MDC 에 넣어도 로그 줄에 안 찍혀서, 클라이언트가 받은 ID 로 검색할 것이 없다.
+logging:
+  pattern:
+    correlation: "[${spring.application.name:},%X{requestId:-}] "
+
 management:
   endpoints:
     web:

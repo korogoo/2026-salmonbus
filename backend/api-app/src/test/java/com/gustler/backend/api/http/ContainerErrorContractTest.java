@@ -14,7 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 
@@ -32,6 +35,7 @@ import org.springframework.context.annotation.Import;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(PostgresTestContainer.class)
+@ExtendWith(OutputCaptureExtension.class)
 class ContainerErrorContractTest {
 
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
@@ -89,6 +93,15 @@ class ContainerErrorContractTest {
         assertThat(actual.status).isEqualTo(400);
         assertThat(actual.body).contains("\"code\":\"INVALID_ROUTE_ID\"");
         assertThat(actual.body).contains("\"requestId\"");
+    }
+
+    @Test
+    void 응답의_요청_식별자로_서버_로그를_찾을_수_있다(CapturedOutput 로그) throws IOException {
+        // when 컨테이너가 /error 로 넘긴 요청이라 예외 처리기를 안 지난다
+        Response actual = send("TRACE /api/v1/routes HTTP/1.1");
+
+        // then 응답에만 있고 로그에 없으면 그 식별자로 찾을 것이 없다
+        assertThat(로그.getOut()).contains(bodyRequestId(actual.body));
     }
 
     @Test

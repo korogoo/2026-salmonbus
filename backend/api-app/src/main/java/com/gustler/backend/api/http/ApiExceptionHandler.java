@@ -1,5 +1,7 @@
 package com.gustler.backend.api.http;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -21,6 +23,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  */
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(
@@ -78,11 +82,27 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return new ResponseEntity<>(bodyOf(code, code.message()), errorHeaders(), code.status());
     }
 
+    /**
+     * 응답에 실을 값을 만들면서 같은 식별자로 로그도 남긴다.
+     *
+     * <p>안 남기면 클라이언트가 받은 {@code requestId} 로 찾을 로그가 없다. 그러면 그 필드를
+     * 응답에 실은 뜻이 절반만 산다.
+     *
+     * <p>서버 잘못은 {@code WARN}, 요청 잘못은 {@code INFO} 로 남긴다. 요청 잘못까지 경고로
+     * 올리면 잘못된 routeId 하나에 경고가 쌓여서 진짜 경고가 묻힌다.
+     */
     private ErrorResponse bodyOf(
         ErrorCode code,
         String message
     ) {
-        return new ErrorResponse(code, message, RequestId.ofCurrentRequest());
+        String requestId = RequestId.ofCurrentRequest();
+        if (code.status().is5xxServerError()) {
+            log.warn("오류로 응답한다. 오류코드={} requestId={}", code.name(), requestId);
+        } else {
+            log.info("오류로 응답한다. 오류코드={} requestId={}", code.name(), requestId);
+        }
+
+        return new ErrorResponse(code, message, requestId);
     }
 
     private HttpHeaders errorHeaders() {

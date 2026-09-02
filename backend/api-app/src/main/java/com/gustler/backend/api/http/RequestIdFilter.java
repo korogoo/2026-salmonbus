@@ -20,7 +20,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 객체를 새로 만들지 않아서 붙여 둔 값이 그대로 따라간다. 그래서 {@code DispatcherType} 을
  * 안 가리고 한 번만 만든다.
  *
- * <p>로그 문맥은 반드시 {@code finally} 에서 지운다. 스레드를 돌려 쓰는 자리라 안 지우면
+ * <p>로그 문맥에 넣는 것만으로는 로그 줄에 안 찍힌다. {@code application.yml} 의
+ * {@code logging.pattern.correlation} 이 {@code %X{requestId}} 를 읽어 가야 찍힌다.
+ * 둘 중 하나가 빠지면 클라이언트가 받은 식별자로 찾을 로그가 없다.
+ *
+ * <p>로그 문맥은 반드시 {@code finally} 에서 지운다. 스레드를 돌려 쓰는 곳이라 안 지우면
  * 다음 요청의 로그에 남의 식별자가 붙는다.
  */
 @Component
