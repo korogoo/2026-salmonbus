@@ -27,6 +27,19 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>{@code Content-Type} 을 직접 박는 이유는 {@link ApiExceptionHandler} 와 같다.
  * 요청의 {@code Accept} 로 협상하게 두면 JSON 을 안 받는 요청에서 본문이 사라진다.
+ *
+ * <h2>관리 포트는 이 형식을 안 쓴다</h2>
+ *
+ * <p>{@code management.server.port} 로 Actuator 를 다른 포트에 떼면 그 포트는 자식 컨텍스트에서
+ * 돈다. 이 컨트롤러와 {@link RequestIdFilter} 와 {@link ContainerErrorResponseValve} 는 부모
+ * 컨텍스트에만 붙어서 <b>관리 포트에는 안 걸린다.</b> 거기서는 스프링 부트 기본 오류 응답이 나간다.
+ *
+ * <p>일부러 그렇게 뒀다. api 문서가 정한 것은 {@code /api/v1} 아래이고 Actuator 는 안 적혀 있다.
+ * 노출도 {@code health} 와 {@code info} 둘뿐이다. 그 포트를 부르는 것은 화면이 아니라 로드밸런서라,
+ * 우리 형식으로 바꾸면 부트 기본 모양을 읽는 도구가 오히려 못 읽을 수 있다.
+ *
+ * <p>공개 포트가 관리 포트 분리와 무관하게 이 형식을 지키는지는
+ * {@code ManagementPortSeparationTest} 가 붙잡는다.
  */
 @RestController
 public class ApiErrorController implements ErrorController {
