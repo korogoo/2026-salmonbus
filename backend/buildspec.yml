@@ -19,10 +19,12 @@ phases:
       - java -version
       - |
         # 캐시를 진짜 썼는지는 이 줄로만 안다.
-        # buildspec 에 적어도 CodeBuild 프로젝트에서 캐시를 안 켜면 매번 "없다" 가 찍힌다
+        # buildspec 에 적어도 CodeBuild 프로젝트에서 캐시를 안 켜면 매번 "없다" 가 찍힌다.
+        # 로컬 캐시는 이 경로를 심볼릭 링크로 걸어 준다. du 는 링크를 안 따라가서
+        # -L 이 없으면 126MB 가 들어와 있어도 0B 로 찍힌다. 실제로 재봤다
         for d in wrapper/dists caches/modules-2; do
           if [ -d "$GRADLE_USER_HOME/$d" ]; then
-            du -sh "$GRADLE_USER_HOME/$d"
+            du -shL "$GRADLE_USER_HOME/$d"
           else
             echo "$GRADLE_USER_HOME/$d 가 없다. 이번 빌드가 다 내려받는다"
           fi
@@ -41,6 +43,16 @@ phases:
 
   post_build:
     commands:
+      # 캐시 정리는 성공 확인보다 앞에 둔다. CodeBuild 는 실패한 빌드의 캐시도 올려서,
+      # 뒤에 두면 실패한 빌드가 남긴 제어 파일이 그대로 캐시에 들어간다
+      - |
+        # Gradle 문서가 의존성 캐시를 옮길 때 이 둘은 빼라고 한다.
+        # *.lock 은 동시 접근을 막는 파일이고 gc.properties 는 캐시 청소 기준이다.
+        # 다른 빌드가 남긴 것이 되살아나면 어긋난다. 지워도 다음 빌드가 다시 만든다
+        if [ -d "$GRADLE_USER_HOME/caches/modules-2" ]; then
+          find "$GRADLE_USER_HOME/caches/modules-2" \
+            \( -name '*.lock' -o -name 'gc.properties' \) -delete
+        fi
       # build 가 실패해도 post_build 는 실행된다. 이 줄이 없으면 깨진 빌드가 배포로 나간다
       - test "$CODEBUILD_BUILD_SUCCEEDING" = "1"
       - cd "${CODEBUILD_SRC_DIR}/backend"
