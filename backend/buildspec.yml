@@ -2,6 +2,11 @@ version: 0.2
 
 env:
   shell: bash
+  variables:
+    # cache.paths 는 셸을 안 거쳐서 $HOME 이 안 풀린다. 그래서 캐시로 담을 경로와
+    # Gradle 이 실제로 쓰는 경로를 양쪽에 같은 글자로 적는다.
+    # 둘이 어긋나면 캐시가 없는 것처럼 아무 말 없이 그냥 돈다
+    GRADLE_USER_HOME: /root/.gradle
 
 phases:
   install:
@@ -12,6 +17,18 @@ phases:
     commands:
       - cd "${CODEBUILD_SRC_DIR}/backend"
       - java -version
+      - |
+        # 캐시를 진짜 썼는지는 이 줄로만 안다.
+        # buildspec 에 적어도 CodeBuild 프로젝트에서 캐시를 안 켜면 매번 "없다" 가 찍힌다.
+        # 로컬 캐시는 이 경로를 심볼릭 링크로 걸어 준다. du 는 링크를 안 따라가서
+        # -L 이 없으면 126MB 가 들어와 있어도 0B 로 찍힌다. 실제로 재봤다
+        for d in wrapper/dists caches/modules-2; do
+          if [ -d "$GRADLE_USER_HOME/$d" ]; then
+            du -shL "$GRADLE_USER_HOME/$d"
+          else
+            echo "$GRADLE_USER_HOME/$d 가 없다. 이번 빌드가 다 내려받는다"
+          fi
+        done
       # post_build 의 지문 계산이 이 넷을 쓴다. 없으면 여기서 알아보게 세운다
       - for c in unzip sha256sum awk find; do command -v "$c" >/dev/null || { echo "$c 가 없다"; exit 1; }; done
       # backend-ci.yml 과 같은 검사다. 멀티모듈로 쪼갠 뒤 루트에 소스가 남으면 조용히 안 돈다
@@ -26,6 +43,16 @@ phases:
 
   post_build:
     commands:
+      # 캐시 정리는 성공 확인보다 앞에 둔다. CodeBuild 는 실패한 빌드의 캐시도 올려서,
+      # 뒤에 두면 실패한 빌드가 남긴 제어 파일이 그대로 캐시에 들어간다
+      - |
+        # Gradle 문서가 의존성 캐시를 옮길 때 이 둘은 빼라고 한다.
+        # *.lock 은 동시 접근을 막는 파일이고 gc.properties 는 캐시 청소 기준이다.
+        # 다른 빌드가 남긴 것이 되살아나면 어긋난다. 지워도 다음 빌드가 다시 만든다
+        if [ -d "$GRADLE_USER_HOME/caches/modules-2" ]; then
+          find "$GRADLE_USER_HOME/caches/modules-2" \
+            \( -name '*.lock' -o -name 'gc.properties' \) -delete
+        fi
       # build 가 실패해도 post_build 는 실행된다. 이 줄이 없으면 깨진 빌드가 배포로 나간다
       - test "$CODEBUILD_BUILD_SUCCEEDING" = "1"
       - cd "${CODEBUILD_SRC_DIR}/backend"
@@ -82,6 +109,17 @@ phases:
         pack worker "$WORKER_JAR" "$WORKER_DIGEST"
       # 비밀 검사는 예행연습이 같은 파일을 돌린다. 한쪽만 고치면 어긋난다
       - bash deploy/verify-revision.sh build/revision
+
+# 캐시가 없으면 빌드마다 배포판 151MB 와 의존성 126MB 를 다시 내려받는다.
+# GitHub Actions 는 gradle/actions/setup-gradle 이 이 일을 대신 해 준다
+cache:
+  paths:
+    # Gradle 9.5.1 배포판. gradle-wrapper.properties 의 distributionBase 가
+    # GRADLE_USER_HOME 이라 여기로 풀린다
+    - '/root/.gradle/wrapper/dists/**/*'
+    # 내려받은 의존성. Gradle 자기 것이 쌓이는 caches/9.5.1 은 안 담는다.
+    # 이 둘만 되살리고 --offline 으로 clean testClasses 가 통과하는 것을 재봤다
+    - '/root/.gradle/caches/modules-2/**/*'
 
 artifacts:
   # secondary-artifacts 만 쓸 때도 CodeBuild 는 최상위 files 를 요구한다.
