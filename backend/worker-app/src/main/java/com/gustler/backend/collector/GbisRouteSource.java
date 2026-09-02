@@ -9,10 +9,9 @@ import com.gustler.backend.collector.dto.BusRouteInfoResponse;
 import com.gustler.backend.collector.dto.BusRouteInfoResponse.RouteInfoItem;
 import com.gustler.backend.collector.dto.BusRouteStationResponse;
 import com.gustler.backend.collector.dto.BusRouteStationResponse.RouteStationItem;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -87,19 +86,29 @@ public class GbisRouteSource {
     /**
      * 회차 순번은 정류소 목록이 준다. 노선정보 응답에는 없다.
      *
-     * <p>모든 정류소 행에 같은 {@code turnSeq} 가 실려 오고, 회차하는 정류소만 {@code turnYn}
-     * 이 Y 다. 둘이 어긋나거나 값이 여럿이면 회차 없음으로 본다. 잘못 고른 순번으로 판본을 열면
-     * 정류소 절반의 방향이 뒤집힌 채 그럴듯하게 돌아간다.
+     * <p>정상 응답은 <b>모든 정류소 행에 같은 {@code turnSeq}</b> 가 실리고
+     * <b>회차하는 정류소 하나만 {@code turnYn} 이 Y</b> 다. 셋 중 하나라도 어긋나면 회차 없음으로
+     * 본다. 잘못 고른 순번으로 판본을 열면 정류소 절반의 방향이 뒤집힌 채 그럴듯하게 돌아간다.
+     *
+     * <ul>
+     *   <li>값이 빠진 행이 하나라도 있으면 안 쓴다. 남은 행만으로 고르면 그 노선이 정말 회차하는지
+     *       알 수 없다
+     *   <li>서로 다른 값이 오면 안 쓴다
+     *   <li>회차 표시가 없거나 둘 이상이면 안 쓴다
+     *   <li>표시가 붙은 정류소의 순번이 {@code turnSeq} 와 다르면 안 쓴다
+     * </ul>
      */
     private Integer turnSequenceOf(
         List<RouteStationItem> stations
     ) {
+        if (stations.isEmpty()) {
+            return null;
+        }
         Set<Integer> declared = stations.stream()
             .map(RouteStationItem::turnSequence)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
-        if (declared.size() != 1) {
-            return null;
+            .collect(HashSet::new, HashSet::add, HashSet::addAll);
+        if (declared.size() != 1 || declared.contains(null)) {
+            return warnAndIgnore("회차 순번이 행마다 다르거나 빠진 행이 있다: {}", declared);
         }
 
         Integer turnSequence = declared.iterator().next();
@@ -107,12 +116,23 @@ public class GbisRouteSource {
             .filter(RouteStationItem::isTurnPoint)
             .map(RouteStationItem::stopOrder)
             .toList();
-        if (marked.size() == 1 && !marked.getFirst().equals(turnSequence)) {
-            log.warn("회차 순번과 회차 표시가 어긋난다. 회차 없음으로 본다. turnSeq={} turnYn 순번={}",
-                turnSequence, marked.getFirst());
-            return null;
+        if (marked.size() != 1) {
+            return warnAndIgnore("회차 표시가 붙은 정류소가 {}개다. 하나여야 한다", marked.size());
+        }
+        if (!marked.getFirst().equals(turnSequence)) {
+            return warnAndIgnore("회차 순번 {} 과 회차 표시가 붙은 순번이 다르다",
+                turnSequence + " / " + marked.getFirst());
         }
         return turnSequence;
+    }
+
+    private Integer warnAndIgnore(
+        String message,
+        Object detail
+    ) {
+        log.warn("회차 메타데이터가 성립하지 않아 단방향 노선으로 읽는다. " + message, detail);
+
+        return null;
     }
 
     private List<UpstreamRouteStop> toUpstreamStops(

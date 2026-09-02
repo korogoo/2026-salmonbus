@@ -146,6 +146,60 @@ class GbisRouteSourceTest {
     }
 
     @Test
+    void 회차_표시가_없으면_단방향_노선으로_읽어낸다() {
+        // given 순번은 실려 왔는데 어느 정류소가 회차 지점인지 표시가 없다
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace("\"turnYn\":\"Y\"", "\"turnYn\":\"N\""));
+
+        // when
+        final GbisRouteResult actual = source.read(ROUTE_3330);
+
+        // then
+        assertThat(((Success) actual).route().stops().turnSequence()).isNull();
+    }
+
+    @Test
+    void 회차_표시가_둘이면_단방향_노선으로_읽어낸다() {
+        // given
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace("\"stationSeq\":3,\"turnSeq\":2,\"turnYn\":\"N\"",
+                "\"stationSeq\":3,\"turnSeq\":2,\"turnYn\":\"Y\""));
+
+        // when
+        final GbisRouteResult actual = source.read(ROUTE_3330);
+
+        // then
+        assertThat(((Success) actual).route().stops().turnSequence()).isNull();
+    }
+
+    @Test
+    void 회차_순번이_빠진_행이_하나라도_있으면_단방향_노선으로_읽어낸다() {
+        // given 남은 행만으로 고르면 그 노선이 정말 회차하는지 알 수 없다
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace("\"stationSeq\":1,\"turnSeq\":2,", "\"stationSeq\":1,"));
+
+        // when
+        final GbisRouteResult actual = source.read(ROUTE_3330);
+
+        // then
+        assertThat(((Success) actual).route().stops().turnSequence()).isNull();
+    }
+
+    @Test
+    void 회차_순번이_행마다_다르면_단방향_노선으로_읽어낸다() {
+        // given
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace("\"stationSeq\":1,\"turnSeq\":2,",
+                "\"stationSeq\":1,\"turnSeq\":3,"));
+
+        // when
+        final GbisRouteResult actual = source.read(ROUTE_3330);
+
+        // then
+        assertThat(((Success) actual).route().stops().turnSequence()).isNull();
+    }
+
+    @Test
     void 회차_순번과_회차_표시가_어긋나면_단방향_노선으로_읽어낸다() {
         // given 순번은 2 인데 표시는 3번 정류소에 붙어 있다
         respondWith(ROUTE_INFO_JSON.formatted(0),

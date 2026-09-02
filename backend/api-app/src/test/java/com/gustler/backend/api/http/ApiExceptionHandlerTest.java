@@ -169,6 +169,57 @@ class ApiExceptionHandlerTest {
         assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
     }
 
+    @ParameterizedTest
+    @MethodSource("thrownExceptions")
+    void 우리가_던진_오류도_JSON_으로_적는다고_못박는다(ApiException exception) {
+        // when
+        ResponseEntity<ErrorResponse> actual = handler.handleApiException(exception);
+
+        // then 협상에 맡기면 Accept 가 JSON 이 아닌 요청에서 본문이 통째로 사라진다
+        assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+    }
+
+    @ParameterizedTest
+    @MethodSource("databaseUnavailableExceptions")
+    void DB_오류도_JSON_으로_적는다고_못박는다(RuntimeException exception) {
+        // when
+        ResponseEntity<ErrorResponse> actual = handler.handleDatabaseUnavailable(exception);
+
+        // then
+        assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+    }
+
+    @Test
+    void 예상하지_못한_오류도_JSON_으로_적는다고_못박는다() {
+        // when
+        ResponseEntity<ErrorResponse> actual =
+            handler.handleUnexpected(new IllegalStateException("아무도 모르는 오류"));
+
+        // then
+        assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+    }
+
+    @Test
+    void 스프링이_실어_둔_헤더는_그대로_두고_우리_것만_얹는다() {
+        // given
+        HttpHeaders 스프링이_실은_것 = new HttpHeaders();
+        스프링이_실은_것.set(HttpHeaders.ALLOW, "GET");
+
+        // when
+        ResponseEntity<Object> actual = handler.handleExceptionInternal(
+            new IllegalStateException("스프링이 잡은 예외"),
+            null,
+            스프링이_실은_것,
+            HttpStatus.METHOD_NOT_ALLOWED,
+            null
+        );
+
+        // then
+        assertThat(actual.getHeaders().getFirst(HttpHeaders.ALLOW)).isEqualTo("GET");
+        assertThat(actual.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+    }
+
     @Test
     void 예상하지_못한_예외는_500으로_옮긴다() {
         // when
