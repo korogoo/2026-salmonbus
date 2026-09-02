@@ -53,13 +53,17 @@ JAR="$CURRENT/jars/$COMPONENT-app.jar"
 # mkdir 은 있으면 실패하는 하나짜리 동작이라 확인과 생성 사이가 안 벌어진다
 MARKER="$ROOT/.deploying"
 MARKER_STALE_SECONDS=900
+# 잠금은 있는데 owner 를 못 읽는 것은 남이 막 잡고 아직 안 썼거나, 잡았다 방금 놓은 찰나다.
+# 한 번 보고 단정하지 않고 잠깐 자고 다시 본다
+MARKER_CLAIM_TRIES=3
+MARKER_CLAIM_WAIT_SECONDS=1
 # CodeDeploy 가 훅마다 같은 값을 준다. 그래서 한 배포의 네 훅이 같은 잠금을 쓴다
 DEPLOY_ID="${DEPLOYMENT_ID:-$COMPONENT-manual}"
 
 claim_deploy() {
   mkdir -p "$ROOT"
   local tries=0 who id when age
-  while [ "$tries" -lt 3 ]; do
+  while [ "$tries" -lt "$MARKER_CLAIM_TRIES" ]; do
     tries=$((tries + 1))
     if mkdir "$MARKER" 2>/dev/null; then
       printf '%s %s %s\n' "$COMPONENT" "$DEPLOY_ID" "$(date +%s)" > "$MARKER/owner"
@@ -69,7 +73,9 @@ claim_deploy() {
       return 0
     fi
     who=""; id=""; when=""
-    read -r who id when < "$MARKER/owner" 2>/dev/null || true
+    # 2>/dev/null 을 입력 리디렉션보다 앞에 둔다. 뒤에 두면 owner 가 없을 때
+    # 셸이 내는 리디렉션 오류를 못 막아서 훅 로그에 그대로 남는다
+    read -r who id when 2>/dev/null < "$MARKER/owner" || true
     # 같은 배포의 다음 훅이면 그대로 쓴다
     [ "$id" = "$DEPLOY_ID" ] && return 0
     # 같은 서비스의 다른 배포면 넘겨받는다.
@@ -90,10 +96,20 @@ claim_deploy() {
       rm -rf "$MARKER"
       continue
     fi
-    log "${who:-다른} 배포가 ${age}초째 도는 중이다. 겹치지 않게 여기서 멈춘다"
+    # 누가 잡았는지 못 읽었다. 남이 막 잡고 owner 를 아직 안 썼거나 잡았다 방금 놓았다.
+    # 여기서 멈추면 남은 이미 지나갔는데 나만 배포를 못 한다
+    if [ -z "$who" ]; then
+      # 마지막 차례면 더 볼 기회가 없다. 여기서 자면 배포만 1초 늦는다
+      [ "$tries" -lt "$MARKER_CLAIM_TRIES" ] || break
+      log "잠금은 있는데 누가 잡았는지 안 적혀 있다. ${MARKER_CLAIM_WAIT_SECONDS}초 뒤 다시 본다 (${tries}/${MARKER_CLAIM_TRIES})"
+      sleep "$MARKER_CLAIM_WAIT_SECONDS"
+      continue
+    fi
+    # 누가 잡았는지 읽었다. 진짜로 다른 서비스가 도는 중이라 다시 봐도 소용없다
+    log "$who 배포가 ${age}초째 도는 중이다. 겹치지 않게 여기서 멈춘다"
     exit 1
   done
-  log "배포 잠금을 못 잡았다"
+  log "배포 잠금을 ${MARKER_CLAIM_TRIES}번 잡아 봤는데 못 잡았다"
   exit 1
 }
 
@@ -105,7 +121,7 @@ _release_on_failure() {
 # 내가 잡은 잠금만 푼다. 남의 것을 풀면 겹침을 막는 뜻이 없어진다
 release_deploy() {
   local id=""
-  read -r _ id _ < "$MARKER/owner" 2>/dev/null || true
+  read -r _ id _ 2>/dev/null < "$MARKER/owner" || true
   [ "$id" = "$DEPLOY_ID" ] && rm -rf "$MARKER"
   return 0
 }

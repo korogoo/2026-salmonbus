@@ -305,7 +305,63 @@ chmod 600 /etc/salmonbus/api.env
 [ ! -d /opt/salmonbus/.deploying ] \
   && ok "실패한 훅이 잠금을 풀고 나갔다" || bad "잠금이 남았다"
 
-sec "9-6. 값이 박힌 JAR 을 배포판 검사가 막나"
+sec "9-6. 잠금이 찰나에 비어 있을 때"
+# 첫 배포에서 실제로 났다. Deploy 액션 둘이 같이 돌아서
+# 한쪽이 잠금을 잡자마자 놓는 사이에 다른 쪽이 읽었다.
+# owner 를 못 읽었는데 "다른 배포가 0초째 도는 중" 하고 멈췄다
+cat > "$WORK/claim.sh" <<'CLAIM'
+#!/bin/bash
+export DEPLOYMENT_ID="$2"
+source /archive/$1/scripts/common.sh
+claim_deploy
+CLAIM
+chmod +x "$WORK/claim.sh"
+
+# owner 가 아직 안 쓰인 잠금을 남이 곧 놓는다. 다시 보면 잡을 수 있다
+rm -rf /opt/salmonbus/.deploying
+mkdir -p /opt/salmonbus/.deploying
+( sleep 0.5; rm -rf /opt/salmonbus/.deploying ) &
+if "$WORK/claim.sh" api d-flicker-1 > "$WORK/flicker.out" 2>&1; then
+  ok "누가 잡았는지 안 적힌 잠금이 곧 풀리면 다시 잡는다"
+else
+  bad "누가 잡았는지 안 적힌 것을 보고 바로 멈췄다"; sed 's/^/      /' "$WORK/flicker.out"
+fi
+wait
+rm -rf /opt/salmonbus/.deploying
+
+# 누가 잡았는지 안 적힌 잠금이 계속 남아 있으면 세 번 다시 보고 멈춘다.
+# 그동안 셸이 owner 리디렉션 오류를 stderr 로 흘리면 안 된다
+mkdir -p /opt/salmonbus/.deploying
+if "$WORK/claim.sh" api d-flicker-2 > "$WORK/noowner.out" 2> "$WORK/noowner.err"; then
+  bad "누가 잡았는지 모르는 잠금을 그냥 뺏었다"
+else
+  ok "누가 잡았는지 끝내 안 나오면 멈춘다"
+fi
+grep -q '번 잡아 봤는데 못 잡았다' "$WORK/noowner.out" \
+  && ok "멈춘 이유가 세 번 다 못 잡은 것이다" \
+  || { bad "멈춘 이유가 다르다"; sed 's/^/      /' "$WORK/noowner.out"; }
+if [ -s "$WORK/noowner.err" ]; then
+  bad "owner 를 읽다가 난 셸 오류가 stderr 로 샜다"; sed 's/^/      /' "$WORK/noowner.err"
+else
+  ok "owner 가 없어도 stderr 가 깨끗하다"
+fi
+rm -rf /opt/salmonbus/.deploying
+
+# 진짜로 다른 서비스가 잡고 있으면 다시 보지 않고 바로 멈춘다. 이건 설계다
+mkdir -p /opt/salmonbus/.deploying
+printf 'worker d-worker-777 %s\n' "$(date +%s)" > /opt/salmonbus/.deploying/owner
+if "$WORK/claim.sh" api d-flicker-3 > "$WORK/held.out" 2>&1; then
+  bad "worker 가 잡고 있는데 api 가 들어왔다"
+else
+  grep -q 'worker 배포가' "$WORK/held.out" \
+    && ok "누가 잡았는지 읽고 멈췄다" \
+    || { bad "막히긴 했는데 이유가 다르다"; sed 's/^/      /' "$WORK/held.out"; }
+fi
+grep -q '번 잡아 봤는데 못 잡았다' "$WORK/held.out" \
+  && bad "누가 잡았는지 아는데도 세 번 다시 봤다" || ok "누가 잡았는지 알면 다시 보지 않는다"
+rm -rf /opt/salmonbus/.deploying
+
+sec "9-7. 값이 박힌 JAR 을 배포판 검사가 막나"
 mkdir -p "$WORK/rev-ok/jars" "$WORK/rev-bad/jars"
 python3 /rehearse/makejar.py "$WORK/rev-ok/jars/api-app.jar" api-app   'spring:
   datasource:
