@@ -30,15 +30,15 @@ class GbisRouteSourceTest {
           "msgBody":{"busRouteInfoItem":{
             "routeName":"3330","startStationName":"범계역","endStationName":"강남역",
             "upFirstTime":"05:00","upLastTime":"22:35",
-            "downFirstTime":"05:00","downLastTime":"23:55","turnSeq":2}}}}
+            "downFirstTime":"05:00","downLastTime":"23:55"}}}}
         """;
     private static final String THREE_STATIONS_JSON = """
         {"response":{"msgHeader":{
             "queryTime":"2026-08-28 11:14:04.911","resultCode":0,"resultMessage":"정상"},
           "msgBody":{"busRouteStationList":[
-            {"stationId":"205000217","stationName":"범계역","stationSeq":1},
-            {"stationId":"277103149","stationName":"안양대교(경유)","stationSeq":2},
-            {"stationId":"208000069","stationName":"안양역","stationSeq":3}]}}}
+            {"stationId":"205000217","stationName":"범계역","stationSeq":1,"turnSeq":2,"turnYn":"N"},
+            {"stationId":"277103149","stationName":"안양대교(경유)","stationSeq":2,"turnSeq":2,"turnYn":"Y"},
+            {"stationId":"208000069","stationName":"안양역","stationSeq":3,"turnSeq":2,"turnYn":"N"}]}}}
         """;
     private static final String NO_STATIONS_JSON = """
         {"response":{"msgHeader":{
@@ -132,14 +132,32 @@ class GbisRouteSourceTest {
     }
 
     @Test
-    void 회차_순번이_0_으로_와도_단방향_노선으로_읽어낸다() {
+    void 회차_순번이_없으면_단방향_노선으로_읽어낸다() {
         // given
-        respondWith(ROUTE_INFO_JSON.formatted(0).replace("\"turnSeq\":2", "\"turnSeq\":0"), THREE_STATIONS_JSON);
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace(",\"turnSeq\":2,\"turnYn\":\"N\"", "")
+                .replace(",\"turnSeq\":2,\"turnYn\":\"Y\"", ""));
 
         // when
         final GbisRouteResult actual = source.read(ROUTE_3330);
 
-        // then 접지 않으면 회차 순번 검증에 걸려 이 노선 수집이 통째로 멈춘다
+        // then
+        assertThat(((Success) actual).route().stops().turnSequence()).isNull();
+    }
+
+    @Test
+    void 회차_순번과_회차_표시가_어긋나면_단방향_노선으로_읽어낸다() {
+        // given 순번은 2 인데 표시는 3번 정류소에 붙어 있다
+        respondWith(ROUTE_INFO_JSON.formatted(0),
+            THREE_STATIONS_JSON.replace("\"stationSeq\":2,\"turnSeq\":2,\"turnYn\":\"Y\"",
+                    "\"stationSeq\":2,\"turnSeq\":2,\"turnYn\":\"N\"")
+                .replace("\"stationSeq\":3,\"turnSeq\":2,\"turnYn\":\"N\"",
+                    "\"stationSeq\":3,\"turnSeq\":2,\"turnYn\":\"Y\""));
+
+        // when
+        final GbisRouteResult actual = source.read(ROUTE_3330);
+
+        // then 잘못 고른 순번으로 판본을 열면 정류소 절반의 방향이 뒤집힌다
         assertThat(((Success) actual).route().stops().turnSequence()).isNull();
     }
 

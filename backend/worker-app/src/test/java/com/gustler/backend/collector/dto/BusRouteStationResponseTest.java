@@ -19,15 +19,15 @@ class BusRouteStationResponseTest {
         {"response":{"msgHeader":{
             "queryTime":"2026-08-28 11:14:04.911","resultCode":0,"resultMessage":"정상"},
           "msgBody":{"busRouteStationList":[
-            {"stationId":"205000217","stationName":"범계역","stationSeq":1},
-            {"stationId":"277103149","stationName":"안양대교(경유)","stationSeq":2},
-            {"stationId":"208000069","stationName":"안양역","stationSeq":3}]}}}
+            {"stationId":"205000217","stationName":"범계역","stationSeq":1,"turnSeq":2,"turnYn":"N"},
+            {"stationId":"277103149","stationName":"안양대교(경유)","stationSeq":2,"turnSeq":2,"turnYn":"Y"},
+            {"stationId":"208000069","stationName":"안양역","stationSeq":3,"turnSeq":2,"turnYn":"N"}]}}}
         """;
     private static final String SINGLE_STATION_AS_OBJECT_JSON = """
         {"response":{"msgHeader":{
             "queryTime":"2026-08-28 11:14:04.911","resultCode":0,"resultMessage":"정상"},
           "msgBody":{"busRouteStationList":
-            {"stationId":"205000217","stationName":"범계역","stationSeq":1}}}}
+            {"stationId":"205000217","stationName":"범계역","stationSeq":1,"turnSeq":2,"turnYn":"N"}}}}
         """;
 
     @Autowired
@@ -62,6 +62,30 @@ class BusRouteStationResponseTest {
         // then
         final RouteStationItem actualStation = actual.response().body().stations().getFirst();
         assertThat(actualStation)
-            .isEqualTo(new RouteStationItem("205000217", "범계역", 1));
+            .isEqualTo(new RouteStationItem("205000217", "범계역", 1, 2, "N"));
+    }
+
+    @Test
+    void 회차_지점인_정류소만_회차_표시가_붙는다() {
+        // when
+        final BusRouteStationResponse actual =
+            objectMapper.readValue(THREE_STATIONS_JSON, BusRouteStationResponse.class);
+
+        // then
+        assertThat(actual.response().body().stations())
+            .extracting(RouteStationItem::isTurnPoint)
+            .containsExactly(false, true, false);
+    }
+
+    @Test
+    void 회차_순번은_모든_정류소_행에_같은_값으로_실려_온다() {
+        // when
+        final BusRouteStationResponse actual =
+            objectMapper.readValue(THREE_STATIONS_JSON, BusRouteStationResponse.class);
+
+        // then 노선정보 응답에는 이 값이 없어서 여기서만 읽을 수 있다
+        assertThat(actual.response().body().stations())
+            .extracting(RouteStationItem::turnSequence)
+            .containsOnly(2);
     }
 }

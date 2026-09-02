@@ -10,6 +10,11 @@ import com.gustler.backend.collector.dto.BusRouteInfoResponse.RouteInfoItem;
 import com.gustler.backend.collector.dto.BusRouteStationResponse;
 import com.gustler.backend.collector.dto.BusRouteStationResponse.RouteStationItem;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -17,11 +22,13 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * 노선 하나의 기본 정보와 경유 정류소를 상류에서 읽는다.
  *
- * <p>상류가 둘을 따로 준다. 표시명 · 기점 · 종점 · 첫차 · 막차 · 회차 순번은 노선정보에 있고,
- * 정류소 목록은 노선정류소 조회에 있다. 그래서 한 노선을 읽는 데 호출을 두 번 쓴다.
+ * <p>상류가 둘을 따로 준다. 표시명 · 기점 · 종점 · 첫차 · 막차는 노선정보에 있고, 정류소 목록과
+ * <b>회차 순번</b>은 노선정류소 조회에 있다. 그래서 한 노선을 읽는 데 호출을 두 번 쓴다.
  */
 @Component
 public class GbisRouteSource {
+
+    private static final Logger log = LoggerFactory.getLogger(GbisRouteSource.class);
 
     /** 한 노선을 읽는 데 드는 상류 호출 수. 장부에서 이만큼 자리를 잡고 부른다. */
     public static final int UPSTREAM_CALLS_PER_READ = 2;
@@ -69,12 +76,43 @@ public class GbisRouteSource {
                 routeInfo.displayName(),
                 routeInfo.startStopName(),
                 routeInfo.endStopName(),
-                RouteStops.from(routeInfo.turnSequence(), toUpstreamStops(stations)),
+                RouteStops.from(turnSequenceOf(stations), toUpstreamStops(stations)),
                 timetableOf(routeInfo)));
         } catch (final IllegalArgumentException e) {
             // 순번이 겹치거나 회차 순번이 정류소 목록에 없는 응답. 판본으로 열면 뜻이 없는 노선이 된다.
             return new Failed("노선 %s 의 정류소 목록이 성립하지 않는다: %s".formatted(routeId, e.getMessage()));
         }
+    }
+
+    /**
+     * 회차 순번은 정류소 목록이 준다. 노선정보 응답에는 없다.
+     *
+     * <p>모든 정류소 행에 같은 {@code turnSeq} 가 실려 오고, 회차하는 정류소만 {@code turnYn}
+     * 이 Y 다. 둘이 어긋나거나 값이 여럿이면 회차 없음으로 본다. 잘못 고른 순번으로 판본을 열면
+     * 정류소 절반의 방향이 뒤집힌 채 그럴듯하게 돌아간다.
+     */
+    private Integer turnSequenceOf(
+        List<RouteStationItem> stations
+    ) {
+        Set<Integer> declared = stations.stream()
+            .map(RouteStationItem::turnSequence)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (declared.size() != 1) {
+            return null;
+        }
+
+        Integer turnSequence = declared.iterator().next();
+        List<Integer> marked = stations.stream()
+            .filter(RouteStationItem::isTurnPoint)
+            .map(RouteStationItem::stopOrder)
+            .toList();
+        if (marked.size() == 1 && !marked.getFirst().equals(turnSequence)) {
+            log.warn("회차 순번과 회차 표시가 어긋난다. 회차 없음으로 본다. turnSeq={} turnYn 순번={}",
+                turnSequence, marked.getFirst());
+            return null;
+        }
+        return turnSequence;
     }
 
     private List<UpstreamRouteStop> toUpstreamStops(
