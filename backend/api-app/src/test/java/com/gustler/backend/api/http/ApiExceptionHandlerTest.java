@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.transaction.CannotCreateTransactionException;
@@ -151,6 +152,21 @@ class ApiExceptionHandlerTest {
             assertThat(body.code()).isEqualTo(expected);
             assertThat(body.message()).isEqualTo(expected.message());
         });
+    }
+
+    @Test
+    void 스프링이_잡은_오류도_JSON_으로_적는다고_못박는다() {
+        // when
+        ResponseEntity<Object> actual = handler.handleExceptionInternal(
+            new IllegalStateException("스프링이 잡은 예외"),
+            null,
+            new HttpHeaders(),
+            HttpStatus.NOT_ACCEPTABLE,
+            null
+        );
+
+        // then
+        assertThat(actual.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
     }
 
     @Test
