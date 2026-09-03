@@ -5,8 +5,13 @@ env:
   variables:
     # cache.paths 는 셸을 안 거쳐서 $HOME 이 안 풀린다. 그래서 캐시로 담을 경로와
     # Gradle 이 실제로 쓰는 경로를 양쪽에 같은 글자로 적는다.
-    # 둘이 어긋나면 캐시가 없는 것처럼 아무 말 없이 그냥 돈다
-    GRADLE_USER_HOME: /root/.gradle
+    # 둘이 어긋나면 캐시가 없는 것처럼 아무 말 없이 그냥 돈다.
+    #
+    # 기본 자리인 /root/.gradle 을 안 쓴다. 빌드 이미지가 거기에 Gradle 8 계열 배포판을
+    # 1.1GB 얹어 두는데 우리는 9.5.1 을 쓴다. 첫 빌드가 1.1GB 를 찍고도
+    # gradle-9.5.1-bin.zip 을 내려받은 것으로 확인했다.
+    # 그 자리를 캐시에 담으면 S3 로 빌드마다 1.4GB 가 오간다. 여기로 옮기면 277MB 다
+    GRADLE_USER_HOME: /root/.gradle-ci
 
 phases:
   install:
@@ -20,6 +25,7 @@ phases:
       - |
         # 캐시를 진짜 썼는지는 이 줄로만 안다.
         # buildspec 에 적어도 CodeBuild 프로젝트에서 캐시를 안 켜면 매번 "없다" 가 찍힌다.
+        # 빌드 이미지가 안 쓰는 자리라 여기 있는 것은 전부 되살아난 캐시다.
         # 로컬 캐시는 이 경로를 심볼릭 링크로 걸어 준다. du 는 링크를 안 따라가서
         # -L 이 없으면 126MB 가 들어와 있어도 0B 로 찍힌다. 실제로 재봤다
         for d in wrapper/dists caches/modules-2; do
@@ -116,10 +122,10 @@ cache:
   paths:
     # Gradle 9.5.1 배포판. gradle-wrapper.properties 의 distributionBase 가
     # GRADLE_USER_HOME 이라 여기로 풀린다
-    - '/root/.gradle/wrapper/dists/**/*'
+    - '/root/.gradle-ci/wrapper/dists/**/*'
     # 내려받은 의존성. Gradle 자기 것이 쌓이는 caches/9.5.1 은 안 담는다.
     # 이 둘만 되살리고 --offline 으로 clean testClasses 가 통과하는 것을 재봤다
-    - '/root/.gradle/caches/modules-2/**/*'
+    - '/root/.gradle-ci/caches/modules-2/**/*'
 
 artifacts:
   # secondary-artifacts 만 쓸 때도 CodeBuild 는 최상위 files 를 요구한다.
