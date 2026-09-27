@@ -7,9 +7,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.SchedulingConfigurer;
 import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 
 @Configuration
@@ -28,7 +28,7 @@ public class CollectionConfig {
     @Configuration
     @EnableScheduling
     @ConditionalOnProperty(prefix = "collection", name = "enabled", havingValue = "true")
-    static class ScheduledCollection {
+    static class ScheduledCollection implements SchedulingConfigurer {
 
         private final CollectionProperties properties;
         private final CollectionScheduler scheduler;
@@ -50,13 +50,12 @@ public class CollectionConfig {
             this.collectionTaskScheduler = collectionTaskScheduler;
         }
 
-        @Bean
-        ScheduledTaskRegistrar collectionTaskRegistrar() {
+        @Override
+        public void configureTasks(
+            ScheduledTaskRegistrar registrar
+        ) {
             warnIfOverDailyLimit();
-            ScheduledTaskRegistrar registrar = new ScheduledTaskRegistrar();
-            registrar.setTaskScheduler(collectionTaskScheduler);
-            registrar.addTriggerTask(scheduler::collectAllRoutes, new AdaptiveCollectionTrigger(clock));
-            return registrar;
+            collectionTaskScheduler.schedule(scheduler::collectAllRoutes, new AdaptiveCollectionTrigger(clock));
         }
 
         private void warnIfOverDailyLimit() {
