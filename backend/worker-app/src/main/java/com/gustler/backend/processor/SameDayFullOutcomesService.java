@@ -53,10 +53,15 @@ public class SameDayFullOutcomesService {
 
     /** 호출자가 같은 노선 잠금을 유지하는 트랜잭션 안에서 사용한다. */
     public boolean initializeIfAbsent(long routeId, SeoulDay day) {
-        if (!repository.findCounts(routeId, day).isEmpty()) {
+        return initializeIfAbsent(routeId, day, new SameDayInitializationAttempt());
+    }
+
+    boolean initializeIfAbsent(long routeId, SeoulDay day, SameDayInitializationAttempt attempt) {
+        if (!attempt.measure(SameDayInitializationAttempt.Stage.CHECK,
+            () -> repository.findCounts(routeId, day)).isEmpty()) {
             return false;
         }
-        seed(routeId, day);
+        seed(routeId, day, attempt);
         return true;
     }
 
@@ -72,16 +77,17 @@ public class SameDayFullOutcomesService {
 
     private List<SameDayFullOutcomeCount> seed(
         final long routeId,
-        SeoulDay day
+        SeoulDay day,
+        SameDayInitializationAttempt attempt
     ) {
-        List<SameDayFullOutcomeCount> counted = WorkerOperationLog.measure("same_day_seed_source", routeId,
+        List<SameDayFullOutcomeCount> counted = attempt.measure(SameDayInitializationAttempt.Stage.SOURCE,
             () -> repository.countFromSource(routeId, day, day.end()));
         if (counted.isEmpty()) {
             // 거리 0은 실제 예보가 아니다. 이 날짜/품질 버전에서 원본이 비었음을 한 번만 기록한다.
             counted = List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start()));
         }
         List<SameDayFullOutcomeCount> toSave = counted;
-        WorkerOperationLog.run("same_day_seed_save", routeId, () -> repository.upsertCounts(routeId, day, toSave));
+        attempt.run(SameDayInitializationAttempt.Stage.SAVE, () -> repository.upsertCounts(routeId, day, toSave));
         return counted;
     }
 

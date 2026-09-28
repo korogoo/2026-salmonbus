@@ -36,12 +36,12 @@ class SameDayFullOutcomesInitializationJobTest {
     @Test
     void 한_회차에는_노선_하나만_초기화하고_다음_노선으로_차례를_넘긴다() {
         job.initializeNext();
-        verify(initializer).initialize(1L, SeoulDay.containing(now));
-        verify(initializer, never()).initialize(eq(2L), any());
+        verify(initializer).initialize(eq(1L), eq(SeoulDay.containing(now)), any());
+        verify(initializer, never()).initialize(eq(2L), any(), any());
         job.initializeNext();
-        verify(initializer).initialize(2L, SeoulDay.containing(now));
+        verify(initializer).initialize(eq(2L), eq(SeoulDay.containing(now)), any());
         job.initializeNext();
-        verify(initializer, times(2)).initialize(anyLong(), any());
+        verify(initializer, times(2)).initialize(anyLong(), any(), any());
     }
 
     @Test
@@ -50,22 +50,22 @@ class SameDayFullOutcomesInitializationJobTest {
         // 날짜가 바뀌지 않는 시각에서 재시도 간격만 검증한다.
         Instant start = now.minusSeconds(120);
         when(clock.instant()).thenReturn(start);
-        when(initializer.initialize(anyLong(), any())).thenThrow(new IllegalStateException("fixture"));
+        when(initializer.initialize(anyLong(), any(), any())).thenThrow(new IllegalStateException("fixture"));
         assertThatThrownBy(job::initializeNext).isInstanceOf(IllegalStateException.class);
         when(clock.instant()).thenReturn(start.plusSeconds(59));
         job.initializeNext();
-        verify(initializer, times(1)).initialize(anyLong(), any());
+        verify(initializer, times(1)).initialize(anyLong(), any(), any());
         when(clock.instant()).thenReturn(start.plusSeconds(60));
         assertThatThrownBy(job::initializeNext).isInstanceOf(IllegalStateException.class);
-        verify(initializer, times(2)).initialize(anyLong(), any());
+        verify(initializer, times(2)).initialize(anyLong(), any(), any());
     }
 
     @Test
     void 잠금_시간초과도_다음_노선의_초기화를_막지_않는다() {
-        when(initializer.initialize(eq(1L), any())).thenThrow(new CannotAcquireLockException("fixture"));
+        when(initializer.initialize(eq(1L), any(), any())).thenThrow(new CannotAcquireLockException("fixture"));
         assertThatThrownBy(job::initializeNext).isInstanceOf(CannotAcquireLockException.class);
         job.initializeNext();
-        verify(initializer).initialize(2L, SeoulDay.containing(now));
+        verify(initializer).initialize(eq(2L), eq(SeoulDay.containing(now)), any());
     }
 
     @Test
@@ -74,8 +74,8 @@ class SameDayFullOutcomesInitializationJobTest {
         job.initializeNext();
         when(clock.instant()).thenReturn(now.plusSeconds(10));
         job.initializeNext();
-        verify(initializer).initialize(1L, SeoulDay.containing(now.plusSeconds(10)));
-        verify(initializer, times(2)).initialize(anyLong(), any());
+        verify(initializer).initialize(eq(1L), eq(SeoulDay.containing(now.plusSeconds(10))), any());
+        verify(initializer, times(2)).initialize(anyLong(), any(), any());
     }
 
     @Test
@@ -85,14 +85,51 @@ class SameDayFullOutcomesInitializationJobTest {
         events.start();
         logger.addAppender(events);
         try {
-            when(initializer.initialize(eq(1L), any())).thenThrow(new TransactionSystemException("commit failure"));
-            when(initializer.initialize(eq(2L), any())).thenReturn(true);
+            when(initializer.initialize(eq(1L), any(), any())).thenAnswer(call -> {
+                SameDayInitializationAttempt attempt = call.getArgument(2);
+                attempt.awaitingCommit();
+                throw new TransactionSystemException("commit failure");
+            });
+            when(initializer.initialize(eq(2L), any(), any())).thenReturn(true);
             assertThatThrownBy(job::initializeNext).isInstanceOf(TransactionSystemException.class);
-            assertThat(events.list).isEmpty();
+            assertThat(events.list).singleElement().satisfies(event ->
+                assertThat(event.getFormattedMessage()).contains("status=FAILED", "failedStage=COMMIT").doesNotContain("status=COMPLETED"));
+            events.list.clear();
             job.initializeNext();
             assertThat(events.list).singleElement().satisfies(event -> {
                 assertThat(event.getFormattedMessage()).contains("status=COMPLETED", "routeId=2", "outcomeDate=2026-09-28");
             });
+        } finally {
+            logger.detachAppender(events);
+            events.stop();
+        }
+    }
+
+    @Test
+    void 실제_초기화와_완료된_집계의_건너뜀을_구분해_기록한다() {
+        Logger logger = (Logger) LoggerFactory.getLogger(SameDayFullOutcomesInitializationJob.class);
+        var events = new ListAppender<ILoggingEvent>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            when(initializer.initialize(eq(1L), any(), any())).thenAnswer(call -> {
+                SameDayInitializationAttempt attempt = call.getArgument(2);
+                attempt.measure(SameDayInitializationAttempt.Stage.SOURCE, () -> 1);
+                attempt.awaitingCommit();
+                return true;
+            });
+            when(initializer.initialize(eq(2L), any(), any())).thenAnswer(call -> {
+                SameDayInitializationAttempt attempt = call.getArgument(2);
+                attempt.awaitingCommit();
+                return false;
+            });
+            job.initializeNext();
+            job.initializeNext();
+            assertThat(events.list).hasSize(2);
+            assertThat(events.list.get(0).getFormattedMessage())
+                .contains("status=COMPLETED", "sourceAttempted=true", "startedAt=2026-09-28T23:59:50+09:00");
+            assertThat(events.list.get(1).getFormattedMessage())
+                .contains("status=SKIPPED", "sourceAttempted=false", "sourceQueryMs=null");
         } finally {
             logger.detachAppender(events);
             events.stop();

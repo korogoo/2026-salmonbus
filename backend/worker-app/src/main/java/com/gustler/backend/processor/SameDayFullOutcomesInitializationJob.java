@@ -4,11 +4,13 @@ import com.gustler.backend.diagnostics.WorkerOperationLog;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -49,14 +51,21 @@ public class SameDayFullOutcomesInitializationJob {
         if (due.isEmpty()) { return; }
         long route = due.stream().filter(id -> id > lastRouteId).findFirst().orElse(due.getFirst());
         lastRouteId = route;
+        var attempt = new SameDayInitializationAttempt();
+        Instant startedAt = clock.instant();
         try {
-            boolean initialized = WorkerOperationLog.measure("same_day_initialize_and_commit", route,
-                () -> initializer.initialize(route, day));
-            // 별도 빈의 프록시가 커밋에 성공해서 돌아온 뒤에만 성공 로그를 남긴다.
-            if (initialized) {
-                log.info("event=same_day_initialization status=COMPLETED routeId={} outcomeDate={}", route, day.date());
-            }
+            // 별도 빈의 트랜잭션 프록시가 커밋을 완료하고 반환해야 성공이다.
+            boolean initialized = initializer.initialize(route, day, attempt);
+            attempt.completed(initialized);
+        } catch (RuntimeException failure) {
+            attempt.failed(failure);
+            throw failure;
         } finally {
+            log.atLevel(attempt.status().equals("FAILED") ? Level.ERROR : Level.INFO)
+                .log("event=same_day_initialization startedAt={} routeId={} outcomeDate={} status={} sourceAttempted={} lockAcquireMs={} sourceQueryMs={} totalMs={} failedStage={} sqlState={}",
+                startedAt.atZone(ZoneId.of("Asia/Seoul")), route, day.date(), attempt.status(),
+                attempt.sourceAttempted(), attempt.lockAcquireMs(), attempt.sourceQueryMs(),
+                attempt.totalMs(), attempt.failedStage(), attempt.sqlState());
             // 실행 종료부터 간격을 둔다. 실패한 노선도 다음 회차를 독점하지 못한다.
             retryAt.put(route, clock.instant().plus(properties.retryInterval()));
         }

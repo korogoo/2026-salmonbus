@@ -26,11 +26,19 @@ public class SameDayFullOutcomesInitializer {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 2)
     public boolean initialize(long routeId, SeoulDay day) {
-        configureTimeouts();
-        jdbc.sql("SELECT id FROM route WHERE id = :routeId FOR UPDATE")
-            .param("routeId", routeId).query(Long.class).single();
-        // 잠금을 기다리는 동안 다른 작업이 준비했을 수 있으므로 반드시 잠금 뒤에 다시 확인한다.
-        return service.initializeIfAbsent(routeId, day);
+        return initialize(routeId, day, new SameDayInitializationAttempt());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 2)
+    public boolean initialize(long routeId, SeoulDay day, SameDayInitializationAttempt attempt) {
+        attempt.run(SameDayInitializationAttempt.Stage.CONFIGURE, this::configureTimeouts);
+        attempt.measure(SameDayInitializationAttempt.Stage.LOCK, () ->
+            jdbc.sql("SELECT id FROM route WHERE id = :routeId FOR UPDATE")
+                .param("routeId", routeId).query(Long.class).single());
+        // 잠금을 기다리는 동안 준비됐을 수 있으므로 잠금 획득 후 다시 확인한다.
+        boolean initialized = service.initializeIfAbsent(routeId, day, attempt);
+        attempt.awaitingCommit();
+        return initialized;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 2, readOnly = true)
