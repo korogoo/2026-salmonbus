@@ -10,12 +10,8 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * 오늘 도착이 확인된 예보들의 성적. 만석 확률을 당일 성적으로 옮기는 데 쓴다.
- *
- * <p>정산이 예보를 닫을 때마다 한 칸씩 더해 둔 것을 읽는다. <b>batch 마다 원본을 다시 세지 않는다.</b>
- * 다시 세는 자리는 둘이다. 그 노선의 오늘 칸이 아직 없을 때와, 예보 시각이 집계에 반영된 마지막
- * 도착보다 앞일 때다. 뒤쪽은 장애로 밀린 batch 를 뒤늦게 처리하는 경우인데, 그때 집계를 그대로 쓰면
- * 그 batch 가 아직 모르는 도착까지 센 값을 보게 된다.
+ * 저장된 당일 성적만 예보 보정에 사용한다. 미초기화/과거 시점 예보는 당일 보정을 생략한다.
+ * 원본 계산은 별도 초기화 트랜잭션에서만 수행하며, 준비 전 정산도 원본에는 남는다.
  */
 @Component
 public class SameDayFullOutcomesService {
@@ -34,12 +30,8 @@ public class SameDayFullOutcomesService {
     ) {
         SeoulDay day = SeoulDay.containing(predictionAt);
         List<SameDayFullOutcomeCount> counts = WorkerOperationLog.measure("same_day_read", routeId, () -> repository.findCounts(routeId, day));
-        if (counts.isEmpty()) {
-            counts = seed(routeId, day);
-        }
-        if (predictionAt.isBefore(settledThroughOf(counts))) {
-            return outcomesOf(WorkerOperationLog.measure("same_day_asof_source", routeId,
-                () -> repository.countFromSource(routeId, day, predictionAt)));
+        if (counts.isEmpty() || predictionAt.isBefore(settledThroughOf(counts))) {
+            return Map.of();
         }
         return outcomesOf(counts);
     }
@@ -50,7 +42,7 @@ public class SameDayFullOutcomesService {
         for (Map.Entry<RouteDay, List<SettledForecast>> group : groupByRouteDay(settled).entrySet()) {
             RouteDay key = group.getKey();
             if (repository.findCounts(key.routeId(), key.day()).isEmpty()) {
-                seed(key.routeId(), key.day());
+                // 부분 합계를 만들면 초기화 완료로 오인한다. 원본은 이후 초기화에서 함께 센다.
                 continue;
             }
             for (SettledForecast forecast : group.getValue()) {

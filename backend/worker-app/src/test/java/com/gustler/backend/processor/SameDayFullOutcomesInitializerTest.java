@@ -8,7 +8,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -27,9 +26,6 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
 
     @BeforeEach
     void 실제_초기화_빈의_트랜잭션_프록시를_준비한다() {
-        context.registerBean(SameDayInitializationProperties.class, () -> new SameDayInitializationProperties(
-            Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofMillis(500), Duration.ofMillis(100)));
-        context.registerBean(SameDayFullOutcomesInitializer.class);
         initializer = context.getBean(SameDayFullOutcomesInitializer.class);
     }
 

@@ -117,6 +117,9 @@ class SameDayTransactionBoundaryTest {
         context.registerBean(Clock.class, () -> Clock.fixed(NOW, ZoneOffset.UTC));
         context.registerBean(ForecastProperties.class, () -> new ForecastProperties(true,
             Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofHours(6), Duration.ofMinutes(5), 20, 3000, 400));
+        context.registerBean(SameDayInitializationProperties.class, () -> new SameDayInitializationProperties(
+            Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofMillis(500), Duration.ofMillis(100)));
+        context.registerBean(SameDayFullOutcomesInitializer.class);
         context.registerBean(ArrivalLabelJob.class);
         context.registerBean(ForecastBatchWriter.class);
         context.refresh();
@@ -235,6 +238,51 @@ class SameDayTransactionBoundaryTest {
         writeForecast();
         writeForecast();
         assertForecastComplete();
+    }
+
+    @Test
+    void 별도_초기집계가_실패해도_예보와_묶음_완료는_커밋된다() {
+        doAnswer(call -> { timeout(); return call.callRealMethod(); })
+            .when(countsSpy).countFromSource(anyLong(), any(), any());
+        assertThatThrownBy(() -> initializer().initialize(routeId, SeoulDay.containing(NOW)))
+            .isInstanceOf(QueryTimeoutException.class);
+
+        writeForecast();
+
+        assertForecastComplete();
+        assertThat(count("same_day_full_outcomes")).isZero();
+    }
+
+    @Test
+    void 미초기화_중에도_정산과_통계_대기자료는_함께_커밋된다() {
+        savePending();
+
+        settlement.settleArrivalLabels();
+
+        assertThat(jdbc.sql("SELECT scoring_state FROM seat_forecast WHERE vehicle_observation_id=?")
+            .param(sourceId).query(String.class).single()).isEqualTo("SETTLED");
+        assertThat(count("stop_demand_pending_sample")).isEqualTo(1);
+        assertThat(count("same_day_full_outcomes")).isZero();
+    }
+
+    @Test
+    void 초기화_전후의_정산은_당일_합계에_정확히_한번씩_반영된다() {
+        savePending();
+        settlement.settleArrivalLabels();
+        assertThat(count("same_day_full_outcomes")).isZero();
+        assertThat(initializer().initialize(routeId, SeoulDay.containing(NOW))).isTrue();
+        long later = insertObservation(insertBatch(OBSERVED_AT.plusSeconds(2)), 1, 12);
+        forecastsSpy.save(List.of(new SeatForecast(later, versionId, 2, 1, modelId, 1, .25, .25, 12.5, GENERATED_AT)));
+        settlement.settleArrivalLabels();
+        settlement.settleArrivalLabels();
+        assertThat(initializer().initialize(routeId, SeoulDay.containing(NOW))).isFalse();
+        assertThat(countsSpy.findCounts(routeId, SeoulDay.containing(NOW))).singleElement()
+            .extracting(SameDayFullOutcomeCount::rowCount).isEqualTo(2);
+        assertThat(count("stop_demand_pending_sample")).isEqualTo(2);
+    }
+
+    SameDayFullOutcomesInitializer initializer() {
+        return context.getBean(SameDayFullOutcomesInitializer.class);
     }
 
     void assertUnsettled() {
