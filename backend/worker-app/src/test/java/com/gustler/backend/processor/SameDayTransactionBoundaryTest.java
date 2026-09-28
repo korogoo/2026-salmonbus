@@ -58,11 +58,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class SameDayTransactionBoundaryTest {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18")
-        .withDatabaseName("transaction_contract")
-        .withTmpFs(Map.of("/var/lib/postgresql", "rw,size=192m"))
-        .withCommand("postgres", "-c", "max_wal_size=64MB", "-c", "min_wal_size=32MB")
-        .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig()
-            .withNanoCPUs(1_000_000_000L).withMemory(512L * 1024 * 1024).withMemorySwap(512L * 1024 * 1024));
+        .withDatabaseName("transaction_contract");
 
     static final Instant OBSERVED_AT = Instant.parse("2026-09-28T00:00:00Z");
     static final Instant GENERATED_AT = OBSERVED_AT.plusSeconds(1);
