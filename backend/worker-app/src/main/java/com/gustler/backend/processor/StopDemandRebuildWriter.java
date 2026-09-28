@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -57,6 +58,12 @@ public class StopDemandRebuildWriter {
                     input_until_id=EXCLUDED.input_until_id, observation_until_id=EXCLUDED.observation_until_id,
                     cursor_id=0, phase='SCAN'
                 """).params(version, vehicle, request, revision, clock.instant().atOffset(ZoneOffset.UTC)).update();
+            jdbc.sql("""
+                INSERT INTO stop_demand_rebuild_scan(route_version_id,vehicle_id,batch_until_id)
+                VALUES (?, ?, (SELECT COALESCE(max(id),0) FROM observation_batch))
+                ON CONFLICT(route_version_id,vehicle_id) DO UPDATE SET batch_until_id=EXCLUDED.batch_until_id,
+                    after_at=NULL, after_batch_id=0, group_end_at=NULL, group_end_id=0
+                """).params(version, vehicle).update();
             return true;
         }
         Progress p = progress.getFirst();
@@ -96,9 +103,70 @@ public class StopDemandRebuildWriter {
     }
 
     private void scan(long version, String vehicle, Progress p) {
-        var page = jdbc.sql("""
+        var states = jdbc.sql("SELECT * FROM stop_demand_rebuild_scan WHERE route_version_id=? AND vehicle_id=?")
+            .params(version, vehicle).query((rs, n) -> new ScanState(
+                rs.getLong("batch_until_id"), rs.getObject("after_at", OffsetDateTime.class),
+                rs.getLong("after_batch_id"), rs.getObject("group_end_at", OffsetDateTime.class),
+                rs.getLong("group_end_id"))).list();
+        // 배포 전에 시작한 작업은 기존 관측 ID 커서를 끝까지 사용한다.
+        if (states.isEmpty()) {
+            List<Long> ids = jdbc.sql("SELECT id FROM vehicle_observation WHERE id>? AND id<=? ORDER BY id LIMIT 128")
+                .params(p.cursor(), p.upper()).query(Long.class).list();
+            aggregate(version, vehicle, p, ids);
+            move(version, vehicle, ids.size() < 128 ? "CLEAR" : "SCAN", ids.size() < 128 ? 0 : ids.getLast());
+            return;
+        }
+        ScanState state = states.getFirst();
+        if (state.endAt() == null) {
+            var batches = jdbc.sql("""
+                SELECT id,response_received_at FROM observation_batch
+                WHERE route_version_id=:version AND id<=:upper AND response_received_at IS NOT NULL
+                  AND (response_received_at,id)>(COALESCE(:afterAt::timestamptz,'-infinity'::timestamptz),:afterId)
+                ORDER BY response_received_at,id LIMIT 32
+                """).param("version", version).param("upper", state.upper())
+                .param("afterAt", state.afterAt()).param("afterId", state.afterId())
+                .query((rs,n) -> new Batch(rs.getLong("id"),rs.getObject("response_received_at",OffsetDateTime.class))).list();
+            if (batches.isEmpty()) { move(version, vehicle, "CLEAR", 0); return; }
+            Batch end = batches.getLast();
+            jdbc.sql("UPDATE stop_demand_rebuild_scan SET group_end_at=?,group_end_id=? WHERE route_version_id=? AND vehicle_id=?")
+                .params(end.at(), end.id(), version, vehicle).update();
+            state = new ScanState(state.upper(), state.afterAt(), state.afterId(), end.at(), end.id());
+        }
+        List<Long> ids = jdbc.sql("""
+            WITH batches AS MATERIALIZED (
+                SELECT id FROM observation_batch
+                WHERE route_version_id=:version AND id<=:batchUpper AND response_received_at IS NOT NULL
+                  AND (response_received_at,id)>(COALESCE(:afterAt::timestamptz,'-infinity'::timestamptz),:afterId)
+                  AND (response_received_at,id)<=(:endAt,:endId)
+                ORDER BY response_received_at,id LIMIT 32
+            )
+            SELECT observation.id FROM batches b JOIN LATERAL (
+                SELECT id FROM vehicle_observation WHERE observation_batch_id=b.id
+                  AND (:vehicle='' OR vehicle_id=:vehicle) AND id>:cursor AND id<=:upper
+                ORDER BY id LIMIT 128
+            ) observation ON true ORDER BY observation.id LIMIT 128
+            """).param("version", version).param("batchUpper",state.upper())
+            .param("afterAt",state.afterAt()).param("afterId",state.afterId())
+            .param("endAt",state.endAt()).param("endId",state.endId())
+            .param("vehicle",vehicle).param("cursor",p.cursor()).param("upper",p.upper())
+            .query(Long.class).list();
+        aggregate(version, vehicle, p, ids);
+        if (ids.size() < 128) {
+            jdbc.sql("""
+                UPDATE stop_demand_rebuild_scan SET after_at=group_end_at,after_batch_id=group_end_id,
+                    group_end_at=NULL,group_end_id=0 WHERE route_version_id=? AND vehicle_id=?
+                """).params(version,vehicle).update();
+            move(version,vehicle,"SCAN",0);
+        } else {
+            move(version,vehicle,"SCAN",ids.getLast());
+        }
+    }
+
+    private void aggregate(long version, String vehicle, Progress p, List<Long> ids) {
+        if (ids.isEmpty()) { return; }
+        jdbc.sql("""
             WITH page AS MATERIALIZED (
-                SELECT id FROM vehicle_observation WHERE id > :cursor AND id <= :upper ORDER BY id LIMIT 128
+                SELECT id FROM vehicle_observation WHERE id IN (:ids)
             ), added AS (
                 INSERT INTO stop_demand_rebuild_total AS total(route_version_id, scope_vehicle_id, request_id,
                     vehicle_id, arrived_hour_start, target_stop_order, sample_count, arrival_seats_sum, net_boarding_sum)
@@ -126,11 +194,10 @@ public class StopDemandRebuildWriter {
                     arrival_seats_sum=total.arrival_seats_sum+EXCLUDED.arrival_seats_sum,
                     net_boarding_sum=total.net_boarding_sum+EXCLUDED.net_boarding_sum
                 RETURNING 1
-            ) SELECT count(*) AS size, COALESCE(max(id),:cursor) AS cursor FROM page
+            ) SELECT count(*) FROM added
             """).param("version", version).param("vehicle", vehicle).param("request", p.request())
-            .param("cursor", p.cursor()).param("upper", p.upper()).param("until", p.until()).param("inputUntil", p.inputUntil())
-            .query((rs,n) -> new Page(rs.getInt("size"),rs.getLong("cursor"))).single();
-        move(version, vehicle, page.size() < 128 ? "CLEAR" : "SCAN", page.size() < 128 ? 0 : page.cursor());
+            .param("ids", ids).param("until", p.until()).param("inputUntil", p.inputUntil())
+            .query(Long.class).single();
     }
 
     private void copy(long version, String vehicle, Progress p) {
@@ -180,6 +247,8 @@ public class StopDemandRebuildWriter {
                    set_config('work_mem','1MB',true),set_config('max_parallel_workers_per_gather','0',true)
             """).query().singleRow();
     }
+    private record ScanState(long upper, OffsetDateTime afterAt, long afterId, OffsetDateTime endAt, long endId) { }
+    private record Batch(long id, OffsetDateTime at) { }
     private record Progress(UUID request,long revision,OffsetDateTime until,long inputUntil,long upper,long cursor,String phase) { }
     private record Page(int size,long cursor) { }
 }
