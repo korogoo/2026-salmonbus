@@ -124,6 +124,12 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
     }
 
     @Override
+    public List<Long> findActiveRouteIds() {
+        return jdbcClient.sql("SELECT DISTINCT route_id FROM route_version WHERE valid_to IS NULL ORDER BY route_id")
+            .query(Long.class).list();
+    }
+
+    @Override
     public List<SameDayFullOutcomeCount> findCounts(
         final long routeId,
         SeoulDay day

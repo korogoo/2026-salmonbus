@@ -58,6 +58,11 @@ model:
 # 예보 배치와 라벨 회수 배치. 계수 번들이 없어 도는 배포가 하나도 없으므로 꺼둔 채로 낸다.
 # 켜는 것은 배포 행이 선 뒤다. 수집(collection.enabled)과 같은 방식으로 끈다.
 forecast:
+  same-day-initialization:
+    interval: 10s
+    retry-interval: 60s
+    statement-timeout: 500ms
+    lock-timeout: 100ms
   enabled: ${FORECAST_ENABLED:false}
   interval: 10s # 예보가 안 붙은 판을 집으러 가는 주기. 수집이 첨두 15초라 그보다 짧게 둔다.
   settlement-interval: 60s # 라벨 회수 주기. 예보와 다른 시계에서 돈다.

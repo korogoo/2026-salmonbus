@@ -8,6 +8,8 @@ import java.util.List;
  */
 public interface SameDayFullOutcomesRepository {
 
+    List<Long> findActiveRouteIds();
+
     List<SameDayFullOutcomeCount> findCounts(
         long routeId,
         SeoulDay day

@@ -13,7 +13,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration
 @EnableScheduling
-@EnableConfigurationProperties(ForecastProperties.class)
+@EnableConfigurationProperties({ForecastProperties.class, SameDayInitializationProperties.class})
 @ConditionalOnProperty(prefix = "forecast", name = "enabled", havingValue = "true")
 public class ForecastScheduleConfig {
 }

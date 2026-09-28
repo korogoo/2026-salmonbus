@@ -59,6 +59,15 @@ public class SameDayFullOutcomesService {
         }
     }
 
+    /** 호출자가 같은 노선 잠금을 유지하는 트랜잭션 안에서 사용한다. */
+    public boolean initializeIfAbsent(long routeId, SeoulDay day) {
+        if (!repository.findCounts(routeId, day).isEmpty()) {
+            return false;
+        }
+        seed(routeId, day);
+        return true;
+    }
+
     private static Map<RouteDay, List<SettledForecast>> groupByRouteDay(
         List<SettledForecast> settled
     ) {
