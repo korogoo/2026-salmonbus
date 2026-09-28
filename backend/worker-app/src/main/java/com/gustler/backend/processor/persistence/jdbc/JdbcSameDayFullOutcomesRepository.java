@@ -79,6 +79,8 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
      * <p>날짜를 {@code ::date} 로 비교하지 않고 자정 경계 두 개로 자른다. 열에 함수를 씌우면
      * 그 인덱스를 못 타고 observation_batch 를 통째로 읽는다.
      */
+    // FK가 예보↔예측 관측, 도착 관측↔batch의 판본 일치를 보장한다.
+    // 아래 EXISTS가 예측↔도착 판본도 일치시키므로 품질 버전은 대상 route에서 한 번 읽을 수 있다.
     private static final String COUNT_FROM_SOURCE = """
         SELECT forecast.stops_to_target,
                count(*)                                              AS row_count,
@@ -86,9 +88,9 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
                sum(forecast.seat_full_chance_raw)                     AS raw_full_chance_sum,
                max(arrival_batch.response_received_at)                AS settled_through
         FROM observation_batch arrival_batch
-        JOIN vehicle_observation arrival
+        JOIN forecast_eligible_observation arrival
           ON arrival.observation_batch_id = arrival_batch.id
-        JOIN quality_calibration_seat_forecast forecast
+        JOIN seat_forecast forecast
           ON forecast.arrival_observation_id = arrival.id
         WHERE arrival_batch.route_version_id IN (
                 SELECT id FROM route_version WHERE route_id = :routeId)
@@ -97,6 +99,13 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
           AND arrival_batch.response_received_at <= :until
           AND forecast.scoring_state = 'SETTLED'
           AND forecast.seats_on_arrival IS NOT NULL
+          AND forecast.quality_revision = (SELECT quality_revision FROM route WHERE id = :routeId)
+          AND EXISTS (
+              SELECT 1 FROM forecast_eligible_observation source
+              WHERE source.id = forecast.vehicle_observation_id
+                AND source.route_version_id = arrival.route_version_id
+                AND source.vehicle_id IS NOT DISTINCT FROM arrival.vehicle_id
+                AND source.quality_direction = arrival.quality_direction)
         GROUP BY forecast.stops_to_target
         ORDER BY forecast.stops_to_target
         """;
@@ -107,6 +116,12 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
         JdbcClient jdbcClient
     ) {
         this.jdbcClient = jdbcClient;
+    }
+
+    @Override
+    public List<Long> findActiveRouteIds() {
+        return jdbcClient.sql("SELECT DISTINCT route_id FROM route_version WHERE valid_to IS NULL ORDER BY route_id")
+            .query(Long.class).list();
     }
 
     @Override

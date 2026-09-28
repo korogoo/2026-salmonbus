@@ -1,5 +1,6 @@
 package com.gustler.backend.processor;
 
+import com.gustler.backend.diagnostics.WorkerOperationLog;
 import com.gustler.backend.processor.seatdistribution.SameDayFullOutcomes;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -9,12 +10,8 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * 오늘 도착이 확인된 예보들의 성적. 만석 확률을 당일 성적으로 옮기는 데 쓴다.
- *
- * <p>정산이 예보를 닫을 때마다 한 칸씩 더해 둔 것을 읽는다. <b>batch 마다 원본을 다시 세지 않는다.</b>
- * 다시 세는 자리는 둘이다. 그 노선의 오늘 칸이 아직 없을 때와, 예보 시각이 집계에 반영된 마지막
- * 도착보다 앞일 때다. 뒤쪽은 장애로 밀린 batch 를 뒤늦게 처리하는 경우인데, 그때 집계를 그대로 쓰면
- * 그 batch 가 아직 모르는 도착까지 센 값을 보게 된다.
+ * 저장된 당일 성적만 예보 보정에 사용한다. 미초기화/과거 시점 예보는 당일 보정을 생략한다.
+ * 원본 계산은 별도 초기화 트랜잭션에서만 수행하며, 준비 전 정산도 원본에는 남는다.
  */
 @Component
 public class SameDayFullOutcomesService {
@@ -32,12 +29,9 @@ public class SameDayFullOutcomesService {
         Instant predictionAt
     ) {
         SeoulDay day = SeoulDay.containing(predictionAt);
-        List<SameDayFullOutcomeCount> counts = repository.findCounts(routeId, day);
-        if (counts.isEmpty()) {
-            counts = seed(routeId, day);
-        }
-        if (predictionAt.isBefore(settledThroughOf(counts))) {
-            return outcomesOf(repository.countFromSource(routeId, day, predictionAt));
+        List<SameDayFullOutcomeCount> counts = WorkerOperationLog.measure("same_day_read", routeId, () -> repository.findCounts(routeId, day));
+        if (counts.isEmpty() || predictionAt.isBefore(settledThroughOf(counts))) {
+            return Map.of();
         }
         return outcomesOf(counts);
     }
@@ -48,13 +42,27 @@ public class SameDayFullOutcomesService {
         for (Map.Entry<RouteDay, List<SettledForecast>> group : groupByRouteDay(settled).entrySet()) {
             RouteDay key = group.getKey();
             if (repository.findCounts(key.routeId(), key.day()).isEmpty()) {
-                seed(key.routeId(), key.day());
+                // 부분 합계를 만들면 초기화 완료로 오인한다. 원본은 이후 초기화에서 함께 센다.
                 continue;
             }
             for (SettledForecast forecast : group.getValue()) {
                 repository.add(forecast);
             }
         }
+    }
+
+    /** 호출자가 같은 노선 잠금을 유지하는 트랜잭션 안에서 사용한다. */
+    public boolean initializeIfAbsent(long routeId, SeoulDay day) {
+        return initializeIfAbsent(routeId, day, new SameDayInitializationAttempt());
+    }
+
+    boolean initializeIfAbsent(long routeId, SeoulDay day, SameDayInitializationAttempt attempt) {
+        if (!attempt.measure(SameDayInitializationAttempt.Stage.CHECK,
+            () -> repository.findCounts(routeId, day)).isEmpty()) {
+            return false;
+        }
+        seed(routeId, day, attempt);
+        return true;
     }
 
     private static Map<RouteDay, List<SettledForecast>> groupByRouteDay(
@@ -69,14 +77,17 @@ public class SameDayFullOutcomesService {
 
     private List<SameDayFullOutcomeCount> seed(
         final long routeId,
-        SeoulDay day
+        SeoulDay day,
+        SameDayInitializationAttempt attempt
     ) {
-        List<SameDayFullOutcomeCount> counted = repository.countFromSource(routeId, day, day.end());
+        List<SameDayFullOutcomeCount> counted = attempt.measure(SameDayInitializationAttempt.Stage.SOURCE,
+            () -> repository.countFromSource(routeId, day, day.end()));
         if (counted.isEmpty()) {
             // 거리 0은 실제 예보가 아니다. 이 날짜/품질 버전에서 원본이 비었음을 한 번만 기록한다.
             counted = List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start()));
         }
-        repository.upsertCounts(routeId, day, counted);
+        List<SameDayFullOutcomeCount> toSave = counted;
+        attempt.run(SameDayInitializationAttempt.Stage.SAVE, () -> repository.upsertCounts(routeId, day, toSave));
         return counted;
     }
 
