@@ -120,8 +120,7 @@ class SameDayTransactionBoundaryTest {
         context.registerBean(Clock.class, () -> Clock.fixed(NOW, ZoneOffset.UTC));
         context.registerBean(ForecastProperties.class, () -> new ForecastProperties(true,
             Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofHours(6), Duration.ofMinutes(5), 20, 3000, 400));
-        context.registerBean(SameDayInitializationProperties.class, () -> new SameDayInitializationProperties(
-            Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofMillis(500), Duration.ofMillis(100)));
+        context.registerBean(SameDayInitializationProperties.class, this::initializationProperties);
         context.registerBean(SameDayFullOutcomesInitializer.class);
         context.registerBean(ArrivalLabelJob.class);
         context.registerBean(ForecastBatchWriter.class);
@@ -147,6 +146,11 @@ class SameDayTransactionBoundaryTest {
         boolean stopped = workers.awaitTermination(10, TimeUnit.SECONDS);
         context.close();
         assertThat(stopped).as("테스트의 백그라운드 작업이 남지 않는다").isTrue();
+    }
+
+    SameDayInitializationProperties initializationProperties() {
+        return new SameDayInitializationProperties(
+            Duration.ofSeconds(10), Duration.ofSeconds(60), Duration.ofMillis(500), Duration.ofMillis(100));
     }
 
     @Test

@@ -24,12 +24,13 @@ public class SameDayFullOutcomesInitializer {
         this.properties = properties;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 2)
+    // 원본 SQL 25초에 준비 확인/저장/커밋 여유를 둔다. 노선 목록 조회 제한과는 별개다.
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public boolean initialize(long routeId, SeoulDay day) {
         return initialize(routeId, day, new SameDayInitializationAttempt());
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 2)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public boolean initialize(long routeId, SeoulDay day, SameDayInitializationAttempt attempt) {
         attempt.run(SameDayInitializationAttempt.Stage.CONFIGURE, this::configureTimeouts);
         attempt.measure(SameDayInitializationAttempt.Stage.LOCK, () ->

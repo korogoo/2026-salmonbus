@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record SameDayInitializationProperties(
     @DefaultValue("10s") Duration interval,
     @DefaultValue("60s") Duration retryInterval,
-    @DefaultValue("500ms") Duration statementTimeout,
+    @DefaultValue("25s") Duration statementTimeout,
     @DefaultValue("100ms") Duration lockTimeout
 ) {
     public SameDayInitializationProperties {

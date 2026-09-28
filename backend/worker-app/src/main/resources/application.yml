@@ -61,7 +61,7 @@ forecast:
   same-day-initialization:
     interval: 10s
     retry-interval: 60s
-    statement-timeout: 500ms
+    statement-timeout: 25s # 운영 단일 조회 14.93초 표본에 여유를 둔 초기값. 실행 로그로 재평가한다.
     lock-timeout: 100ms
   enabled: ${FORECAST_ENABLED:false}
   interval: 10s # 예보가 안 붙은 판을 집으러 가는 주기. 수집이 첨두 15초라 그보다 짧게 둔다.
