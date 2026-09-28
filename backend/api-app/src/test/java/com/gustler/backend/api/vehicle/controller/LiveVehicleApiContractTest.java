@@ -92,10 +92,33 @@ class LiveVehicleApiContractTest {
             .andExpect(jsonPath("$.vehicles[0].vehicleId").value("test-bus"))
             .andExpect(jsonPath("$.vehicles[0].currentStopSequence").value(5))
             .andExpect(jsonPath("$.vehicles[0].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[0].seat.reason").value("QUALITY_WITHHELD"))
             .andExpect(jsonPath("$.vehicles[0].seat.remaining").doesNotExist())
             .andExpect(jsonPath("$.vehicles[1].seat.remaining").value(12));
         assertThat(jdbcClient.sql("SELECT remaining_seats FROM vehicle_observation WHERE id=?")
             .param(observation).query(Integer.class).single()).isEqualTo(seats);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NOT_REPORTED", "REPORTED_UNKNOWN"})
+    void 원래_좌석이_없던_차량은_품질_조사_중에도_원래_사유를_반환한다(String reason) throws Exception {
+        RouteContext route = insertCurrentRoute();
+        insertStop(route, 5, "205000005", "예시 정류장", "UP");
+        long batch = insertSuccessfulBatch(route, NOW.minusSeconds(20), "SUCCESS_ROWS", 1);
+        insertObservationWithUnknownSeats(batch, route, 0, "test-bus", 5, "205000005", 2, reason);
+        jdbcClient.sql("INSERT INTO trip_quality_rebuild(route_version_id, vehicle_id, until_at) VALUES (?, ?, ?)")
+            .params(route.routeVersionId(), "test-bus", NOW).update();
+        assertThat(jdbcClient.sql("SELECT forecast_eligible FROM forecast_observation_quality WHERE observation_batch_id=?")
+            .param(batch).query(Boolean.class).single()).isFalse();
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/vehicles", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.vehicles.length()").value(1))
+            .andExpect(jsonPath("$.vehicles[0].seat").value(aMapWithSize(2)))
+            .andExpect(jsonPath("$.vehicles[0].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[0].seat.reason").value(reason))
+            .andExpect(jsonPath("$.vehicles[0].seat.remaining").doesNotExist())
+            .andExpect(jsonPath("$.vehicles[0].currentStopSequence").value(5));
     }
 
     @Test
@@ -142,19 +165,22 @@ class LiveVehicleApiContractTest {
             .andExpect(jsonPath("$.vehicles[0].stationId").doesNotExist())
             .andExpect(jsonPath("$.vehicles[0].stopName").value("상행 다섯 번째"))
             .andExpect(jsonPath("$.vehicles[0].phase").value("ARRIVING"))
-            .andExpect(jsonPath("$.vehicles[0].seat").value(aMapWithSize(1)))
+            .andExpect(jsonPath("$.vehicles[0].seat").value(aMapWithSize(2)))
             .andExpect(jsonPath("$.vehicles[0].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[0].seat.reason").value("NOT_REPORTED"))
             .andExpect(jsonPath("$.vehicles[0].seat.remaining").doesNotExist())
             .andExpect(jsonPath("$.vehicles[0].plateNumber").doesNotExist())
             .andExpect(jsonPath("$.vehicles[1].vehicleId").value("204000206"))
             .andExpect(jsonPath("$.vehicles[1].currentStopSequence").value(6))
             .andExpect(jsonPath("$.vehicles[1].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[1].seat.reason").value("REPORTED_UNKNOWN"))
             .andExpect(jsonPath("$.vehicles[1].seat.remaining").doesNotExist())
             .andExpect(jsonPath("$.vehicles[2].vehicleId").value("204000209"))
             .andExpect(jsonPath("$.vehicles[2].currentStopSequence").value(9))
             .andExpect(jsonPath("$.vehicles[2].phase").value("DEPARTED"))
             .andExpect(jsonPath("$.vehicles[2].seat").value(aMapWithSize(2)))
             .andExpect(jsonPath("$.vehicles[2].seat.kind").value("EXACT"))
+            .andExpect(jsonPath("$.vehicles[2].seat.reason").doesNotExist())
             .andExpect(jsonPath("$.vehicles[2].seat.remaining").value(0))
             .andExpect(jsonPath("$.vehicles[3].vehicleId").value("204000202"))
             .andExpect(jsonPath("$.vehicles[3].direction").value("DOWN"))

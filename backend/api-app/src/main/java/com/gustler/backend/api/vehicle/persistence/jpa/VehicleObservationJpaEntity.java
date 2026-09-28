@@ -50,6 +50,9 @@ public class VehicleObservationJpaEntity {
     @Column(name = "remaining_seats")
     private Integer remainingSeats;
 
+    @Column(name = "seat_unknown_reason")
+    private String seatUnknownReason;
+
     @Column(name = "forecast_eligible")
     private boolean forecastEligible;
 
@@ -82,7 +85,7 @@ public class VehicleObservationJpaEntity {
                 stopId,
                 routeStop.name(),
                 phase,
-                VehicleSeat.from(forecastEligible ? remainingSeats : null)
+                VehicleSeat.from(remainingSeats, seatUnknownReason, forecastEligible)
             ));
     }
 }
