@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -322,6 +324,56 @@ class JdbcSameDayFullOutcomesRepositoryTest {
         assertThat(outcomes).hasSize(1);
         assertThat(outcomes.get(STOPS_TO_TARGET).rowCount()).isEqualTo(1);
         verify(observedRepository, times(1)).countFromSource(routeId, ARRIVAL_DAY, ARRIVAL_DAY.end());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"정상", "예측 제외", "도착 제외", "다른 차량", "다른 판본", "다른 방향", "이전 품질 버전"})
+    void 품질을_통과한_같은_차량과_방향의_정산만_당일_성적에_포함한다(String condition) {
+        settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
+        long arrivalId = jdbcClient.sql("SELECT arrival_observation_id FROM seat_forecast WHERE vehicle_observation_id = ?")
+            .param(vehicleObservationId).query(Long.class).single();
+        switch (condition) {
+            case "예측 제외" -> jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82 WHERE id = ?")
+                .param(vehicleObservationId).update();
+            case "도착 제외" -> jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82 WHERE id = ?")
+                .param(arrivalId).update();
+            case "다른 차량" -> jdbcClient.sql("UPDATE vehicle_observation SET vehicle_id = ? WHERE id = ?")
+                .params(VEHICLE_204000207, arrivalId).update();
+            case "다른 판본" -> {
+                long laterVersion = insertLaterRouteVersion();
+                long laterBatch = insertObservationBatch(laterVersion, "different-version", ARRIVAL_RESPONSE_RECEIVED_AT);
+                long laterArrival = insertObservation(laterBatch, laterVersion, VEHICLE_204000206, 0, TARGET_STOP_ORDER);
+                jdbcClient.sql("UPDATE seat_forecast SET arrival_observation_id = ? WHERE vehicle_observation_id = ?")
+                    .params(laterArrival, vehicleObservationId).update();
+            }
+            case "다른 방향" -> jdbcClient.sql("UPDATE route_version SET turn_sequence = ? WHERE id = ?")
+                .params(TARGET_STOP_ORDER, routeVersionId).update();
+            case "이전 품질 버전" -> jdbcClient.sql("UPDATE route SET quality_revision = quality_revision + 1 WHERE id = ?")
+                .param(routeId).update();
+            default -> { }
+        }
+
+        List<SameDayFullOutcomeCount> actual = repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT);
+
+        if (condition.equals("정상")) {
+            assertThat(actual).containsExactly(
+                new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
+        } else {
+            assertThat(actual).isEmpty();
+        }
+    }
+
+    @Test
+    void 예측과_도착_관측의_차량번호가_모두_없어도_기존_집계_결과를_유지한다() {
+        settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
+        jdbcClient.sql("""
+            UPDATE vehicle_observation SET vehicle_id = NULL
+            WHERE id = ? OR id IN (
+                SELECT arrival_observation_id FROM seat_forecast WHERE vehicle_observation_id = ?)
+            """).params(vehicleObservationId, vehicleObservationId).update();
+
+        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
     private SettledForecast settleAsFull(

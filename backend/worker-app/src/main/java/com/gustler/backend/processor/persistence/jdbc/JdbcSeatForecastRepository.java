@@ -94,13 +94,19 @@ public class JdbcSeatForecastRepository implements SeatForecastRepository {
                batch.response_received_at,
                forecast.generated_at,
                observation.quality_direction
-        FROM quality_eligible_seat_forecast forecast
+        FROM seat_forecast forecast
         JOIN forecast_eligible_observation observation
           ON observation.id = forecast.vehicle_observation_id
         JOIN observation_batch batch
           ON batch.id = observation.observation_batch_id
         WHERE forecast.scoring_state = 'PENDING'
           AND forecast.route_version_id = :routeVersionId
+          AND (forecast.arrival_observation_id IS NULL OR EXISTS (
+              SELECT 1 FROM forecast_eligible_observation arrival
+              WHERE arrival.id = forecast.arrival_observation_id
+                AND arrival.route_version_id = observation.route_version_id
+                AND arrival.vehicle_id IS NOT DISTINCT FROM observation.vehicle_id
+                AND arrival.quality_direction = observation.quality_direction))
         ORDER BY forecast.generated_at
         LIMIT :limit
         """;

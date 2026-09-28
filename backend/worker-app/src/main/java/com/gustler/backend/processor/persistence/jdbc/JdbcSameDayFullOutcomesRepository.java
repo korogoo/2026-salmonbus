@@ -88,7 +88,7 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
         FROM observation_batch arrival_batch
         JOIN vehicle_observation arrival
           ON arrival.observation_batch_id = arrival_batch.id
-        JOIN quality_calibration_seat_forecast forecast
+        JOIN seat_forecast forecast
           ON forecast.arrival_observation_id = arrival.id
         WHERE arrival_batch.route_version_id IN (
                 SELECT id FROM route_version WHERE route_id = :routeId)
@@ -97,6 +97,20 @@ public class JdbcSameDayFullOutcomesRepository implements SameDayFullOutcomesRep
           AND arrival_batch.response_received_at <= :until
           AND forecast.scoring_state = 'SETTLED'
           AND forecast.seats_on_arrival IS NOT NULL
+          AND forecast.quality_revision = (
+              SELECT quality.quality_revision
+              FROM route_version version
+              JOIN route quality ON quality.id = version.route_id
+              WHERE version.id = forecast.route_version_id)
+          AND EXISTS (
+              SELECT 1 FROM forecast_eligible_observation source
+              WHERE source.id = forecast.vehicle_observation_id
+                AND EXISTS (
+                    SELECT 1 FROM forecast_eligible_observation eligible_arrival
+                    WHERE eligible_arrival.id = forecast.arrival_observation_id
+                      AND eligible_arrival.route_version_id = source.route_version_id
+                      AND eligible_arrival.vehicle_id IS NOT DISTINCT FROM source.vehicle_id
+                      AND eligible_arrival.quality_direction = source.quality_direction))
         GROUP BY forecast.stops_to_target
         ORDER BY forecast.stops_to_target
         """;
