@@ -128,6 +128,36 @@ class WorkerOperationLogTest {
         assertThat(messages()).hasSize(2);
     }
 
+    @Test
+    void 같은_노선이라도_경고_사유가_다르면_즉시_기록한다() {
+        recorder.warn("quota", 1L, "DAILY_LIMIT");
+        recorder.warn("quota", 1L, "NEXT_DAY_LIMIT");
+        recorder.warn("quota", 1L, "DAILY_LIMIT");
+        recorder.warn("quota", 1L, "NEXT_DAY_LIMIT");
+
+        assertThat(messages()).hasSize(2);
+        assertThat(messages().get(0)).contains("reason=DAILY_LIMIT");
+        assertThat(messages().get(1)).contains("reason=NEXT_DAY_LIMIT");
+    }
+
+    @Test
+    void 복구하면_해당_작업과_노선의_모든_사유만_초기화한다() {
+        recorder.warn("quota", 1L, "DAILY_LIMIT");
+        recorder.warn("quota", 1L, "NEXT_DAY_LIMIT");
+        recorder.warn("quota", 2L, "DAILY_LIMIT");
+        recorder.warn("other", 1L, "DAILY_LIMIT");
+        logs.list.clear();
+
+        recorder.recovered("quota", 1L);
+        recorder.warn("quota", 1L, "DAILY_LIMIT");
+        recorder.warn("quota", 1L, "NEXT_DAY_LIMIT");
+        recorder.warn("quota", 2L, "DAILY_LIMIT");
+        recorder.warn("other", 1L, "DAILY_LIMIT");
+
+        assertThat(messages()).hasSize(2).allSatisfy(message ->
+            assertThat(message).contains("operation=quota", "route=1"));
+    }
+
     private void slowQuery() {
         recorder.measure("query", 1L, () -> { nanos.addAndGet(TimeUnit.SECONDS.toNanos(1)); return List.of(1); });
     }

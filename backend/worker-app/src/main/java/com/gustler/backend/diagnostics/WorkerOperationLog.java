@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
@@ -43,7 +44,7 @@ public final class WorkerOperationLog {
         private static final long WARNING_NANOS = TimeUnit.MINUTES.toNanos(1);
         private final LongSupplier nanoTime;
         private final ThreadLocal<Set<Throwable>> reported = new ThreadLocal<>();
-        private final Map<String, Long> warnings = new LinkedHashMap<>();
+        private final Map<WarningKey, Long> warnings = new LinkedHashMap<>();
 
         Recorder(LongSupplier nanoTime) { this.nanoTime = nanoTime; }
 
@@ -108,7 +109,7 @@ public final class WorkerOperationLog {
         }
 
         synchronized void warn(String operation, Object route, String reason) {
-            String key = operation + ":" + route;
+            WarningKey key = new WarningKey(operation, String.valueOf(route), reason);
             long now = nanoTime.getAsLong();
             Long last = warnings.get(key);
             if (last != null && now - last < WARNING_NANOS) { return; }
@@ -120,8 +121,11 @@ public final class WorkerOperationLog {
         }
 
         synchronized void recovered(String operation, Object route) {
-            warnings.remove(operation + ":" + route);
+            warnings.keySet().removeIf(key -> Objects.equals(key.operation(), operation)
+                && key.route().equals(String.valueOf(route)));
         }
+
+        private record WarningKey(String operation, String route, String reason) { }
 
         private static long millis(long nanos) { return TimeUnit.NANOSECONDS.toMillis(nanos); }
     }
