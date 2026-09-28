@@ -396,6 +396,40 @@ class JdbcSameDayFullOutcomesRepositoryTest {
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
+    @Test
+    void 다른_노선의_품질_버전으로_당일_집계를_판정하지_않는다() {
+        settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
+        jdbcClient.sql("""
+            INSERT INTO route (
+                public_route_id, source_id, source_route_id, display_name,
+                start_stop_name, end_stop_name, quality_revision
+            ) VALUES ('other-route', 'fixture', 'other-route', 'other', 'start', 'end', 2)
+            """).update();
+
+        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
+
+        jdbcClient.sql("UPDATE route SET quality_revision = 2 WHERE id = ?").param(routeId).update();
+        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
+    }
+
+    @Test
+    void 여러_예보가_같은_도착_관측을_사용해도_각_예보를_모두_집계한다() {
+        settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
+        long laterBatch = insertObservationBatch(routeVersionId, "later-prediction", RESPONSE_RECEIVED_AT.plusSeconds(10));
+        long laterSource = insertObservation(laterBatch, routeVersionId, VEHICLE_204000206, 0, PASSED_STOP_ORDER);
+        settleAsFull(laterSource, OTHER_RAW_FULL_CHANCE);
+        jdbcClient.sql("""
+            UPDATE seat_forecast SET arrival_observation_id = (
+                SELECT arrival_observation_id FROM seat_forecast WHERE vehicle_observation_id = ?
+            ) WHERE vehicle_observation_id = ?
+            """).params(vehicleObservationId, laterSource).update();
+
+        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 2,
+                RAW_FULL_CHANCE + OTHER_RAW_FULL_CHANCE, ARRIVED_AT));
+    }
+
     private SettledForecast settleAsFull(
         final long observationId,
         final double rawFullChance
