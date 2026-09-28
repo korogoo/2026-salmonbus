@@ -46,7 +46,7 @@ class MigrationOrderTest {
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
         List.of("stop_demand_pending_sample", "stop_demand_rebuild_request",
             "forecast_vacuum_threshold", "stop_demand_current_total",
-            "stop_demand_rebuild_progress", "stop_demand_publication");
+            "stop_demand_rebuild_progress", "stop_demand_publication", "stop_demand_rebuild_scan");
 
     private static final String MIGRATION_LOCATION = "db/migration";
     private static final String STAGED_SCHEMA = "staged_deploy";
