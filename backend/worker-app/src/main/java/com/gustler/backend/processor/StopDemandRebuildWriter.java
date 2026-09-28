@@ -26,6 +26,11 @@ public class StopDemandRebuildWriter {
     public boolean step(long version, String vehicle) {
         limits(jdbc);
         quality.lockRoute(version);
+        // 전체 합계 교체가 끝날 때까지 차량별 중간값을 적용하지 않는다.
+        if (!vehicle.isEmpty() && jdbc.sql("""
+            SELECT EXISTS(SELECT 1 FROM stop_demand_rebuild_request
+                WHERE route_version_id=? AND vehicle_id='')
+            """).param(version).query(Boolean.class).single()) { return false; }
         if (jdbc.sql("""
             SELECT EXISTS(SELECT 1 FROM trip_quality_rebuild WHERE route_version_id=? AND NOT completed
               AND (? = '' OR vehicle_id IN ('', ?)))
@@ -41,7 +46,9 @@ public class StopDemandRebuildWriter {
                 rs.getLong("quality_revision"), rs.getObject("data_until", OffsetDateTime.class),
                 rs.getLong("input_until_id"), rs.getLong("observation_until_id"), rs.getLong("cursor_id"),
                 rs.getString("phase"))).list();
-        if (progress.isEmpty() || !progress.getFirst().request().equals(request) || progress.getFirst().revision() != revision) {
+        // 차량별 변경은 해당 요청 UUID로 판단한다. 전체 계산은 모든 차량의 품질 변경에 영향을 받는다.
+        if (progress.isEmpty() || !progress.getFirst().request().equals(request)
+            || (vehicle.isEmpty() && progress.getFirst().revision() != revision)) {
             // 이전 시도의 중간값을 나눠 정리한 뒤 새 처리 범위를 고정한다.
             int removed = jdbc.sql("""
                 DELETE FROM stop_demand_rebuild_total WHERE id IN (
@@ -86,6 +93,14 @@ public class StopDemandRebuildWriter {
                     if (removed == 0) {
                         jdbc.sql("DELETE FROM stop_demand_rebuild_request WHERE route_version_id=? AND vehicle_id=? AND request_id=?")
                             .params(version, vehicle, request).update();
+                        if (vehicle.isEmpty()) {
+                            // 전체 완료와 함께 커밋한다. 중단됐던 차량 계산은 새 합계를 덮어쓰지 않고 다시 시작한다.
+                            jdbc.sql("""
+                                UPDATE stop_demand_rebuild_request SET request_id=gen_random_uuid(),
+                                    requested_at=CURRENT_TIMESTAMP
+                                WHERE route_version_id=? AND vehicle_id<>''
+                                """).param(version).update();
+                        }
                         jdbc.sql("DELETE FROM stop_demand_rebuild_progress WHERE route_version_id=? AND vehicle_id=?")
                             .params(version, vehicle).update();
                         jdbc.sql("""

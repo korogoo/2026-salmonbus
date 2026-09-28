@@ -22,6 +22,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -41,6 +42,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -111,6 +113,7 @@ class SameDayTransactionBoundaryTest {
         context.registerBean(JdbcSeatForecastRepository.class, () -> forecastsSpy);
         context.registerBean(SameDayFullOutcomesService.class);
         context.registerBean(TripQualityRepository.class);
+        context.registerBean(StopDemandRebuildWriter.class);
         context.registerBean(ArrivalObservationRepository.class, () -> arrivals);
         context.registerBean(VehicleTrajectoryRepository.class, () -> trajectories);
         context.registerBean(StopDemandStatisticsRepository.class, () -> statistics);
@@ -300,6 +303,62 @@ class SameDayTransactionBoundaryTest {
         assertThat(countsSpy.findCounts(routeId, SeoulDay.containing(ARRIVED_AT)).stream()
             .filter(row -> row.rowCount() > 0).toList()).containsExactly(
             new SameDayFullOutcomeCount(1, 1, 1, .25, ARRIVED_AT));
+    }
+
+    @Test
+    void 전체_완료와_차량_재시작은_함께_커밋된다() throws Exception {
+        savePending();
+        settlement.settleArrivalLabels();
+        var quality = context.getBean(TripQualityRepository.class);
+        var rebuild = context.getBean(StopDemandRebuildWriter.class);
+        quality.requestStatisticsRebuild(versionId,"fixture-vehicle");
+        rebuild.step(versionId,"fixture-vehicle");
+        UUID before = vehicleRebuildRequest();
+        quality.requestStatisticsRebuild(versionId,"");
+        for (int i=0; i<100; i++) {
+            String phase = jdbc.sql("SELECT phase FROM stop_demand_rebuild_progress WHERE route_version_id=? AND vehicle_id=''")
+                .param(versionId).query(String.class).optional().orElse("");
+            long totals = jdbc.sql("SELECT count(*) FROM stop_demand_rebuild_total WHERE route_version_id=? AND scope_vehicle_id=''")
+                .param(versionId).query(Long.class).single();
+            if (phase.equals("CLEAN") && totals==0) { break; }
+            assertThat(rebuild.step(versionId,"")).isTrue();
+        }
+        assertThat(jdbc.sql("SELECT phase FROM stop_demand_rebuild_progress WHERE route_version_id=? AND vehicle_id=''")
+            .param(versionId).query(String.class).single()).isEqualTo("CLEAN");
+        var staged = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var tx = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+        Future<?> running = workers.submit(() -> tx.executeWithoutResult(status -> {
+            rebuild.step(versionId,"");
+            staged.countDown();
+            try { await(release); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            throw new IllegalStateException("완료 저장 후 실패 주입");
+        }));
+        try {
+            await(staged);
+            // 다른 트랜잭션에는 전체 완료도 새 차량 요청 번호도 아직 보이지 않는다.
+            assertThat(globalRebuildRequests()).isEqualTo(1);
+            assertThat(vehicleRebuildRequest()).isEqualTo(before);
+        } finally { release.countDown(); }
+        assertThatThrownBy(() -> running.get(10,TimeUnit.SECONDS)).hasRootCauseInstanceOf(IllegalStateException.class);
+        assertThat(globalRebuildRequests()).isEqualTo(1);
+        assertThat(vehicleRebuildRequest()).isEqualTo(before);
+
+        rebuild.step(versionId,"");
+
+        assertThat(globalRebuildRequests()).isZero();
+        assertThat(vehicleRebuildRequest()).isNotEqualTo(before);
+    }
+
+    private long globalRebuildRequests() {
+        return jdbc.sql("SELECT count(*) FROM stop_demand_rebuild_request WHERE route_version_id=? AND vehicle_id=''")
+            .param(versionId).query(Long.class).single();
+    }
+
+    private UUID vehicleRebuildRequest() {
+        return jdbc.sql("SELECT request_id FROM stop_demand_rebuild_request WHERE route_version_id=? AND vehicle_id='fixture-vehicle'")
+            .param(versionId).query(UUID.class).single();
     }
 
     void assertNoForecast() {

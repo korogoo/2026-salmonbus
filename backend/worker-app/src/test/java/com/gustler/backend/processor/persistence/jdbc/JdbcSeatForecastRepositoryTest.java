@@ -682,6 +682,103 @@ class JdbcSeatForecastRepositoryTest {
             .param(routeVersionId).query(Long.class).single()).isEqualTo(expected);
     }
 
+    @Test
+    void 다른_차량의_품질_변경에도_계산을_이어간다() {
+        givenStatisticsSample();
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+        advanceRebuildTo(VEHICLE_204000206,"CLEAR");
+        UUID original = rebuildRequest(VEHICLE_204000206);
+        quality.requestStatisticsRebuild(routeVersionId,"other-vehicle");
+        quality.invalidateDerivedInputs(routeVersionId);
+
+        rebuild.step(routeVersionId,VEHICLE_204000206);
+
+        assertThat(rebuildRequest(VEHICLE_204000206)).isEqualTo(original);
+        assertThat(rebuildPhase(VEHICLE_204000206)).isEqualTo("COPY");
+        finishRebuild(VEHICLE_204000206);
+        assertRebuiltSamples(1);
+    }
+
+    @Test
+    void 같은_차량의_새_요청은_다시_계산한다() {
+        givenStatisticsSample();
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+        advanceRebuildTo(VEHICLE_204000206,"CLEAR");
+        UUID original = rebuildRequest(VEHICLE_204000206);
+        addLateSample("same-vehicle-request",1);
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+
+        assertThat(rebuildRequest(VEHICLE_204000206)).isNotEqualTo(original);
+        finishRebuild(VEHICLE_204000206);
+        assertRebuiltSamples(2);
+    }
+
+    @Test
+    void 전체_재계산_중에는_차량_계산을_진행하지_않는다() {
+        givenStatisticsSample();
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+        advanceRebuildTo(VEHICLE_204000206,"CLEAR");
+        quality.requestStatisticsRebuild(routeVersionId,"");
+
+        assertThat(rebuild.step(routeVersionId,VEHICLE_204000206)).isFalse();
+        assertThat(rebuildPhase(VEHICLE_204000206)).isEqualTo("CLEAR");
+    }
+
+    @Test
+    void 전체_재계산_뒤_차량_계산이_새_결과를_지우지_않는다() {
+        givenStatisticsSample();
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+        advanceRebuildTo(VEHICLE_204000206,"CLEAR");
+        UUID original = rebuildRequest(VEHICLE_204000206);
+        addLateSample("global-refresh",1);
+        quality.requestStatisticsRebuild(routeVersionId,"");
+        finishRebuild("");
+        var expected = jdbcClient.sql("SELECT * FROM stop_demand_current_total WHERE route_version_id=? ORDER BY vehicle_id,arrived_hour_start,target_stop_order")
+            .param(routeVersionId).query().listOfRows();
+
+        assertRebuiltSamples(2);
+        assertThat(rebuildRequest(VEHICLE_204000206)).isNotEqualTo(original);
+        finishRebuild(VEHICLE_204000206);
+
+        assertRebuiltSamples(2);
+        assertThat(jdbcClient.sql("SELECT * FROM stop_demand_current_total WHERE route_version_id=? ORDER BY vehicle_id,arrived_hour_start,target_stop_order")
+            .param(routeVersionId).query().listOfRows()).isEqualTo(expected);
+    }
+
+    @Test
+    void 전체_계산은_품질이_바뀌면_다시_계산한다() {
+        givenStatisticsSample();
+        quality.requestStatisticsRebuild(routeVersionId,"");
+        advanceRebuildTo("","CLEAR");
+        jdbcClient.sql("UPDATE vehicle_one_way_trip SET status='EXCLUDED' WHERE start_observation_id=?")
+            .param(vehicleObservationId).update();
+        quality.requestStatisticsRebuild(routeVersionId,VEHICLE_204000206);
+        quality.invalidateDerivedInputs(routeVersionId);
+
+        finishRebuild("");
+
+        assertThat(jdbcClient.sql("SELECT count(*) FROM stop_demand_current_total WHERE route_version_id=?")
+            .param(routeVersionId).query(Integer.class).single()).isZero();
+    }
+
+    private UUID rebuildRequest(String vehicle) {
+        return jdbcClient.sql("SELECT request_id FROM stop_demand_rebuild_request WHERE route_version_id=? AND vehicle_id=?")
+            .params(routeVersionId,vehicle).query(UUID.class).single();
+    }
+
+    private String rebuildPhase(String vehicle) {
+        return jdbcClient.sql("SELECT phase FROM stop_demand_rebuild_progress WHERE route_version_id=? AND vehicle_id=?")
+            .params(routeVersionId,vehicle).query(String.class).optional().orElse("");
+    }
+
+    private void advanceRebuildTo(String vehicle, String phase) {
+        for (int i=0; i<100; i++) {
+            if (rebuildPhase(vehicle).equals(phase)) { return; }
+            assertThat(rebuild.step(routeVersionId,vehicle)).isTrue();
+        }
+        throw new AssertionError("정정이 목표 단계에 도달하지 않음: "+phase);
+    }
+
     private void finishRebuild(String vehicle) {
         for (int i = 0; i < 100; i++) {
             if (!rebuild.step(routeVersionId, vehicle)) { return; }
