@@ -372,6 +372,123 @@ class JdbcForecastEvaluationRepositoryTest {
             .extracting(PendingForecast::targetStopOrder).containsExactly(NEXT_TARGET_STOP_ORDER);
     }
 
+    @Test
+    void 정산_대상은_관측_순서로_오래된_예보부터_고른다() {
+        // given
+        long laterObservationId = insertObservation(observationBatchId, "204000207", 1, PASSED_STOP_ORDER);
+        saveForecasts(List.of(
+            forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, NEXT_GENERATED_AT),
+            new SeatForecast(
+                laterObservationId, routeVersionId, TARGET_STOP_ORDER, STOPS_TO_TARGET,
+                modelDeploymentId, DEMAND_STATISTICS_REVISION, 0.41, 0.38, 12.5, GENERATED_AT)));
+
+        // when
+        List<PendingForecast> actual = evaluationRepository.findPending(routeVersionId, 1);
+
+        // then
+        assertThat(actual)
+            .extracting(PendingForecast::vehicleObservationId)
+            .containsExactly(vehicleObservationId);
+    }
+
+    @Test
+    void 품질_보류된_예보가_앞에_있어도_다음_예보로_정산_대상을_채운다() {
+        // given
+        long laterObservationId = insertObservation(observationBatchId, "204000207", 1, PASSED_STOP_ORDER);
+        saveForecasts(List.of(
+            forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT),
+            new SeatForecast(
+                laterObservationId, routeVersionId, TARGET_STOP_ORDER, STOPS_TO_TARGET,
+                modelDeploymentId, DEMAND_STATISTICS_REVISION, 0.41, 0.38, 12.5, NEXT_GENERATED_AT)));
+        jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82 WHERE id = ?")
+            .param(vehicleObservationId)
+            .update();
+
+        // when
+        List<PendingForecast> actual = evaluationRepository.findPending(routeVersionId, 1);
+
+        // then
+        assertThat(actual)
+            .extracting(PendingForecast::vehicleObservationId)
+            .containsExactly(laterObservationId);
+    }
+
+    @Test
+    void 정산_대상은_묶음으로_이어_읽어도_요청한_개수를_넘지_않는다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82 WHERE id = ?")
+            .param(vehicleObservationId)
+            .update();
+        long second = insertObservation(observationBatchId, "204000207", 1, PASSED_STOP_ORDER);
+        long third = insertObservation(observationBatchId, "204000208", 2, PASSED_STOP_ORDER);
+        long fourth = insertObservation(observationBatchId, "204000209", 3, PASSED_STOP_ORDER);
+        saveForecasts(List.of(second, third, fourth).stream()
+            .map(observationId -> new SeatForecast(
+                observationId, routeVersionId, TARGET_STOP_ORDER, STOPS_TO_TARGET,
+                modelDeploymentId, DEMAND_STATISTICS_REVISION, 0.41, 0.38, 12.5, GENERATED_AT))
+            .toList());
+
+        // when
+        List<PendingForecast> actual = evaluationRepository.findPending(routeVersionId, 2);
+
+        // then
+        assertThat(actual)
+            .extracting(PendingForecast::vehicleObservationId)
+            .containsExactly(second, third);
+    }
+
+    @Test
+    void 미정산_평가가_남은_노선_버전을_정산할_노선으로_한_번만_읽는다() {
+        // given
+        saveForecasts(List.of(
+            forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT),
+            forecastOf(NEXT_TARGET_STOP_ORDER, STOPS_TO_NEXT_TARGET, GENERATED_AT)));
+
+        // when
+        List<Long> actual = evaluationRepository.findRouteVersionIdsWithPendingForecasts();
+
+        // then
+        assertThat(actual).containsOnlyOnce(routeVersionId);
+    }
+
+    @Test
+    void 평가가_모두_닫힌_노선_버전은_정산할_노선으로_읽지_않는다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        evaluationRepository.settle(List.of(ForecastEvaluation.completed(
+            vehicleObservationId, TARGET_STOP_ORDER, new ArrivalLabel.Skipped(), SCORED_AT)));
+
+        // when
+        List<Long> actual = evaluationRepository.findRouteVersionIdsWithPendingForecasts();
+
+        // then
+        assertThat(actual).doesNotContain(routeVersionId);
+    }
+
+    @Test
+    void 이전_노선_버전에_남은_미정산_평가도_정산할_노선으로_읽는다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        jdbcClient.sql("UPDATE route_version SET valid_to = ? WHERE id = ?")
+            .params(ARRIVAL_RESPONSE_RECEIVED_AT, routeVersionId)
+            .update();
+        long nextRouteVersionId = jdbcClient.sql("""
+                INSERT INTO route_version (route_id, content_digest, valid_from)
+                VALUES (?, ?, ?)
+                RETURNING id
+                """)
+            .params(routeId, "1".repeat(64), ARRIVAL_RESPONSE_RECEIVED_AT)
+            .query(Long.class)
+            .single();
+
+        // when
+        List<Long> actual = evaluationRepository.findRouteVersionIdsWithPendingForecasts();
+
+        // then
+        assertThat(actual).contains(routeVersionId).doesNotContain(nextRouteVersionId);
+    }
+
     private SeatForecast forecastOf(
         final int targetStopOrder,
         final int stopsToTarget,
