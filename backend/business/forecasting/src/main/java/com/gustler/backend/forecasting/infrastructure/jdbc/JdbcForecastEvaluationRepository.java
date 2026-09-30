@@ -100,9 +100,13 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     @Override
     public List<Long> findRouteVersionIdsWithPendingForecasts() {
         return jdbcClient.sql("""
-            SELECT DISTINCT route_version_id
-            FROM forecast_evaluation
-            WHERE scoring_state = 'PENDING'
+            SELECT version.id
+            FROM route_version version
+            WHERE EXISTS (
+                SELECT 1 FROM forecast_evaluation evaluation
+                WHERE evaluation.route_version_id = version.id
+                  AND evaluation.scoring_state = 'PENDING'
+            )
             """).query(Long.class).list();
     }
 
