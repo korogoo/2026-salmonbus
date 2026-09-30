@@ -41,10 +41,10 @@ class MigrationOrderTest {
      * 번호가 거꾸로 배정돼도 그 가정에 맞춰 다른 파일을 빼게 되고, 결국 늘 순서가 맞아서 통과한다.
      * 이름으로 고르고, 그 파일들이 정말 마지막 번호인지는 아래에서 따로 단언한다.
      *
-     * <p>이 브랜치는 전환 기록 테이블 삭제를 더한다.
+     * <p>이 브랜치는 품질 제외 평가 상태를 허용한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
-        List.of("drop_sal134_transition_tables");
+        List.of("quality_excluded_evaluation");
 
     private static final String MIGRATION_LOCATION = "db/migration";
     private static final String STAGED_SCHEMA = "staged_deploy";

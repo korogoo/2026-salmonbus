@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.StringJoiner;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -151,6 +153,25 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                         AND target_stop.stop_order = forecast.target_stop_order), false) AS target_boarding_allowed
         """;
 
+    private static final int EXCLUSION_LIMIT = 500;
+
+    // 조사 중의 임시 편도 배정은 종료 근거로 쓰지 않는다. 완료된 차량 조사와 확정 제외가 모두 필요하다.
+    private static final String CONFIRMED_EXCLUSION = """
+        trip.status = 'EXCLUDED'
+        AND EXISTS (SELECT 1 FROM trip_quality_rebuild completed
+            WHERE completed.route_version_id = source.route_version_id
+              AND completed.vehicle_id = source.vehicle_id AND completed.completed AND completed.phase = 'DONE')
+        AND NOT EXISTS (SELECT 1 FROM trip_quality_rebuild pending
+            WHERE pending.route_version_id = source.route_version_id AND NOT pending.completed
+              AND (pending.vehicle_id = '' OR pending.vehicle_id = source.vehicle_id))
+        """;
+
+    private static final String EXCLUSION_SOURCE = """
+        JOIN vehicle_observation source ON source.id = keys.observation_id
+        LEFT JOIN observation_trip_assignment assignment ON assignment.observation_id = source.id
+        JOIN vehicle_one_way_trip trip ON trip.id = COALESCE(assignment.trip_id, source.vehicle_trip_key)
+        """;
+
     private final JdbcClient jdbcClient;
 
     public JdbcForecastEvaluationRepository(JdbcClient jdbcClient) {
@@ -167,6 +188,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                 WHERE evaluation.route_version_id = version.id
                   AND evaluation.scoring_state = 'PENDING'
             )
+            ORDER BY version.route_id, version.id
             """).query(Long.class).list();
     }
 
@@ -183,9 +205,11 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public List<PendingForecast> findPending(final long routeVersionId, final int limit) {
         List<PendingForecast> pending = new ArrayList<>();
         PendingKey after = PendingKey.BEFORE_FIRST;
+        int exclusionBudget = EXCLUSION_LIMIT;
         while (pending.size() < limit) {
             List<PendingKey> keys = findPendingKeys(routeVersionId, after, limit);
             if (keys.isEmpty()) {
@@ -193,10 +217,62 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             }
             PendingKey last = keys.getLast();
             List<PendingForecast> eligible = findEligiblePending(routeVersionId, after, last);
+            if (exclusionBudget > 0 && eligible.size() < keys.size()) {
+                exclusionBudget -= closeConfirmedExclusions(routeVersionId, keys, eligible, exclusionBudget);
+            }
             pending.addAll(eligible.subList(0, Math.min(eligible.size(), limit - pending.size())));
             after = last;
         }
         return pending;
+    }
+
+    private int closeConfirmedExclusions(long version, List<PendingKey> keys,
+        List<PendingForecast> eligible, int budget) {
+        Set<Long> eligibleIds = eligible.stream().map(PendingForecast::vehicleObservationId).collect(Collectors.toSet());
+        List<Long> absentIds = keys.stream().map(PendingKey::vehicleObservationId)
+            .filter(id -> !eligibleIds.contains(id)).distinct().toList();
+        if (absentIds.isEmpty()) { return 0; }
+        List<Long> confirmed = jdbcClient.sql("""
+            SELECT source.id FROM vehicle_observation source
+            LEFT JOIN observation_trip_assignment assignment ON assignment.observation_id = source.id
+            JOIN vehicle_one_way_trip trip ON trip.id = COALESCE(assignment.trip_id, source.vehicle_trip_key)
+            WHERE source.id IN (:ids) AND source.route_version_id = :version AND
+            """ + CONFIRMED_EXCLUSION)
+            .param("ids", absentIds).param("version", version).query(Long.class).list();
+        if (confirmed.isEmpty()) { return 0; }
+
+        // 뒤의 Writer도 노선 ID 오름차순으로 잠근다. 앞선 정상 노선은 아직 잠그지 않았을 수 있어
+        // 이 노선까지의 낮은 ID를 먼저 잠가 후속 Writer와 잠금 순서가 뒤집히지 않게 한다.
+        jdbcClient.sql("""
+            SELECT id FROM route
+            WHERE id <= (SELECT route_id FROM route_version WHERE id = ?)
+            ORDER BY id FOR UPDATE
+            """).param(version).query(Long.class).list();
+        Set<Long> excludedIds = Set.copyOf(confirmed);
+        List<PendingKey> closing = keys.stream().filter(key -> excludedIds.contains(key.vehicleObservationId()))
+            .limit(budget).toList();
+        StringJoiner values = new StringJoiner(", ");
+        for (int index = 0; index < closing.size(); index++) {
+            values.add("(CAST(:observation%d AS bigint), CAST(:stop%d AS integer))".formatted(index, index));
+        }
+        // 잠금을 얻은 뒤 최신 조사/편도 상태를 다시 확인한다. PENDING 조건으로 재시도도 중복 갱신하지 않는다.
+        JdbcClient.StatementSpec query = jdbcClient.sql("""
+            WITH keys(observation_id, target_stop_order) AS MATERIALIZED (VALUES %s)
+            UPDATE forecast_evaluation evaluation
+            SET scoring_state = 'QUALITY_EXCLUDED', scored_at = CURRENT_TIMESTAMP
+            FROM keys
+            %s
+            WHERE evaluation.vehicle_observation_id = keys.observation_id
+              AND evaluation.target_stop_order = keys.target_stop_order
+              AND evaluation.route_version_id = :version AND source.route_version_id = :version
+              AND evaluation.scoring_state = 'PENDING' AND %s
+            """.formatted(values, EXCLUSION_SOURCE, CONFIRMED_EXCLUSION)).param("version", version);
+        for (int index = 0; index < closing.size(); index++) {
+            query = query.param("observation" + index, closing.get(index).vehicleObservationId())
+                .param("stop" + index, closing.get(index).targetStopOrder());
+        }
+        query.update();
+        return closing.size();
     }
 
     private List<PendingKey> findPendingKeys(final long routeVersionId, PendingKey after, final int limit) {
