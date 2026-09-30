@@ -27,7 +27,6 @@ const history = serverFrames["history.batch"].messages;
 const sentBody = clientFrames["message.send"].body;
 const LONG_HISTORY_COUNT = 20;
 const HALF_SHEET_HEIGHT = 439;
-const QUARTER_SHEET_HEIGHT = 220;
 const DRAG_START_NUDGE = 8;
 const CARD_GAP = 24;
 const HISTORY_BATCH_SIZE = 10;
@@ -471,9 +470,16 @@ test("조금만 끌고 놓으면 원래 단계로 돌아간다", async ({ page, 
   // then
   await expect(sheet(page)).toHaveAttribute("data-position", "half");
   await expect.poll(() => pixelGap(shownSheetHeight(page), HALF_SHEET_HEIGHT)).toBeLessThanOrEqual(1);
+
+  // when
+  await dropSheetHead(page, SMALL_DRAG_PX);
+
+  // then
+  await expect(sheet(page)).toHaveAttribute("data-position", "half");
+  await expect.poll(() => pixelGap(shownSheetHeight(page), HALF_SHEET_HEIGHT)).toBeLessThanOrEqual(1);
 });
 
-test("적당히 내리면 반의 반으로, 한 번 더 내리면 접히며 초점이 알약으로 간다", async ({ page, chat }) => {
+test("반 높이에서 적당히 내리면 중간 단계 없이 바로 접힌다", async ({ page, chat }) => {
   // given
   chat.enabled = true;
   await openReadyChat(page, chat.sockets);
@@ -482,17 +488,9 @@ test("적당히 내리면 반의 반으로, 한 번 더 내리면 접히며 초�
   await dropSheetHead(page, STEP_DRAG_PX);
 
   // then
-  await expect(sheet(page)).toHaveAttribute("data-position", "quarter");
-  await expect.poll(() => pixelGap(shownSheetHeight(page), QUARTER_SHEET_HEIGHT)).toBeLessThanOrEqual(1);
-  await expect.poll(() => pixelGap(composerBottom(page), phoneViewport.height)).toBeLessThanOrEqual(1);
-
-  // when
-  await dropSheetHead(page, STEP_DRAG_PX);
-
-  // then
   await expect(sheet(page)).toHaveAttribute("data-position", "collapsed");
   await page.clock.runFor(100);
-  await expect(launcher(page)).toBeFocused();
+  await expect(launcher(page)).not.toBeFocused();
 });
 
 test("전체에서 적당히 내리면 반으로 돌아가고, 전체에서 손잡이를 누르면 접힌다", async ({ page, chat }) => {
@@ -517,10 +515,10 @@ test("전체에서 적당히 내리면 반으로 돌아가고, 전체에서 손�
   // then
   await expect(sheet(page)).toHaveAttribute("data-position", "collapsed");
   await page.clock.runFor(100);
-  await expect(launcher(page)).toBeFocused();
+  await expect(launcher(page)).not.toBeFocused();
 });
 
-test("휴대폰 시트 머리의 조절 버튼은 손잡이 하나로, 반의 반에서 누르면 반, 전체 순으로 커지고 다시 열면 반 높이다", async ({
+test("휴대폰 시트 머리의 조절 버튼은 손잡이 하나로, 반에서 누르면 전체로 커지고 다시 열면 반 높이다", async ({
   page,
   chat,
 }) => {
@@ -529,13 +527,6 @@ test("휴대폰 시트 머리의 조절 버튼은 손잡이 하나로, 반의 �
   await openReadyChat(page, chat.sockets);
   await expect.poll(async () => (await edges(sheet(page))).width).toBe(phoneViewport.width);
   await expect(sheetHead(page).getByRole("button")).toHaveCount(1);
-  await dropSheetHead(page, STEP_DRAG_PX);
-  await expect(sheet(page)).toHaveAttribute("data-position", "quarter");
-
-  // when
-  await sheetHead(page).getByRole("button", { name: "채팅 크게 보기", exact: true }).click();
-
-  // then
   await expect(sheet(page)).toHaveAttribute("data-position", "half");
 
   // when
@@ -567,6 +558,93 @@ test("입력칸을 눌러도 시트 높이와 위치가 그대로다", async ({ 
   // then
   await expect(sheet(page)).toHaveAttribute("data-position", "half");
   await expect.poll(() => pixelGap(shownSheetHeight(page), HALF_SHEET_HEIGHT)).toBeLessThanOrEqual(1);
+});
+
+for (const method of ["드래그", "손잡이 클릭", "데스크톱 접기 클릭"] as const) {
+  test(`[${method}] 메시지 입력 후 접으면 알약에 포커스 테두리가 남지 않는다`, async ({ page, chat }) => {
+    // given
+    if (method === "데스크톱 접기 클릭") await page.setViewportSize({ width: 1440, height: 900 });
+    chat.enabled = true;
+    await openReadyChat(page, chat.sockets);
+    const input = page.getByRole("textbox", { name: "메시지", exact: true });
+    await input.click();
+    await input.pressSequentially("test");
+
+    // when
+    if (method === "드래그") {
+      await dropSheetHead(page, STEP_DRAG_PX);
+    } else {
+      if (method === "손잡이 클릭") {
+        await sheetHead(page).getByRole("button", { name: "채팅 크게 보기", exact: true }).click();
+      }
+      await sheetHead(page).getByRole("button", { name: "채팅 접기", exact: true }).click();
+    }
+    await page.clock.runFor(100);
+
+    // then
+    await expect(sheet(page)).toHaveAttribute("data-position", "collapsed");
+    await expect(launcher(page)).toBeVisible();
+    await expect(launcher(page)).not.toBeFocused();
+    await expect(launcher(page)).toHaveCSS("outline-style", "none");
+
+    // when
+    await launcher(page).click();
+
+    // then
+    await expect(input).toHaveValue("test");
+  });
+}
+
+for (const method of ["Escape", "손잡이 Enter", "데스크톱 접기 Enter"] as const) {
+  test(`키보드 ${method}로 접으면 알약에 포커스와 테두리가 돌아온다`, async ({ page, chat }) => {
+    // given
+    if (method === "데스크톱 접기 Enter") await page.setViewportSize({ width: 1440, height: 900 });
+    chat.enabled = true;
+    await openReadyChat(page, chat.sockets);
+    await page.clock.runFor(100);
+
+    // when
+    await page.keyboard.press("Tab");
+    if (method === "Escape") {
+      await page.getByRole("textbox", { name: "메시지", exact: true }).pressSequentially("test");
+      await page.keyboard.press("Escape");
+    } else {
+      if (method === "손잡이 Enter") {
+        await sheetHead(page).getByRole("button", { name: "채팅 크게 보기", exact: true }).press("Enter");
+      }
+      await sheetHead(page).getByRole("button", { name: "채팅 접기", exact: true }).press("Enter");
+    }
+    await page.clock.runFor(100);
+
+    // then
+    await expect(sheet(page)).toHaveAttribute("data-position", "collapsed");
+    await expect(launcher(page)).toBeFocused();
+    await expect(launcher(page)).toHaveCSS("outline-style", "solid");
+    await expect(launcher(page)).toHaveCSS("outline-width", "2px");
+  });
+}
+
+test.describe("터치 화면", () => {
+  test.use({ hasTouch: true });
+
+  test("메시지를 입력하고 손잡이를 탭해 접으면 알약에 포커스 테두리가 남지 않는다", async ({ page, chat }) => {
+    // given
+    chat.enabled = true;
+    await openReadyChat(page, chat.sockets);
+    const input = page.getByRole("textbox", { name: "메시지", exact: true });
+    await input.tap();
+    await input.pressSequentially("test");
+
+    // when
+    await sheetHead(page).getByRole("button", { name: "채팅 크게 보기", exact: true }).tap();
+    await sheetHead(page).getByRole("button", { name: "채팅 접기", exact: true }).tap();
+    await page.clock.runFor(100);
+
+    // then
+    await expect(sheet(page)).toHaveAttribute("data-position", "collapsed");
+    await expect(launcher(page)).not.toBeFocused();
+    await expect(launcher(page)).toHaveCSS("outline-style", "none");
+  });
 });
 
 test("연결 상태 띠가 끼었다 빠져도 마지막 메시지 위치가 그대로다", async ({ page, chat }) => {
