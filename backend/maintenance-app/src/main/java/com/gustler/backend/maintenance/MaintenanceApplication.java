@@ -1,17 +1,22 @@
 package com.gustler.backend.maintenance;
 
+import com.gustler.backend.forecasting.api.model.InspectModelBundle;
+import com.gustler.backend.forecasting.api.model.ModelLoadException;
 import com.gustler.backend.forecasting.api.quality.GetTripQualityStatus;
 import com.gustler.backend.forecasting.api.quality.PreviewTripQuality;
 import com.gustler.backend.forecasting.api.quality.ProcessTripQualityChunk;
 import com.gustler.backend.forecasting.api.quality.TripQualityChunkResult;
 import com.gustler.backend.forecasting.api.quality.TripQualityPreview;
 import com.gustler.backend.forecasting.api.quality.TripQualityStatus;
+import com.gustler.backend.maintenance.configuration.BundleInspectionCommandConfiguration;
 import com.gustler.backend.maintenance.configuration.MaintenanceConfiguration;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.transaction.CannotCreateTransactionException;
 
@@ -39,9 +44,33 @@ public final class MaintenanceApplication {
 
     static Object run(CliArguments arguments) {
         return switch (arguments.command()) {
+            case "bundle-check" -> bundleCheck(arguments);
             case "quality-preview", "quality-rebuild", "quality-status" -> quality(arguments);
             default -> throw new MaintenanceException("UNKNOWN_COMMAND");
         };
+    }
+
+    private static Object bundleCheck(CliArguments arguments) {
+        String directory = arguments.requiredPath("directory").toString();
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.register(BundleInspectionCommandConfiguration.class);
+            context.refresh();
+            var inspected = context.getBean(InspectModelBundle.class).inspect(directory);
+            return Map.of(
+                "validation", "PASSED",
+                "activated", false,
+                "accuracyEvaluated", false,
+                "releaseId", inspected.releaseId(),
+                "bundleDigest", inspected.bundleDigest(),
+                "featureContractVersion", inspected.featureContractVersion(),
+                "dataThrough", inspected.dataThrough(),
+                "routes", inspected.routes());
+        } catch (ModelLoadException error) {
+            Matcher code = Pattern.compile("^\\[([A-Z][A-Z0-9_]*)\\]")
+                .matcher(error.getMessage() == null ? "" : error.getMessage());
+            throw new MaintenanceException(
+                code.find() ? "BUNDLE_REJECTED_" + code.group(1) : "BUNDLE_REJECTED", error);
+        }
     }
 
     private static Object quality(CliArguments arguments) {
