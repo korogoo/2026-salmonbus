@@ -33,6 +33,9 @@ public interface SameDayFullOutcomesStore {
         SettledForecast settled
     );
 
+    /** 이미 초기화된 날짜의 누계에 새 정산 증가분을 더한다. 호출자는 노선 잠금을 유지한다. */
+    void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments);
+
     /** 저장된 누계 대신 현재 품질 조건에 맞는 평가 결과에서 직접 집계한다. */
     List<SameDayFullOutcomeCount> countFromSource(
         long routeId,

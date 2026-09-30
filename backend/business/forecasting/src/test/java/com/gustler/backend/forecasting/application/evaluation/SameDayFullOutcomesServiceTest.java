@@ -103,7 +103,7 @@ class SameDayFullOutcomesServiceTest {
     }
 
     @Test
-    void 집계가_있으면_정산된_예보를_하나씩_더한다() {
+    void 같은_노선과_도착일과_예보거리의_정산을_한번에_더한다() {
         // given
         when(repository.findCounts(ROUTE_3330, DAY)).thenReturn(List.of(TALLY));
         SettledForecast full = settledOn(ROUTE_3330, SETTLED_THROUGH, 0);
@@ -113,8 +113,8 @@ class SameDayFullOutcomesServiceTest {
         service.record(List.of(full, notFull));
 
         // then
-        verify(repository).add(full);
-        verify(repository).add(notFull);
+        verify(repository).addCounts(ROUTE_3330, DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 1, 0.82, SETTLED_THROUGH)));
         verify(repository, never()).countFromSource(anyLong(), any(), any());
     }
 
@@ -129,7 +129,7 @@ class SameDayFullOutcomesServiceTest {
         // then
         verify(repository, never()).upsertCounts(anyLong(), any(), any());
         verify(repository, never()).countFromSource(anyLong(), any(), any());
-        verify(repository, never()).add(any());
+        verify(repository, never()).addCounts(anyLong(), any(), any());
     }
 
     @Test
@@ -144,10 +144,11 @@ class SameDayFullOutcomesServiceTest {
         service.record(List.of(on3330, on1650));
 
         // then
-        verify(repository).add(on3330);
+        verify(repository).addCounts(ROUTE_3330, DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, 0.41, SETTLED_THROUGH)));
         verify(repository, never()).upsertCounts(anyLong(), any(), any());
         verify(repository, never()).countFromSource(anyLong(), any(), any());
-        verify(repository, never()).add(on1650);
+        verify(repository, never()).addCounts(eq(ROUTE_1650), any(), any());
     }
 
     @Test
@@ -164,10 +165,34 @@ class SameDayFullOutcomesServiceTest {
         service.record(List.of(today, lateSettled));
 
         // then
-        verify(repository).add(today);
+        verify(repository).addCounts(ROUTE_3330, DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, 0.41, SETTLED_THROUGH)));
         verify(repository, never()).upsertCounts(anyLong(), any(), any());
         verify(repository, never()).countFromSource(anyLong(), any(), any());
-        verify(repository, never()).add(lateSettled);
+        verify(repository, never()).addCounts(eq(ROUTE_3330), eq(yesterday), any());
+    }
+
+    @Test
+    void 도착_순서가_섞여도_가장_늦은_도착시각을_유지한다() {
+        when(repository.findCounts(ROUTE_3330, DAY)).thenReturn(List.of(TALLY));
+        service.record(List.of(settledOn(ROUTE_3330, SETTLED_THROUGH.plusSeconds(60), 0),
+            settledOn(ROUTE_3330, SETTLED_THROUGH, 7)));
+        verify(repository).addCounts(ROUTE_3330, DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 1, 0.82, SETTLED_THROUGH.plusSeconds(60))));
+    }
+
+    @Test
+    void KST_자정_전후의_정산을_다른_날짜로_묶는다() {
+        Instant before = Instant.parse("2026-08-19T14:59:59Z");
+        Instant after = before.plusSeconds(1);
+        SeoulDay nextDay = SeoulDay.containing(after);
+        when(repository.findCounts(ROUTE_3330, DAY)).thenReturn(List.of(TALLY));
+        when(repository.findCounts(ROUTE_3330, nextDay)).thenReturn(List.of(TALLY));
+        service.record(List.of(settledOn(ROUTE_3330, before, 0), settledOn(ROUTE_3330, after, 7)));
+        verify(repository).addCounts(ROUTE_3330, DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, 0.41, before)));
+        verify(repository).addCounts(ROUTE_3330, nextDay, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 0, 0.41, after)));
     }
 
     private static SettledForecast settledOn(

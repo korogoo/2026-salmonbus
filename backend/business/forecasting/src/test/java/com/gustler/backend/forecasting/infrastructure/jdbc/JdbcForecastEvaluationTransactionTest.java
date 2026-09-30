@@ -387,6 +387,12 @@ class JdbcForecastEvaluationTransactionTest {
         }
 
         @Override
+        public void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments) {
+            delegate.addCounts(routeId, day, increments);
+            throw new CalibrationWriteFailure();
+        }
+
+        @Override
         public List<SameDayFullOutcomeCount> countFromSource(final long routeId, SeoulDay day, Instant until) {
             return delegate.countFromSource(routeId, day, until);
         }

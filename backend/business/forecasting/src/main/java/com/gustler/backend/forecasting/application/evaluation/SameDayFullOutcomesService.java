@@ -51,10 +51,25 @@ public class SameDayFullOutcomesService {
                 // 부분 합계를 만들면 초기화 완료로 오인한다. 원본은 이후 초기화에서 함께 센다.
                 continue;
             }
-            for (SettledForecast forecast : group.getValue()) {
-                repository.add(forecast);
-            }
+            repository.addCounts(key.routeId(), key.day(), incrementsOf(group.getValue()));
         }
+    }
+
+    private static List<SameDayFullOutcomeCount> incrementsOf(List<SettledForecast> settled) {
+        Map<Integer, SameDayFullOutcomeCount> increments = new LinkedHashMap<>();
+        for (SettledForecast forecast : settled) {
+            SameDayFullOutcomeCount next = new SameDayFullOutcomeCount(
+                forecast.stopsToTarget(), 1, forecast.wasFull() ? 1 : 0,
+                forecast.rawFullChance(), forecast.arrivedAt());
+            increments.merge(forecast.stopsToTarget(), next, (previous, current) ->
+                new SameDayFullOutcomeCount(previous.stopsToTarget(),
+                    previous.rowCount() + current.rowCount(),
+                    previous.actualFullCount() + current.actualFullCount(),
+                    previous.rawFullChanceSum() + current.rawFullChanceSum(),
+                    previous.settledThrough().isAfter(current.settledThrough())
+                        ? previous.settledThrough() : current.settledThrough()));
+        }
+        return List.copyOf(increments.values());
     }
 
     private static Map<RouteDay, List<SettledForecast>> groupByRouteDay(
