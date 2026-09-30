@@ -25,7 +25,6 @@ import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcModelDeploymentRe
 import com.gustler.backend.forecasting.support.ForecastingIntegrationTest;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -328,29 +327,52 @@ class BundleActivationTest {
     }
 
     @Test
-    void 학습_시각을_못_읽는_계수_파일은_처음_올릴_때_기동_적재를_멈춘다() {
-        // given
-        BundleFiles files = DummyBundle.valid().put("dataThrough", "2026-08-30 14:59:56").writeTo(directory);
+    void 잘못된_학습_시각은_최초_기동에서_거절된다() {
+        BundleFiles files = DummyBundle.valid().put("dataThrough", "2026-08-30 14:59:56")
+            .writeTo(directory);
 
-        // when, then
-        assertThatThrownBy(() -> startUp(files, false)).isInstanceOf(DateTimeParseException.class);
+        ModelLoadResult actual = startUp(files, false);
+
+        assertThat(actual).isInstanceOf(ModelLoadResult.Rejected.class);
+        assertThat(actual.toString()).contains(BundleCheck.DATA_THROUGH.name());
         assertThat(deploymentCount()).isZero();
+        assertThat(resolver().resolveActive()).isEmpty();
     }
 
     @Test
-    void 학습_시각은_다시_올릴_때가_아니라_예보에_쓸_것을_고를_때_읽는다() {
-        // given
+    void 잘못된_학습_시각은_재기동에서도_메모리에_올리지_않는다() {
         activation().activate(filesOf(DummyBundle.valid().writeTo(directory)));
+        ActiveModelDeployment original = deployments.findActive().orElseThrow();
         bundles = new LoadedModelRegistry();
         BundleFiles unreadable = DummyBundle.valid().put("dataThrough", "2026-08-30 14:59:56")
             .writeTo(directoryUnder("unreadable"));
 
-        // when
         ModelLoadResult actual = startUp(unreadable, false);
 
-        // then
-        assertThat(actual).isEqualTo(new ModelLoadResult.Reloaded("dummy-release-0001"));
-        assertThatThrownBy(() -> resolver().resolveActive()).isInstanceOf(DateTimeParseException.class);
+        assertThat(actual).isInstanceOf(ModelLoadResult.Rejected.class);
+        assertThat(actual.toString()).contains(BundleCheck.DATA_THROUGH.name());
+        assertThat(deploymentCount()).isEqualTo(1);
+        assertThat(deployments.findActive()).contains(original);
+        assertThat(bundles.find(original.bundleDigest())).isEmpty();
+        assertThat(resolver().resolveActive()).isEmpty();
+    }
+
+    @Test
+    void 길이를_초과한_번들은_배포_행과_기존_계수를_변경하지_않는다() {
+        activation().activate(filesOf(DummyBundle.valid().writeTo(directory)));
+        ActiveModelDeployment original = deployments.findActive().orElseThrow();
+        var originalBundle = bundles.find(original.bundleDigest()).orElseThrow();
+        BundleFiles invalid = DummyBundle.valid().put("featureContractVersion", "v".repeat(41))
+            .writeTo(directoryUnder("too-long"));
+
+        ModelLoadResult actual = startUp(invalid, true);
+
+        assertThat(actual).isInstanceOf(ModelLoadResult.Rejected.class);
+        assertThat(actual.toString()).contains(BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH.name());
+        assertThat(deploymentCount()).isEqualTo(1);
+        assertThat(deployments.findActive()).contains(original);
+        assertThat(bundles.find(original.bundleDigest())).contains(originalBundle);
+        assertThat(resolver().resolveActive()).isPresent();
     }
 
     /** 예보 경로는 모델 포트로 부르는데, 이 테스트는 열 31개를 곧바로 넣어 보려고 예측기를 꺼낸다. */

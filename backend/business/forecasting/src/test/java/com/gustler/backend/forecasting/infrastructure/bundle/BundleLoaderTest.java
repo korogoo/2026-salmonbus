@@ -44,6 +44,45 @@ class BundleLoaderTest {
     }
 
     @Test
+    void 계산_버전_40자는_허용하고_41자는_거절한다() {
+        BundleFiles accepted = DummyBundle.valid()
+            .put("featureContractVersion", "v".repeat(40)).writeTo(directory);
+        assertThat(BundleLoader.load(accepted).manifest().featureContractVersion())
+            .isEqualTo("v".repeat(40));
+
+        assertRejectedBy(BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH,
+            loading(DummyBundle.valid().put("featureContractVersion", "v".repeat(41))));
+    }
+
+    @Test
+    void 출시_식별자_80자는_허용하고_81자는_거절한다() {
+        BundleFiles accepted = DummyBundle.valid().put("releaseId", "r".repeat(80)).writeTo(directory);
+        assertThat(BundleLoader.load(accepted).manifest().releaseId()).isEqualTo("r".repeat(80));
+
+        assertRejectedBy(BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH,
+            loading(DummyBundle.valid().put("releaseId", "r".repeat(81))));
+    }
+
+    @Test
+    void 식별자_길이는_유니코드_문자_수로_검사한다() {
+        String supplementaryCharacter = new String(Character.toChars(0x1F68C));
+        String acceptedVersion = supplementaryCharacter.repeat(40);
+        BundleFiles accepted = DummyBundle.valid()
+            .put("featureContractVersion", acceptedVersion).writeTo(directory);
+        assertThat(BundleLoader.load(accepted).manifest().featureContractVersion())
+            .isEqualTo(acceptedVersion);
+
+        assertRejectedBy(BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH,
+            loading(DummyBundle.valid().put("featureContractVersion", supplementaryCharacter.repeat(41))));
+    }
+
+    @Test
+    void 학습_종료_시각을_읽을_수_없으면_로딩에서_거절한다() {
+        assertRejectedBy(BundleCheck.DATA_THROUGH,
+            loading(DummyBundle.valid().put("dataThrough", "2026-08-30 14:59:56")));
+    }
+
+    @Test
     void 설명_파일이_symlink_면_거절한다() throws IOException {
         // given
         BundleFiles files = DummyBundle.valid().writeTo(directory);

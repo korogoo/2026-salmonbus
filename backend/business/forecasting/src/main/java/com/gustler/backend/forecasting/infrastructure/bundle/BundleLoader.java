@@ -4,6 +4,8 @@ import com.gustler.backend.forecasting.domain.model.Sha256;
 
 import com.gustler.backend.forecasting.domain.model.SeatForecastDesignMatrix;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Arrays;
@@ -53,6 +55,7 @@ public final class BundleLoader {
 
         BundleManifest manifest = BundleManifestReader.read(manifestContent);
         checkIdentity(manifest);
+        checkDeploymentMetadata(manifest);
         checkScope(manifest);
         checkWeightsDigest(manifest, weightsContent);
         checkGoldenVectorDigest(manifest);
@@ -75,6 +78,30 @@ public final class BundleLoader {
             !manifest.routeReferenceVersion().isBlank(), "판 이름이 비어 있다");
         BundleCheck.ROUTE_REFERENCE.require(
             manifest.routeReferenceDigest().length() == 64, manifest.routeReferenceDigest());
+    }
+
+    /** DB 저장이나 메모리 적재 전에 배포 메타데이터를 확인한다. */
+    private static void checkDeploymentMetadata(
+        BundleManifest manifest
+    ) {
+        checkIdentifierLength("releaseId", manifest.releaseId(), 80);
+        checkIdentifierLength("featureContractVersion", manifest.featureContractVersion(), 40);
+        try {
+            Instant.parse(manifest.dataThrough());
+        } catch (DateTimeParseException error) {
+            throw BundleCheck.DATA_THROUGH.reject("dataThrough 는 Instant 형식이어야 한다");
+        }
+    }
+
+    private static void checkIdentifierLength(
+        String field,
+        String value,
+        final int maximum
+    ) {
+        final int characters = value.codePointCount(0, value.length());
+        BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH.require(
+            characters <= maximum,
+            "%s: %d자, 최대 %d자".formatted(field, characters, maximum));
     }
 
     private static void checkScope(
