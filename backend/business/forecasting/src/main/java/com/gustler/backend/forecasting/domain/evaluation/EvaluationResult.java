@@ -25,7 +25,7 @@ public record EvaluationResult(
                     throw new IllegalArgumentException("좌석 결측 결과에는 잔여석을 기록할 수 없습니다");
                 }
             }
-            case SKIPPED, LOST -> {
+            case SKIPPED, LOST, QUALITY_EXCLUDED -> {
                 if (arrivalObservationId != null || seatsOnArrival != null) {
                     throw new IllegalArgumentException("도착을 확인하지 못한 결과에는 도착 관측과 잔여석을 기록할 수 없습니다");
                 }

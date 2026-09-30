@@ -249,6 +249,49 @@ class JdbcForecastEvaluationTransactionTest {
         }
     }
 
+    @Test
+    void 제외_처리가_잠금을_기다리는_동안_재조사가_시작되면_대기를_유지한다() throws Exception {
+        jdbc.sql("UPDATE vehicle_one_way_trip SET status='EXCLUDED' WHERE start_observation_id=?")
+            .param(sourceObservationId).update();
+        jdbc.sql("""
+            INSERT INTO trip_quality_rebuild(route_version_id,vehicle_id,until_at,completed,phase)
+            VALUES(?,'evaluation-vehicle',?,true,'DONE')
+            """).params(routeVersionId, offset(SCORED_AT)).update();
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch closeStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger holding = new AtomicInteger();
+        AtomicInteger waiting = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            var investigation = executor.submit(() -> inTransaction(() -> {
+                holding.set(connectionId());
+                qualityAccess.lockByRoute(routeId);
+                jdbc.sql("UPDATE trip_quality_rebuild SET completed=false,phase='REPLAY' WHERE route_version_id=?")
+                    .param(routeVersionId).update();
+                locked.countDown();
+                await(release);
+                return true;
+            }));
+            var closing = executor.submit(() -> {
+                await(locked);
+                return inTransaction(() -> {
+                    waiting.set(connectionId());
+                    closeStarted.countDown();
+                    return evaluations.findPending(routeVersionId, 10);
+                });
+            });
+            await(closeStarted);
+            awaitDatabaseLock(waiting.get(), holding.get());
+            release.countDown();
+            investigation.get(10, TimeUnit.SECONDS);
+            assertThat(closing.get(10, TimeUnit.SECONDS)).isEmpty();
+            assertThat(evaluationState()).isEqualTo("PENDING");
+        } finally {
+            locked.countDown(); closeStarted.countDown(); release.countDown(); stop(executor);
+        }
+    }
+
     private void initializeSameDayOutcomes() {
         inTransaction(() -> {
             qualityAccess.lockByRoute(routeId);
@@ -383,6 +426,12 @@ class JdbcForecastEvaluationTransactionTest {
         @Override
         public void add(SettledForecast settled) {
             delegate.add(settled);
+            throw new CalibrationWriteFailure();
+        }
+
+        @Override
+        public void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments) {
+            delegate.addCounts(routeId, day, increments);
             throw new CalibrationWriteFailure();
         }
 

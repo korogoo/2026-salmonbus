@@ -157,7 +157,7 @@ class SameDayTransactionBoundaryTest {
             written.countDown();
             await(release);
             return null;
-        }).when(countsSpy).add(any());
+        }).when(countsSpy).addCounts(anyLong(), any(), any());
         Future<?> running = workers.submit(settlement::settleArrivalLabels);
         try {
             await(written);
@@ -177,12 +177,12 @@ class SameDayTransactionBoundaryTest {
             call.callRealMethod();
             timeout();
             return null;
-        }).when(countsSpy).add(any());
+        }).when(countsSpy).addCounts(anyLong(), any(), any());
 
         assertThatThrownBy(settlement::settleArrivalLabels).isInstanceOf(QueryTimeoutException.class);
         assertUnsettled();
 
-        doAnswer(call -> call.callRealMethod()).when(countsSpy).add(any());
+        doAnswer(call -> call.callRealMethod()).when(countsSpy).addCounts(anyLong(), any(), any());
         settlement.settleArrivalLabels();
         settlement.settleArrivalLabels();
         assertSettledOnce();

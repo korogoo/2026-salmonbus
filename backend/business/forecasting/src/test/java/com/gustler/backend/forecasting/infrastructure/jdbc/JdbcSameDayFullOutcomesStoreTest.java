@@ -1,6 +1,7 @@
 package com.gustler.backend.forecasting.infrastructure.jdbc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -91,6 +92,36 @@ class JdbcSameDayFullOutcomesStoreTest {
         modelDeploymentId = insertModelDeployment();
         observationBatchId = insertObservationBatch(routeVersionId, "2026-08-19T11:14", RESPONSE_RECEIVED_AT);
         vehicleObservationId = insertObservation(observationBatchId, routeVersionId, VEHICLE_204000206, 0, PASSED_STOP_ORDER);
+    }
+
+    @Test
+    void 여러_정산의_증가분을_기존_합계에_더한다() {
+        repository.upsertCounts(routeId, ARRIVAL_DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 10, 4, 2.0, ARRIVED_AT)));
+        repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1))));
+        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 13, 6, 3.0, ARRIVED_AT));
+    }
+
+    @Test
+    void 이전_품질_버전의_합계는_새_증가분으로_교체한다() {
+        repository.upsertCounts(routeId, ARRIVAL_DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 10, 4, 2.0, ARRIVED_AT)));
+        jdbcClient.sql("UPDATE route_data_quality SET quality_revision = quality_revision + 1 WHERE route_id = ?")
+            .param(routeId).update();
+        repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1))));
+        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+            new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1)));
+    }
+
+    @Test
+    void 빈_초기화_표시는_정산_증가분으로_저장하지_않는다() {
+        assertThatThrownBy(() -> repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+            new SameDayFullOutcomeCount(0, 0, 0, 0, ARRIVAL_DAY.start()))))
+            .hasRootCauseInstanceOf(IllegalArgumentException.class);
+        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).isEmpty();
     }
 
     @Test
