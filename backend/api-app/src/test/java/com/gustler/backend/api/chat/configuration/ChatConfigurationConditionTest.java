@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.MapPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 import tools.jackson.databind.ObjectMapper;
@@ -39,6 +40,7 @@ class ChatConfigurationConditionTest {
         .withUserConfiguration(ChatConfiguration.class)
         .withBean(ObjectMapper.class, () -> JsonMapper.builder().build())
         .withBean(Clock.class, Clock::systemUTC)
+        .withBean(JdbcClient.class, () -> mock(JdbcClient.class))
         .withInitializer(context -> context.getServletContext()
             .setAttribute(ServerContainer.class.getName(), mock(ServerContainer.class)));
 
@@ -136,6 +138,28 @@ class ChatConfigurationConditionTest {
 
         // then
         assertThat(output.getOut()).doesNotContain(MISSING_URI_WARNING);
+    }
+
+    @Test
+    void 연결_수_상한은_설정값으로_바꿀_수_있다() throws IOException {
+        // given
+        String uri = "mongodb://127.0.0.1:" + closedPort() + "/?serverSelectionTimeoutMS=60000";
+
+        // when & then
+        contextRunner.withPropertyValues(
+                "chat.enabled=true",
+                "chat.mongodb-uri=" + uri,
+                "chat.max-connections=3",
+                "chat.max-connections-per-address=2"
+            )
+            .run(context -> {
+                ChatConnectionLimiter limiter = context.getBean(ChatConnectionLimiter.class);
+                assertThat(limiter.tryAcquire("a", "198.51.100.1")).isTrue();
+                assertThat(limiter.tryAcquire("b", "198.51.100.1")).isTrue();
+                assertThat(limiter.tryAcquire("c", "198.51.100.1")).isFalse();
+                assertThat(limiter.tryAcquire("d", "198.51.100.2")).isTrue();
+                assertThat(limiter.tryAcquire("e", "198.51.100.3")).isFalse();
+            });
     }
 
     private void assertChatIsOff(AssertableWebApplicationContext context) {
