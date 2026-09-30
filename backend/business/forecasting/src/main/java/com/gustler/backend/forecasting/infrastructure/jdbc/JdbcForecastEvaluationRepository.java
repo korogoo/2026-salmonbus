@@ -8,7 +8,13 @@ import com.gustler.backend.forecasting.domain.evaluation.SettledEvaluation;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.StringJoiner;
 import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -90,6 +96,60 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                       WHERE target_stop.route_version_id = forecast.route_version_id
                         AND target_stop.stop_order = forecast.target_stop_order), false) AS target_boarding_allowed
         """.formatted(EligibleObservationSql.ARRIVAL_MATCHES_SOURCE);
+
+    private static final int SETTLEMENT_BATCH_SIZE = 100;
+
+    /** 같은 관측을 쓰는 여러 예보의 품질 조회를 묶음 안에서 한 번만 수행한다. */
+    private static final String COMPLETE_BATCH = """
+        WITH input(vehicleObservationId, targetStopOrder, arrivalObservationId, scoringState, seatsOnArrival, scoredAt)
+            AS MATERIALIZED (VALUES %s),
+        eligible AS MATERIALIZED (
+            SELECT observation.* FROM forecast_eligible_observation observation
+            JOIN (
+                SELECT vehicleObservationId AS id FROM input
+                UNION
+                SELECT arrivalObservationId FROM input WHERE arrivalObservationId IS NOT NULL
+            ) keys ON keys.id = observation.id
+        )
+        UPDATE forecast_evaluation evaluation
+        SET scoring_state = input.scoringState,
+            arrival_observation_id = input.arrivalObservationId,
+            seats_on_arrival = input.seatsOnArrival,
+            scored_at = input.scoredAt,
+            arrived_at = arrival_batch.response_received_at,
+            arrival_route_version_id = arrival.route_version_id,
+            arrival_vehicle_id = arrival.vehicle_id,
+            arrival_stop_order = arrival.stop_order,
+            arrival_running_state = arrival.running_state,
+            arrival_remaining_seats = arrival.remaining_seats,
+            arrival_seat_unknown_reason = arrival.seat_unknown_reason,
+            arrival_vehicle_trip_key = arrival.vehicle_trip_key,
+            arrival_quality_direction = arrival.quality_direction
+        FROM input
+        JOIN seat_forecast forecast ON forecast.vehicle_observation_id = input.vehicleObservationId
+         AND forecast.target_stop_order = input.targetStopOrder
+        JOIN route_version version ON version.id = forecast.route_version_id
+        JOIN route_data_quality quality ON quality.route_id = version.route_id
+        JOIN eligible source ON source.id = forecast.vehicle_observation_id
+        LEFT JOIN eligible arrival ON arrival.id = input.arrivalObservationId
+        LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
+        WHERE evaluation.vehicle_observation_id = input.vehicleObservationId
+          AND evaluation.target_stop_order = input.targetStopOrder
+          AND evaluation.scoring_state = 'PENDING'
+          AND forecast.vehicle_observation_id = evaluation.vehicle_observation_id
+          AND forecast.target_stop_order = evaluation.target_stop_order
+          AND (CAST(input.arrivalObservationId AS bigint) IS NULL OR (
+              arrival.id IS NOT NULL AND %s))
+        RETURNING version.route_id, forecast.route_version_id, evaluation.vehicle_observation_id,
+                  evaluation.target_stop_order, forecast.stops_to_target, forecast.seat_full_chance_raw,
+                  evaluation.arrival_observation_id, evaluation.arrived_at, evaluation.seats_on_arrival,
+                  evaluation.scoring_state, evaluation.scored_at,
+                  forecast.quality_revision = quality.quality_revision AS usable_for_calibration,
+                  source.vehicle_id AS prediction_vehicle_id, source.remaining_seats AS prediction_remaining_seats,
+                  COALESCE((SELECT target_stop.boarding_allowed FROM route_stop target_stop
+                      WHERE target_stop.route_version_id = forecast.route_version_id
+                        AND target_stop.stop_order = forecast.target_stop_order), false) AS target_boarding_allowed
+        """;
 
     private final JdbcClient jdbcClient;
 
@@ -178,6 +238,51 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public List<SettledEvaluation> settle(List<ForecastEvaluation> evaluations) {
+        if (evaluations.stream().anyMatch(evaluation -> evaluation.state() == ScoringState.PENDING)) {
+            throw new IllegalArgumentException("완료된 평가만 저장할 수 있다");
+        }
+        Map<PendingKey, Integer> positions = new HashMap<>();
+        for (int index = 0; index < evaluations.size(); index++) {
+            ForecastEvaluation evaluation = evaluations.get(index);
+            PendingKey key = new PendingKey(evaluation.vehicleObservationId(), evaluation.targetStopOrder());
+            if (positions.put(key, index) != null) {
+                // 첫 입력이 품질 조건에 탈락하면 다음 입력이 저장될 수 있어 순차 의미를 보존한다.
+                return settleIndividually(evaluations);
+            }
+        }
+        List<SettledEvaluation> settled = new ArrayList<>();
+        for (int start = 0; start < evaluations.size(); start += SETTLEMENT_BATCH_SIZE) {
+            List<ForecastEvaluation> batch = evaluations.subList(start,
+                Math.min(start + SETTLEMENT_BATCH_SIZE, evaluations.size()));
+            settled.addAll(settleBatch(batch));
+        }
+        settled.sort(Comparator.comparingInt(result -> positions.get(
+            new PendingKey(result.vehicleObservationId(), result.targetStopOrder()))));
+        return List.copyOf(settled);
+    }
+
+    private List<SettledEvaluation> settleBatch(List<ForecastEvaluation> batch) {
+        StringJoiner values = new StringJoiner(", ");
+        for (int index = 0; index < batch.size(); index++) {
+            values.add(("(CAST(:source%d AS bigint), CAST(:target%d AS integer), CAST(:arrival%d AS bigint), "
+                + "CAST(:state%d AS varchar), CAST(:seats%d AS integer), CAST(:at%d AS timestamptz))")
+                .formatted(index, index, index, index, index, index));
+        }
+        JdbcClient.StatementSpec query = jdbcClient.sql(COMPLETE_BATCH.formatted(
+            values, EligibleObservationSql.ARRIVAL_MATCHES_SOURCE));
+        for (int index = 0; index < batch.size(); index++) {
+            ForecastEvaluation evaluation = batch.get(index);
+            query = query.param("source" + index, evaluation.vehicleObservationId())
+                .param("target" + index, evaluation.targetStopOrder())
+                .param("arrival" + index, evaluation.result().arrivalObservationId())
+                .param("state" + index, evaluation.state().name())
+                .param("seats" + index, evaluation.result().seatsOnArrival())
+                .param("at" + index, offsetOf(evaluation.scoredAt()));
+        }
+        return query.query(JdbcForecastEvaluationRepository::settledEvaluationOf).list();
+    }
+
+    private List<SettledEvaluation> settleIndividually(List<ForecastEvaluation> evaluations) {
         if (evaluations.isEmpty()) {
             return List.of();
         }
@@ -190,7 +295,14 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                 .param("scoringState", evaluation.state().name())
                 .param("seatsOnArrival", evaluation.result().seatsOnArrival())
                 .param("scoredAt", offsetOf(evaluation.scoredAt()))
-                .query((row, index) -> new SettledEvaluation(row.getLong("route_id"), row.getLong("route_version_id"),
+                .query(JdbcForecastEvaluationRepository::settledEvaluationOf)
+                .list());
+        }
+        return List.copyOf(newlySettled);
+    }
+
+    private static SettledEvaluation settledEvaluationOf(ResultSet row, int index) throws SQLException {
+        return new SettledEvaluation(row.getLong("route_id"), row.getLong("route_version_id"),
                     row.getLong("vehicle_observation_id"), row.getInt("target_stop_order"),
                     row.getInt("stops_to_target"), row.getDouble("seat_full_chance_raw"),
                     ScoringState.valueOf(row.getString("scoring_state")),
@@ -199,10 +311,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                     row.getObject("scored_at", OffsetDateTime.class).toInstant(),
                     row.getBoolean("usable_for_calibration"), row.getString("prediction_vehicle_id"),
                     row.getObject("prediction_remaining_seats", Integer.class),
-                    row.getBoolean("target_boarding_allowed")))
-                .list());
-        }
-        return List.copyOf(newlySettled);
+                    row.getBoolean("target_boarding_allowed"));
     }
 
     private JdbcClient.StatementSpec parameters(String sql, ForecastEvaluation evaluation) {

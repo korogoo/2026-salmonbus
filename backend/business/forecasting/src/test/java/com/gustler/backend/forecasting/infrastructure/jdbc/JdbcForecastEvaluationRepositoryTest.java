@@ -95,6 +95,54 @@ class JdbcForecastEvaluationRepositoryTest {
     }
 
     @Test
+    void 묶음_경계_전후의_정산을_빠짐없이_저장한다() {
+        var inputs = new java.util.ArrayList<ForecastEvaluation>();
+        for (int index = 0; index < 101; index++) {
+            long observation = insertObservation(observationBatchId, "batch-test-" + index, index + 1, PASSED_STOP_ORDER);
+            saveForecasts(List.of(new SeatForecast(observation, routeVersionId, TARGET_STOP_ORDER, STOPS_TO_TARGET,
+                modelDeploymentId, DEMAND_STATISTICS_REVISION, 0.41, 0.38, 12.5, GENERATED_AT)));
+            inputs.add(ForecastEvaluation.completed(observation, TARGET_STOP_ORDER, new ArrivalLabel.Skipped(), SCORED_AT));
+        }
+        assertThat(evaluationRepository.settle(inputs)).extracting(SettledEvaluation::vehicleObservationId)
+            .containsExactlyElementsOf(inputs.stream().map(ForecastEvaluation::vehicleObservationId).toList());
+        assertThat(evaluationRepository.settle(inputs)).isEmpty();
+    }
+
+    @Test
+    void 같은_평가가_입력에_반복돼도_한번만_반환한다() {
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        var input = ForecastEvaluation.completed(vehicleObservationId, TARGET_STOP_ORDER, new ArrivalLabel.Skipped(), SCORED_AT);
+        assertThat(evaluationRepository.settle(List.of(input, input))).hasSize(1);
+    }
+
+    @Test
+    void 첫_중복_입력이_품질_조건에_탈락하면_다음_입력으로_닫는다() {
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        long batch = insertObservationBatch("duplicate-arrival", ARRIVAL_RESPONSE_RECEIVED_AT);
+        long wrong = insertObservation(batch, "different-vehicle", 0, ARRIVAL_STOP_ORDER);
+        long right = insertObservation(batch, VEHICLE_204000206, 1, ARRIVAL_STOP_ORDER);
+        var invalid = ForecastEvaluation.completed(vehicleObservationId, TARGET_STOP_ORDER,
+            new ArrivalLabel.Settled(wrong, 0), SCORED_AT);
+        var valid = ForecastEvaluation.completed(vehicleObservationId, TARGET_STOP_ORDER,
+            new ArrivalLabel.Settled(right, 0), SCORED_AT);
+        assertThat(evaluationRepository.settle(List.of(invalid, valid)))
+            .extracting(SettledEvaluation::arrivalObservationId).containsExactly(right);
+    }
+
+    @Test
+    void 같은_관측의_여러_예보도_도착_근거를_각각_저장한다() {
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT),
+            forecastOf(NEXT_TARGET_STOP_ORDER, STOPS_TO_NEXT_TARGET, GENERATED_AT)));
+        long batch = insertObservationBatch("shared-arrival", ARRIVAL_RESPONSE_RECEIVED_AT);
+        long arrival = insertObservation(batch, VEHICLE_204000206, 0, NEXT_TARGET_STOP_ORDER);
+        var result = evaluationRepository.settle(List.of(
+            ForecastEvaluation.completed(vehicleObservationId, TARGET_STOP_ORDER, new ArrivalLabel.Settled(arrival, 0), SCORED_AT),
+            ForecastEvaluation.completed(vehicleObservationId, NEXT_TARGET_STOP_ORDER, new ArrivalLabel.SeatMissing(arrival), SCORED_AT)));
+        assertThat(result).extracting(SettledEvaluation::arrivalObservationId).containsExactly(arrival, arrival);
+        assertThat(result).extracting(SettledEvaluation::seatsOnArrival).containsExactly(0, null);
+    }
+
+    @Test
     void 아직_안_닫힌_예보만_회수_대상으로_읽는다() {
         // given
         saveForecasts(List.of(
