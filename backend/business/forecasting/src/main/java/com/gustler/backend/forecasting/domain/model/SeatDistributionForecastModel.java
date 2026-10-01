@@ -2,7 +2,7 @@ package com.gustler.backend.forecasting.domain.model;
 
 
 /**
- * 예보 재료를 설계행렬 31열로 펴서 좌석 분포 계산에 넘긴다.
+ * 예보 재료를 번들의 입력 규칙으로 펴서 좌석 분포 계산에 넘긴다.
  *
  * <p>예보 경로와 계수 계산 사이를 잇는 자리다. 재료에서 열을 만드는 것은 설계행렬이 하고,
  * 열에서 확률을 내는 것은 예측기가 한다. 여기는 그 둘을 붙이고 노선 이름을 옮기기만 한다.
@@ -16,19 +16,32 @@ package com.gustler.backend.forecasting.domain.model;
 public final class SeatDistributionForecastModel implements SeatForecastModel {
 
     private final SeatDistributionPredictor predictor;
+    private final ForecastFeatureContract features;
+    private final ForecastRouteReference reference;
 
     public SeatDistributionForecastModel(
         SeatDistributionPredictor predictor
     ) {
-        this.predictor = predictor;
+        this(predictor, ForecastFeatureContract.LEGACY, null);
+    }
+
+    public SeatDistributionForecastModel(SeatDistributionPredictor predictor,
+        ForecastFeatureContract features, ForecastRouteReference reference) {
+        this.predictor = java.util.Objects.requireNonNull(predictor);
+        this.features = java.util.Objects.requireNonNull(features);
+        this.reference = features == ForecastFeatureContract.STOP_DIRECTION_TIME
+            ? java.util.Objects.requireNonNull(reference, "조건 모델에는 학습 정류장 기준이 필요하다") : reference;
     }
 
     @Override
     public SeatForecastResult predict(
         SeatForecastInput input
     ) {
+        if (features == ForecastFeatureContract.STOP_DIRECTION_TIME) {
+            reference.requireMatches(input.stops());
+        }
         return predictor.predict(new SeatDistributionInput(
-            SeatForecastDesignMatrix.of(input).toArray(),
+            features.vectorOf(input),
             ModelRoute.of(input.stops().sourceRouteId()),
             input.target().distance().stopCount(),
             input.target().remainingSeats(),
