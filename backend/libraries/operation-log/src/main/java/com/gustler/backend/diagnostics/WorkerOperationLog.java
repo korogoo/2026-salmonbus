@@ -20,6 +20,19 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public final class WorkerOperationLog {
     private static final Recorder RECORDER = new Recorder(System::nanoTime);
 
+    public interface Listener {
+        void completed(String operation, Object route, long nanos, boolean failed);
+        default String context(String operation, Object route) { return ""; }
+    }
+    private static final Listener NONE = (operation, route, nanos, failed) -> { };
+    private static volatile Listener listener = NONE;
+    public static void setListener(Listener value) { listener = value == null ? NONE : value; }
+    public static void clearListener(Listener value) { if (listener == value) { listener = NONE; } }
+
+    private static String context(String operation, Object route) {
+        try { return listener.context(operation, route); }
+        catch (RuntimeException ignored) { return ""; }
+    }
     private WorkerOperationLog() { }
 
     public static <T> T measure(String operation, Object route, Supplier<T> action) {
@@ -52,6 +65,7 @@ public final class WorkerOperationLog {
             boolean outermost = reported.get() == null;
             if (outermost) { reported.set(Collections.newSetFromMap(new IdentityHashMap<>())); }
             long start = nanoTime.getAsLong();
+            boolean failed = false;
             try {
                 T result = action.get();
                 long elapsed = nanoTime.getAsLong() - start;
@@ -61,6 +75,7 @@ public final class WorkerOperationLog {
                 }
                 return result;
             } catch (RuntimeException failure) {
+                failed = true;
                 Set<Throwable> chain = Collections.newSetFromMap(new IdentityHashMap<>());
                 Throwable root = failure;
                 String sqlState = "-";
@@ -71,13 +86,15 @@ public final class WorkerOperationLog {
                     }
                 }
                 if (Collections.disjoint(reported.get(), chain)) {
-                    log.error("event=worker_operation status=FAILED operation={} route={} durationMs={} sqlState={} exceptionType={} rootCause={}",
+                    log.error("event=worker_operation status=FAILED operation={} route={} durationMs={} sqlState={} exceptionType={} rootCause={}{}",
                         operation, route, millis(nanoTime.getAsLong() - start), sqlState,
-                        failure.getClass().getSimpleName(), root.getClass().getSimpleName());
+                        failure.getClass().getSimpleName(), root.getClass().getSimpleName(), context(operation, route));
                 }
                 reported.get().addAll(chain);
                 throw failure;
             } finally {
+                try { listener.completed(operation, route, nanoTime.getAsLong() - start, failed); }
+                catch (RuntimeException ignored) { /* 계측 실패는 업무 결과를 바꾸지 않는다. */ }
                 if (outermost) { reported.remove(); }
             }
         }
@@ -104,8 +121,8 @@ public final class WorkerOperationLog {
         }
 
         private void writeSlow(String operation, Object route, long elapsed, int rows, String outcome) {
-            log.warn("event=worker_operation status=SLOW operation={} route={} durationMs={} returnedRows={} transactionOutcome={}",
-                operation, route, millis(elapsed), rows, outcome);
+            log.warn("event=worker_operation status=SLOW operation={} route={} durationMs={} returnedRows={} transactionOutcome={}{}",
+                operation, route, millis(elapsed), rows, outcome, context(operation, route));
         }
 
         synchronized void warn(String operation, Object route, String reason) {
@@ -117,7 +134,7 @@ public final class WorkerOperationLog {
                 warnings.remove(warnings.keySet().iterator().next());
             }
             warnings.put(key, now);
-            log.warn("event=worker_operation status=DEFERRED operation={} route={} reason={}", operation, route, reason);
+            log.warn("event=worker_operation status=DEFERRED operation={} route={} reason={}{}", operation, route, reason, context(operation, route));
         }
 
         synchronized void recovered(String operation, Object route) {
