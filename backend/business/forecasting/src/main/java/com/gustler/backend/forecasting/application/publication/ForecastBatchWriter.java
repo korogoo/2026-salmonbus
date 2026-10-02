@@ -21,6 +21,7 @@ import com.gustler.backend.observations.api.CollectionInputs;
 
 import com.gustler.backend.forecasting.domain.deployment.RuntimeSnapshot;
 import com.gustler.backend.forecasting.domain.model.SameDayFullOutcomes;
+import com.gustler.backend.forecasting.domain.model.ForecastFeatureContract;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -97,9 +98,9 @@ public class ForecastBatchWriter {
         RuntimeSnapshot runtime,
         TimeSlot timeSlot
     ) {
-        String statisticsVersion = com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STATISTICS_VERSION
+        String statisticsVersion = ForecastFeatureContract.STATISTICS_VERSION
             .equals(runtime.featureContractVersion())
-            ? com.gustler.backend.forecasting.domain.statistics.DemandStatisticsVersion.CURRENT_CALCULATION_VERSION
+            ? ForecastFeatureContract.STATISTICS_CALCULATION_VERSION
             : runtime.featureContractVersion();
         return stopDemandStatisticsRepository.readAsOf(
             batch.routeVersionId(), timeSlot, statisticsVersion, batch.responseReceivedAt());

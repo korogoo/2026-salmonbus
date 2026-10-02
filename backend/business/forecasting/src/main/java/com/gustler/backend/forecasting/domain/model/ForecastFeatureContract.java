@@ -12,7 +12,8 @@ public enum ForecastFeatureContract {
 
     public static final String CONDITIONAL_VERSION = "stop-direction-time-v1";
     public static final String STATISTICS_VERSION = "stop-direction-time-stats-v1";
-    public static final String STATISTICS_POLICY = "observed-max-capacity-v1;as-of-observation";
+    public static final String STATISTICS_CALCULATION_VERSION = "observed-max-capacity-v1";
+    public static final String STATISTICS_POLICY = STATISTICS_CALCULATION_VERSION + ";as-of-observation";
     private static final int BASIS_COUNT = 8;
     private static final int BASIS_START = 20;
     private static final int DOWN_COLUMN = 31;
