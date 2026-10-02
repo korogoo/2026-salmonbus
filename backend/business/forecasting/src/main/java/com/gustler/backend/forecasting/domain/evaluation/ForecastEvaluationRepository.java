@@ -11,6 +11,7 @@ public interface ForecastEvaluationRepository {
     /** 평가 대상 관측이 속한 노선을 조회한다. 잠금 순서는 응용 서비스가 정한다. */
     List<Long> findRouteIdsForObservations(List<Long> observationIds);
 
+    /** 정산 트랜잭션에서 호출한다. 읽은 범위의 확정 제외 평가를 제한 개수만 종료한다. */
     List<PendingForecast> findPending(long routeVersionId, int limit);
 
     void addPending(long routeVersionId, List<ForecastEvaluation> evaluations);

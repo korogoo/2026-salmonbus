@@ -7,6 +7,7 @@ public enum ScoringState {
     SKIPPED,
     LOST,
     SEAT_MISSING,
+    QUALITY_EXCLUDED,
     ;
 
     public boolean scorable() {

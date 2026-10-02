@@ -47,12 +47,12 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
             route_id, outcome_date, stops_to_target,
             row_count, actual_full_count, raw_full_chance_sum, settled_through, quality_revision
         ) VALUES (
-            :routeId, :outcomeDate, :stopsToTarget, 1, :fullCount, :rawFullChance, :arrivedAt,
+            :routeId, :outcomeDate, :stopsToTarget, :rowCount, :fullCount, :rawFullChance, :arrivedAt,
             (SELECT quality_revision FROM route_data_quality WHERE route_id = :routeId)
         )
         ON CONFLICT (route_id, outcome_date, stops_to_target) DO UPDATE SET
             row_count = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
-                THEN same_day_full_outcomes.row_count + 1 ELSE 1 END,
+                THEN same_day_full_outcomes.row_count + EXCLUDED.row_count ELSE EXCLUDED.row_count END,
             actual_full_count = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
                 THEN same_day_full_outcomes.actual_full_count + EXCLUDED.actual_full_count
                 ELSE EXCLUDED.actual_full_count END,
@@ -148,14 +148,29 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
     public void add(
         SettledForecast settled
     ) {
-        jdbcClient.sql(ADD_TO_COUNT)
-            .param("routeId", settled.routeId())
-            .param("outcomeDate", SeoulDay.containing(settled.arrivedAt()).date())
-            .param("stopsToTarget", settled.stopsToTarget())
-            .param("fullCount", settled.wasFull() ? 1 : 0)
-            .param("rawFullChance", settled.rawFullChance())
-            .param("arrivedAt", offsetOf(settled.arrivedAt()))
-            .update();
+        addCounts(settled.routeId(), SeoulDay.containing(settled.arrivedAt()), List.of(
+            new SameDayFullOutcomeCount(settled.stopsToTarget(), 1, settled.wasFull() ? 1 : 0,
+                settled.rawFullChance(), settled.arrivedAt())));
+    }
+
+    @Override
+    public void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments) {
+        for (SameDayFullOutcomeCount count : increments) {
+            if (count.rowCount() <= 0 || count.stopsToTarget() <= 0) {
+                throw new IllegalArgumentException("증가분에는 실제 정산 결과가 필요합니다");
+            }
+        }
+        for (SameDayFullOutcomeCount count : increments) {
+            jdbcClient.sql(ADD_TO_COUNT)
+                .param("routeId", routeId)
+                .param("outcomeDate", day.date())
+                .param("stopsToTarget", count.stopsToTarget())
+                .param("rowCount", count.rowCount())
+                .param("fullCount", count.actualFullCount())
+                .param("rawFullChance", count.rawFullChanceSum())
+                .param("arrivedAt", offsetOf(count.settledThrough()))
+                .update();
+        }
     }
 
     @Override

@@ -23,7 +23,7 @@ class StoredValueContractTest {
     @Test
     void 평가_상태는_평가_표의_CHECK와_같다() {
         // when
-        var allowed = SchemaCheck.allowedValues("V25__ddd_storage_expansion.sql", "scoring_state");
+        var allowed = SchemaCheck.allowedValues("V28__quality_excluded_evaluation.sql", "scoring_state");
 
         // then
         assertThat(Arrays.stream(ScoringState.values()).map(Enum::name)).containsExactlyInAnyOrderElementsOf(allowed);

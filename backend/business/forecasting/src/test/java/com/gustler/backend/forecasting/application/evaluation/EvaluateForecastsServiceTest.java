@@ -237,6 +237,7 @@ class EvaluateForecastsServiceTest {
             case SEAT_MISSING -> new ArrivalLabel.SeatMissing(evaluation.result().arrivalObservationId());
             case SKIPPED -> new ArrivalLabel.Skipped();
             case LOST -> new ArrivalLabel.Lost();
+            case QUALITY_EXCLUDED -> throw new AssertionError("품질 제외는 도착 판정이 아니라 저장소에서 처리한다");
             case PENDING -> throw new AssertionError("평가 대기 상태를 저장하면 안 된다");
         }).toList();
     }
