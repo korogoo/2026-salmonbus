@@ -97,8 +97,12 @@ public class ForecastBatchWriter {
         RuntimeSnapshot runtime,
         TimeSlot timeSlot
     ) {
+        String statisticsVersion = com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STATISTICS_VERSION
+            .equals(runtime.featureContractVersion())
+            ? com.gustler.backend.forecasting.domain.statistics.DemandStatisticsVersion.CURRENT_CALCULATION_VERSION
+            : runtime.featureContractVersion();
         return stopDemandStatisticsRepository.readAsOf(
-            batch.routeVersionId(), timeSlot, runtime.featureContractVersion(), batch.responseReceivedAt());
+            batch.routeVersionId(), timeSlot, statisticsVersion, batch.responseReceivedAt());
     }
 
     private List<SeatForecast> forecastsOf(

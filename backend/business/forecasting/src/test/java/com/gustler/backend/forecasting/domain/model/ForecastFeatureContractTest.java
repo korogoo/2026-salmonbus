@@ -68,6 +68,37 @@ class ForecastFeatureContractTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void 통계_사용_계약은_통계_세_열을_유지하고_기존_조건_계약은_0으로_둔다() {
+        var seed = input(TimeSlot.MORNING, RouteDirection.DOWN);
+        var statistics = new StopDemandStatistics(1L, TimeSlot.MORNING, 2, List.of(
+            new com.gustler.backend.forecasting.domain.statistics.StopDemandCell(49, .2, .1, 10, 2),
+            new com.gustler.backend.forecasting.domain.statistics.StopDemandCell(50, .8, -.1, 10, 2)));
+        var input = new SeatForecastInput(seed.target(), seed.trajectory(), statistics,
+            seed.stops(), seed.timeSlot(), null);
+        double[] actual = ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS.vectorOf(input);
+        double[] original = SeatForecastDesignMatrix.of(input).toArray();
+        assertThat(actual[28]).isEqualTo(original[28]).isNegative();
+        assertThat(actual[29]).isEqualTo(original[29]);
+        assertThat(actual[30]).isZero();
+        double[] previous = ForecastFeatureContract.STOP_DIRECTION_TIME.vectorOf(input);
+        assertThat(new double[] {previous[28], previous[29], previous[30]}).containsOnly(0);
+        for (int index = 0; index < 50; index++) {
+            if (index < 28 || index > 30) { assertThat(actual[index]).isEqualTo(previous[index]); }
+        }
+    }
+
+    @Test
+    void 통계가_없으면_평균값과_결측_표시를_서로_구분한다() {
+        var seed = input(TimeSlot.MORNING, RouteDirection.DOWN);
+        var input = new SeatForecastInput(seed.target(), seed.trajectory(),
+            new StopDemandStatistics(1L, TimeSlot.MORNING, 0, List.of()), seed.stops(), seed.timeSlot(), null);
+        double[] actual = ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS.vectorOf(input);
+        assertThat(actual[28]).isZero();
+        assertThat(actual[29]).isZero();
+        assertThat(actual[30]).isEqualTo(1);
+    }
+
     private static SeatForecastInput input(TimeSlot slot, RouteDirection direction) {
         SeatForecastInput seed = ForecastInputFixture.of("204000057");
         RouteStop target = new RouteStop(1L, 49, "same-stop-id", true, direction);

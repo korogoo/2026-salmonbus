@@ -23,6 +23,34 @@ class ConditionalBundleTest {
     @TempDir Path directory;
 
     @Test
+    void 통계_사용_계약은_별도_버전과_정확한_통계_정책으로만_적재한다() {
+        var loaded = DummyBundle.conditional()
+            .put("featureContractVersion", ForecastFeatureContract.STATISTICS_VERSION)
+            .put("cellStatisticsPolicy", ForecastFeatureContract.STATISTICS_POLICY).loadAt(directory);
+        var release = loaded.release();
+        assertThat(release.features()).isEqualTo(ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS);
+        var actual = new SeatDistributionForecastModel(release.predictor(), release.features(), release.routeReference())
+            .predict(input(null));
+        var direct = loaded.predictor().predict(new SeatDistributionInput(
+            ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS.vectorOf(input(null)), "3330", 1, 20, 44, null));
+        assertThat(actual).isEqualTo(direct);
+    }
+
+    @Test
+    void 통계_사용_모델을_통계_0_정책으로_표시하면_거절한다() {
+        assertThatThrownBy(() -> DummyBundle.conditional()
+            .put("featureContractVersion", ForecastFeatureContract.STATISTICS_VERSION).loadAt(directory))
+            .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void 기존_조건_모델의_통계_정책만_바꾸면_거절한다() {
+        assertThatThrownBy(() -> DummyBundle.conditional()
+            .put("cellStatisticsPolicy", ForecastFeatureContract.STATISTICS_POLICY).loadAt(directory))
+            .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
     void 새_파일을_검사하고_50열_모델로_실제_좌석분포를_계산한다() {
         LoadedBundle loaded = DummyBundle.conditional().loadAt(directory);
         var release = loaded.release();

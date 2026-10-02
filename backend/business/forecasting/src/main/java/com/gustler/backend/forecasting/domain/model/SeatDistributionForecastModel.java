@@ -29,7 +29,7 @@ public final class SeatDistributionForecastModel implements SeatForecastModel {
         ForecastFeatureContract features, ForecastRouteReference reference) {
         this.predictor = java.util.Objects.requireNonNull(predictor);
         this.features = java.util.Objects.requireNonNull(features);
-        this.reference = features == ForecastFeatureContract.STOP_DIRECTION_TIME
+        this.reference = features != ForecastFeatureContract.LEGACY
             ? java.util.Objects.requireNonNull(reference, "조건 모델에는 학습 정류장 기준이 필요하다") : reference;
     }
 
@@ -42,7 +42,7 @@ public final class SeatDistributionForecastModel implements SeatForecastModel {
     public SeatForecastResult predict(
         SeatForecastInput input
     ) {
-        if (features == ForecastFeatureContract.STOP_DIRECTION_TIME) {
+        if (features != ForecastFeatureContract.LEGACY) {
             reference.requireMatches(input.stops());
         }
         return predictor.predict(new SeatDistributionInput(

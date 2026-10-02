@@ -337,6 +337,20 @@ class ForecastBatchWriterTest {
         return RESULT;
     }
 
+    @Test
+    void 통계_사용_모델은_모델_이름이_아닌_통계_계산_버전으로_관측시점_자료를_읽는다() {
+        String version = com.gustler.backend.forecasting.domain.statistics.DemandStatisticsVersion.CURRENT_CALCULATION_VERSION;
+        when(statistics.readAsOf(1, STATISTICS.timeSlot(), version, NOW)).thenReturn(STATISTICS);
+        when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(10, 20, 44)));
+        var runtime = new RuntimeSnapshot(new ActiveModelDeployment(7,
+            com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STATISTICS_VERSION,
+            "statistics-release", "0".repeat(64)), new SupportedForecastScope(List.of("1650", "3330")),
+            input -> { assertThat(input.statistics()).isSameAs(STATISTICS); return RESULT; }, NOW.minusSeconds(60));
+        writer.writeForecastsOf(BATCH, STOPS, runtime);
+        verify(statistics).readAsOf(1, STATISTICS.timeSlot(), version, NOW);
+        verify(outcomes).outcomesFor(1, 7L, NOW);
+    }
+
     private RuntimeSnapshot runtime(SeatForecastModel model) {
         return new RuntimeSnapshot(new ActiveModelDeployment(7, "feature-v1", "release", "0".repeat(64)),
             new SupportedForecastScope(List.of("1650", "3330")), model, NOW.minusSeconds(60));

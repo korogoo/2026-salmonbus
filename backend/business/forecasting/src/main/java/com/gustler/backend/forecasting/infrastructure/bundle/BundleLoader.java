@@ -124,21 +124,26 @@ public final class BundleLoader {
     }
 
     static ForecastFeatureContract featuresOf(BundleManifest manifest) {
-        return CONDITIONAL_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion())
-            ? ForecastFeatureContract.STOP_DIRECTION_TIME : ForecastFeatureContract.LEGACY;
+        if (!CONDITIONAL_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion())) {
+            return ForecastFeatureContract.LEGACY;
+        }
+        return ForecastFeatureContract.STATISTICS_VERSION.equals(manifest.featureContractVersion())
+            ? ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS : ForecastFeatureContract.STOP_DIRECTION_TIME;
     }
 
     private static void checkConditionalContract(BundleManifest manifest) {
-        boolean conditional = featuresOf(manifest) == ForecastFeatureContract.STOP_DIRECTION_TIME;
+        boolean conditional = featuresOf(manifest) != ForecastFeatureContract.LEGACY;
+        boolean statistics = ForecastFeatureContract.STATISTICS_VERSION.equals(manifest.featureContractVersion());
         BundleCheck.FEATURE_CONTRACT_VERSION.require(
-            conditional == ForecastFeatureContract.CONDITIONAL_VERSION.equals(manifest.featureContractVersion()),
+            conditional == (statistics || ForecastFeatureContract.CONDITIONAL_VERSION.equals(manifest.featureContractVersion())),
             "새 입력 계약은 v2 번들에서만 지원한다: " + manifest.featureContractVersion());
         if (conditional) {
             BundleCheck.FEATURE_CONTRACT_VERSION.require(
                 manifest.normalizationConstants().equals(Map.of("largestSeatCount", 68.0, "lowSeatBandWidth", 20.0))
                     && manifest.timeSlotSource().equals("observation_batch.response_received_at;Asia/Seoul;new_time_slot=0")
                     && manifest.capacityPolicy().equals("maximum-seats-ever-observed")
-                    && manifest.cellStatisticsPolicy().equals("statistics-inputs-zero"),
+                    && manifest.cellStatisticsPolicy().equals(statistics
+                        ? ForecastFeatureContract.STATISTICS_POLICY : "statistics-inputs-zero"),
                 "위치·방향·시간 계약의 정규화·시간·정원·통계 규칙이 다르다");
         }
     }

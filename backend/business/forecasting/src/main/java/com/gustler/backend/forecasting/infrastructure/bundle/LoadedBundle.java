@@ -34,7 +34,7 @@ public record LoadedBundle(
         BundleFiles files
     ) {
         CoefficientBundle coefficients = BundleLoader.load(files);
-        ForecastRouteReference reference = BundleLoader.featuresOf(coefficients.manifest()) == ForecastFeatureContract.STOP_DIRECTION_TIME
+        ForecastRouteReference reference = BundleLoader.featuresOf(coefficients.manifest()) != ForecastFeatureContract.LEGACY
             ? BundleRouteReference.read(files.readRouteReference(), coefficients.manifest()) : null;
         LoadedBundle bundle = new LoadedBundle(
             coefficients, new SeatDistributionPredictor(coefficients, RELATIVE_BIN_EDGES), reference);

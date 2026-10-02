@@ -7,9 +7,12 @@ import java.util.List;
 /** 번들과 함께 선택하는 입력 규칙. 기존 31열 계산을 새 모델 때문에 바꾸지 않는다. */
 public enum ForecastFeatureContract {
     LEGACY,
-    STOP_DIRECTION_TIME;
+    STOP_DIRECTION_TIME,
+    STOP_DIRECTION_TIME_STATISTICS;
 
     public static final String CONDITIONAL_VERSION = "stop-direction-time-v1";
+    public static final String STATISTICS_VERSION = "stop-direction-time-stats-v1";
+    public static final String STATISTICS_POLICY = "observed-max-capacity-v1;as-of-observation";
     private static final int BASIS_COUNT = 8;
     private static final int BASIS_START = 20;
     private static final int DOWN_COLUMN = 31;
@@ -30,7 +33,9 @@ public enum ForecastFeatureContract {
         }
         double[] columns = Arrays.copyOf(original, CONDITIONAL_NAMES.size());
         columns[3] = 0; // 학습에서 사용하지 않은 신규 시간대와 과거 통계 입력.
-        Arrays.fill(columns, 28, 31, 0);
+        if (this == STOP_DIRECTION_TIME) {
+            Arrays.fill(columns, 28, 31, 0);
+        }
         double position = columns[19];
         for (int index = 0; index < BASIS_COUNT; index++) {
             double knot = index / (double) (BASIS_COUNT - 1);
