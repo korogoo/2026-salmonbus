@@ -79,7 +79,7 @@ public class ForecastBatchWriter {
         TimeSlot timeSlot = ForecastTimeSlot.of(batch, clock);
         StopDemandStatistics statistics = stopDemandStatisticsOf(batch, runtime, timeSlot);
         Map<Integer, SameDayFullOutcomes> sameDayOutcomes =
-            sameDayFullOutcomesService.outcomesFor(batch.routeId(), batch.responseReceivedAt());
+            sameDayFullOutcomesService.outcomesFor(batch.routeId(), runtime.deploymentId(), batch.responseReceivedAt());
         List<SeatForecast> predictions = forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt);
         publications.save(new ForecastPublication(
             batch.observationBatchId(), batch.routeVersionId(), runtime.deploymentId(), statistics.revision(),

@@ -57,8 +57,8 @@ class ForecastEvaluationWriterTest {
         ForecastEvaluation second = settledEvaluation(100L, 400L, SCORED_AT.plusSeconds(1));
         List<ForecastEvaluation> completed = List.of(first, second);
         List<SettledForecast> newlySettled = List.of(
-            new SettledForecast(8L, 3, 0.4, ARRIVED_AT, 0),
-            new SettledForecast(3L, 3, 0.6, ARRIVED_AT, 0));
+            new SettledForecast(8L, 1L, 3, 0.4, ARRIVED_AT, 0),
+            new SettledForecast(3L, 1L, 3, 0.6, ARRIVED_AT, 0));
         when(evaluations.findRouteIdsForObservations(List.of(200L, 100L))).thenReturn(List.of(8L, 3L, 8L));
         when(evaluations.settle(completed)).thenReturn(List.of(
             settledFrom(newlySettled.get(0)), settledFrom(newlySettled.get(1))));
@@ -114,7 +114,7 @@ class ForecastEvaluationWriterTest {
         // given
         ForecastEvaluation settled = settledEvaluation(200L, 300L, SCORED_AT);
         when(evaluations.findRouteIdsForObservations(List.of(200L))).thenReturn(List.of(8L));
-        when(evaluations.settle(List.of(settled))).thenReturn(List.of(new SettledEvaluation(8L, 11L, 200L,
+        when(evaluations.settle(List.of(settled))).thenReturn(List.of(new SettledEvaluation(8L, 1L, 11L, 200L,
             TARGET_STOP_ORDER, 1, 0.4, ScoringState.SETTLED, 300L, 0, ARRIVED_AT, SCORED_AT, true, "bus-1", 12,
             true)));
 
@@ -129,7 +129,7 @@ class ForecastEvaluationWriterTest {
     private static SettledEvaluation settledFrom(
         SettledForecast forecast
     ) {
-        return new SettledEvaluation(forecast.routeId(), 11L, 200L, TARGET_STOP_ORDER, forecast.stopsToTarget(),
+        return new SettledEvaluation(forecast.routeId(), forecast.modelDeploymentId(), 11L, 200L, TARGET_STOP_ORDER, forecast.stopsToTarget(),
             forecast.rawFullChance(), ScoringState.SETTLED, 300L, forecast.seatsOnArrival(), forecast.arrivedAt(),
             SCORED_AT, true, null, null, false);
     }

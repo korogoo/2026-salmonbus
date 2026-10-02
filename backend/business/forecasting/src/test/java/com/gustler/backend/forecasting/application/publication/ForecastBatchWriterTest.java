@@ -98,7 +98,7 @@ class ForecastBatchWriterTest {
     void setUp() {
         when(quality.lock(anyLong())).thenReturn(1L);
         when(statistics.readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW)).thenReturn(STATISTICS);
-        when(outcomes.outcomesFor(1, NOW)).thenReturn(Map.of());
+        when(outcomes.outcomesFor(1, 7L, NOW)).thenReturn(Map.of());
         logs.start();
         ((Logger) LoggerFactory.getLogger(ForecastBatchWriter.class)).addAppender(logs);
     }

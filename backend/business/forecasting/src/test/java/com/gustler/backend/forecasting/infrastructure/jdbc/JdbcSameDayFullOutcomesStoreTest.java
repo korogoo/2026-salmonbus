@@ -96,32 +96,32 @@ class JdbcSameDayFullOutcomesStoreTest {
 
     @Test
     void 여러_정산의_증가분을_기존_합계에_더한다() {
-        repository.upsertCounts(routeId, ARRIVAL_DAY, List.of(
+        repository.upsertCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 10, 4, 2.0, ARRIVED_AT)));
-        repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+        repository.addCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1))));
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 13, 6, 3.0, ARRIVED_AT));
     }
 
     @Test
     void 이전_품질_버전의_합계는_새_증가분으로_교체한다() {
-        repository.upsertCounts(routeId, ARRIVAL_DAY, List.of(
+        repository.upsertCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 10, 4, 2.0, ARRIVED_AT)));
         jdbcClient.sql("UPDATE route_data_quality SET quality_revision = quality_revision + 1 WHERE route_id = ?")
             .param(routeId).update();
-        repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+        repository.addCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1))));
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 3, 2, 1.0, ARRIVED_AT.minusSeconds(1)));
     }
 
     @Test
     void 빈_초기화_표시는_정산_증가분으로_저장하지_않는다() {
-        assertThatThrownBy(() -> repository.addCounts(routeId, ARRIVAL_DAY, List.of(
+        assertThatThrownBy(() -> repository.addCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(
             new SameDayFullOutcomeCount(0, 0, 0, 0, ARRIVAL_DAY.start()))))
             .hasRootCauseInstanceOf(IllegalArgumentException.class);
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).isEmpty();
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).isEmpty();
     }
 
     @Test
@@ -130,7 +130,7 @@ class JdbcSameDayFullOutcomesStoreTest {
         repository.add(settleAsFull(vehicleObservationId, RAW_FULL_CHANCE));
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -140,7 +140,7 @@ class JdbcSameDayFullOutcomesStoreTest {
         repository.add(settleWithSeats(vehicleObservationId, RAW_FULL_CHANCE, SEATS_ON_ARRIVAL_WHEN_NOT_FULL));
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 0, RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -155,7 +155,7 @@ class JdbcSameDayFullOutcomesStoreTest {
         repository.add(settleWithSeats(otherObservationId, OTHER_RAW_FULL_CHANCE, SEATS_ON_ARRIVAL_WHEN_NOT_FULL));
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 1, RAW_FULL_CHANCE + OTHER_RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -170,12 +170,12 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         service.record(List.of(settledAfter));
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).isEmpty();
-        assertThat(service.initializeIfAbsent(routeId, ARRIVAL_DAY)).isTrue();
-        assertThat(service.initializeIfAbsent(routeId, ARRIVAL_DAY)).isFalse();
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).isEmpty();
+        assertThat(service.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY)).isTrue();
+        assertThat(service.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY)).isFalse();
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 1, RAW_FULL_CHANCE + OTHER_RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -185,10 +185,10 @@ class JdbcSameDayFullOutcomesStoreTest {
         SameDayFullOutcomeCount count = new SameDayFullOutcomeCount(STOPS_TO_TARGET, 5, 2, 1.7, ARRIVED_AT);
 
         // when
-        repository.upsertCounts(routeId, ARRIVAL_DAY, List.of(count));
+        repository.upsertCounts(routeId, modelDeploymentId, ARRIVAL_DAY, List.of(count));
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(count);
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(count);
     }
 
     @Test
@@ -198,7 +198,7 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         List<SameDayFullOutcomeCount> actual =
-            repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT.plusSeconds(60));
+            repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT.plusSeconds(60));
 
         // then
         assertThat(actual).containsExactly(
@@ -211,7 +211,7 @@ class JdbcSameDayFullOutcomesStoreTest {
         settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
 
         // when
-        List<SameDayFullOutcomeCount> actual = repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT);
+        List<SameDayFullOutcomeCount> actual = repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT);
 
         // then
         assertThat(actual).hasSize(1);
@@ -224,7 +224,7 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         List<SameDayFullOutcomeCount> actual =
-            repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT.minusSeconds(60));
+            repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT.minusSeconds(60));
 
         // then
         assertThat(actual).isEmpty();
@@ -237,7 +237,7 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         List<SameDayFullOutcomeCount> actual =
-            repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT.plusSeconds(60));
+            repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT.plusSeconds(60));
 
         // then
         assertThat(actual).isEmpty();
@@ -251,7 +251,7 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         List<SameDayFullOutcomeCount> actual =
-            repository.countFromSource(routeId, nextDay, ARRIVED_AT.plus(Duration.ofDays(1)));
+            repository.countFromSource(routeId, modelDeploymentId, nextDay, ARRIVED_AT.plus(Duration.ofDays(1)));
 
         // then
         assertThat(actual).isEmpty();
@@ -275,7 +275,7 @@ class JdbcSameDayFullOutcomesStoreTest {
 
         // when
         List<SameDayFullOutcomeCount> actual =
-            repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT.plus(Duration.ofMinutes(20)));
+            repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT.plus(Duration.ofMinutes(20)));
 
         // then
         assertThat(actual).containsExactly(new SameDayFullOutcomeCount(
@@ -286,17 +286,17 @@ class JdbcSameDayFullOutcomesStoreTest {
     void 편도_제외로_판정_버전이_바뀌면_기존_집계와_예측값을_후보정에_재사용하지_않는다() {
         // given
         service.record(List.of(settleAsFull(vehicleObservationId, RAW_FULL_CHANCE)));
-        service.initializeIfAbsent(routeId, ARRIVAL_DAY);
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).hasSize(1);
+        service.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY);
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).hasSize(1);
 
         // when
         jdbcClient.sql("UPDATE route_data_quality SET quality_revision = quality_revision + 1 WHERE route_id = ?")
             .param(routeId).update();
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).isEmpty();
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
-        assertThat(service.outcomesFor(routeId, ARRIVED_AT)).isEmpty();
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).isEmpty();
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
+        assertThat(service.outcomesFor(routeId, modelDeploymentId, ARRIVED_AT)).isEmpty();
     }
 
     @Test
@@ -314,7 +314,7 @@ class JdbcSameDayFullOutcomesStoreTest {
         repository.add(current);
 
         // then
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).containsExactly(
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 0, OTHER_RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -326,7 +326,7 @@ class JdbcSameDayFullOutcomesStoreTest {
             .param(vehicleObservationId).update();
 
         // when
-        List<SameDayFullOutcomeCount> counts = repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT);
+        List<SameDayFullOutcomeCount> counts = repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT);
 
         // then
         assertThat(counts).isEmpty();
@@ -339,14 +339,14 @@ class JdbcSameDayFullOutcomesStoreTest {
         var observedService = new SameDayFullOutcomesService(observedRepository);
 
         // when
-        var first = observedService.initializeIfAbsent(routeId, ARRIVAL_DAY);
-        var second = observedService.initializeIfAbsent(routeId, ARRIVAL_DAY);
+        var first = observedService.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY);
+        var second = observedService.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY);
 
         // then
         assertThat(first).isTrue();
         assertThat(second).isFalse();
-        verify(observedRepository, times(1)).countFromSource(routeId, ARRIVAL_DAY, ARRIVAL_DAY.end());
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).singleElement()
+        verify(observedRepository, times(1)).countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVAL_DAY.end());
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).singleElement()
             .extracting(SameDayFullOutcomeCount::rowCount).isEqualTo(0);
     }
 
@@ -355,17 +355,17 @@ class JdbcSameDayFullOutcomesStoreTest {
         // given
         var observedRepository = spy(new JdbcSameDayFullOutcomesStore(jdbcClient));
         var observedService = new SameDayFullOutcomesService(observedRepository);
-        observedService.initializeIfAbsent(routeId, ARRIVAL_DAY);
+        observedService.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY);
         var settled = settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
 
         // when
         observedService.record(List.of(settled));
-        var outcomes = observedService.outcomesFor(routeId, ARRIVED_AT);
+        var outcomes = observedService.outcomesFor(routeId, modelDeploymentId, ARRIVED_AT);
 
         // then
         assertThat(outcomes).hasSize(1);
         assertThat(outcomes.get(STOPS_TO_TARGET).rowCount()).isEqualTo(1);
-        verify(observedRepository, times(1)).countFromSource(routeId, ARRIVAL_DAY, ARRIVAL_DAY.end());
+        verify(observedRepository, times(1)).countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVAL_DAY.end());
     }
 
     @Test
@@ -374,10 +374,10 @@ class JdbcSameDayFullOutcomesStoreTest {
         service.record(List.of(settled));
         SeoulDay currentDay = SeoulDay.containing(ARRIVED_AT.plus(Duration.ofDays(1)));
 
-        service.initializeIfAbsent(routeId, currentDay);
+        service.initializeIfAbsent(routeId, modelDeploymentId, currentDay);
 
-        assertThat(repository.findCounts(routeId, ARRIVAL_DAY)).isEmpty();
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVAL_DAY.end()))
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).isEmpty();
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVAL_DAY.end()))
             .singleElement().extracting(SameDayFullOutcomeCount::rowCount).isEqualTo(1);
         // 이 fixture의 지평은 3이므로 통계 입력(지평 1) 대상은 아니다. 원본 정산은 보존한다.
         assertThat(jdbcClient.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id = ?")
@@ -412,7 +412,7 @@ class JdbcSameDayFullOutcomesStoreTest {
             default -> { }
         }
 
-        List<SameDayFullOutcomeCount> actual = repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT);
+        List<SameDayFullOutcomeCount> actual = repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT);
 
         if (condition.equals("정상")) {
             assertThat(actual).containsExactly(
@@ -431,7 +431,7 @@ class JdbcSameDayFullOutcomesStoreTest {
                 SELECT arrival_observation_id FROM forecast_evaluation WHERE vehicle_observation_id = ?)
             """).params(vehicleObservationId, vehicleObservationId).update();
 
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
     }
 
@@ -447,11 +447,11 @@ class JdbcSameDayFullOutcomesStoreTest {
             """).query(Long.class).single();
         jdbcClient.sql("INSERT INTO route_data_quality(route_id, quality_revision) VALUES (?, 2)").param(otherRoute).update();
 
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 1, 1, RAW_FULL_CHANCE, ARRIVED_AT));
 
         jdbcClient.sql("UPDATE route_data_quality SET quality_revision = 2 WHERE route_id = ?").param(routeId).update();
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
     }
 
     @Test
@@ -466,9 +466,32 @@ class JdbcSameDayFullOutcomesStoreTest {
             ) WHERE vehicle_observation_id = ?
             """).params(vehicleObservationId, laterSource).update();
 
-        assertThat(repository.countFromSource(routeId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).containsExactly(
             new SameDayFullOutcomeCount(STOPS_TO_TARGET, 2, 2,
                 RAW_FULL_CHANCE + OTHER_RAW_FULL_CHANCE, ARRIVED_AT));
+    }
+
+    @Test
+    void 모델별_초기화는_이전_모델의_정산을_섞지_않는다() {
+        long previousModel = modelDeploymentId;
+        SettledForecast previousResult = settleAsFull(vehicleObservationId, RAW_FULL_CHANCE);
+        modelDeploymentId = jdbcClient.sql("""
+            INSERT INTO model_deployment(deployment_key, release_id, model_key, model_version,
+                bundle_digest, prediction_target_version, calculation_version, supported_scope_digest, data_until, state)
+            SELECT ?, ?, model_key, model_version, bundle_digest, prediction_target_version,
+                calculation_version, supported_scope_digest, data_until, 'STAGED'
+            FROM model_deployment WHERE id = ? RETURNING id
+            """).params(UUID.randomUUID(), "different-model", previousModel).query(Long.class).single();
+        service.initializeIfAbsent(routeId, modelDeploymentId, ARRIVAL_DAY);
+        service.initializeIfAbsent(routeId, previousModel, ARRIVAL_DAY);
+        assertThat(repository.findCounts(routeId, modelDeploymentId, ARRIVAL_DAY)).singleElement()
+            .satisfies(count -> assertThat(count.rowCount()).isZero());
+        assertThat(repository.countFromSource(routeId, modelDeploymentId, ARRIVAL_DAY, ARRIVED_AT)).isEmpty();
+        assertThat(repository.countFromSource(routeId, previousModel, ARRIVAL_DAY, ARRIVED_AT)).singleElement()
+            .satisfies(count -> assertThat(count.rowCount()).isOne());
+        assertThat(previousResult.modelDeploymentId()).isEqualTo(previousModel);
+        assertThat(service.outcomesFor(routeId, modelDeploymentId, ARRIVED_AT)).isEmpty();
+        assertThat(service.outcomesFor(routeId, previousModel, ARRIVED_AT)).containsKey(STOPS_TO_TARGET);
     }
 
     private SettledForecast settleAsFull(

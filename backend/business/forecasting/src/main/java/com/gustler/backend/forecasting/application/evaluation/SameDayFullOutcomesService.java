@@ -31,11 +31,12 @@ public class SameDayFullOutcomesService {
 
     public Map<Integer, SameDayFullOutcomes> outcomesFor(
         final long routeId,
+        long modelDeploymentId,
         Instant predictionAt
     ) {
         SeoulDay day = SeoulDay.containing(predictionAt);
         List<SameDayFullOutcomeCount> counts = WorkerOperationLog.measure("same_day_read", routeId,
-            () -> repository.findCounts(routeId, day));
+            () -> repository.findCounts(routeId, modelDeploymentId, day));
         if (counts.isEmpty() || predictionAt.isBefore(settledThroughOf(counts))) {
             return Map.of();
         }
@@ -47,11 +48,11 @@ public class SameDayFullOutcomesService {
     ) {
         for (Map.Entry<RouteDay, List<SettledForecast>> group : groupByRouteDay(settled).entrySet()) {
             RouteDay key = group.getKey();
-            if (repository.findCounts(key.routeId(), key.day()).isEmpty()) {
+            if (repository.findCounts(key.routeId(), key.modelDeploymentId(), key.day()).isEmpty()) {
                 // 부분 합계를 만들면 초기화 완료로 오인한다. 원본은 이후 초기화에서 함께 센다.
                 continue;
             }
-            repository.addCounts(key.routeId(), key.day(), incrementsOf(group.getValue()));
+            repository.addCounts(key.routeId(), key.modelDeploymentId(), key.day(), incrementsOf(group.getValue()));
         }
     }
 
@@ -83,32 +84,33 @@ public class SameDayFullOutcomesService {
     }
 
     /** 호출자가 같은 노선 잠금을 유지하는 트랜잭션 안에서 사용한다. */
-    public boolean initializeIfAbsent(long routeId, SeoulDay day) {
-        return initializeIfAbsent(routeId, day, new SameDayInitializationAttempt());
+    public boolean initializeIfAbsent(long routeId, long modelDeploymentId, SeoulDay day) {
+        return initializeIfAbsent(routeId, modelDeploymentId, day, new SameDayInitializationAttempt());
     }
 
-    boolean initializeIfAbsent(long routeId, SeoulDay day, SameDayInitializationAttempt attempt) {
+    boolean initializeIfAbsent(long routeId, long modelDeploymentId, SeoulDay day, SameDayInitializationAttempt attempt) {
         if (!attempt.measure(SameDayInitializationAttempt.Stage.CHECK,
-            () -> repository.findCounts(routeId, day)).isEmpty()) {
+            () -> repository.findCounts(routeId, modelDeploymentId, day)).isEmpty()) {
             return false;
         }
-        seed(routeId, day, attempt);
+        seed(routeId, modelDeploymentId, day, attempt);
         return true;
     }
 
     private List<SameDayFullOutcomeCount> seed(
         final long routeId,
+        long modelDeploymentId,
         SeoulDay day,
         SameDayInitializationAttempt attempt
     ) {
         List<SameDayFullOutcomeCount> counted = attempt.measure(SameDayInitializationAttempt.Stage.SOURCE,
-            () -> repository.countFromSource(routeId, day, day.end()));
+            () -> repository.countFromSource(routeId, modelDeploymentId, day, day.end()));
         if (counted.isEmpty()) {
             // 거리 0은 실제 예보가 아니다. 이 날짜/품질 버전에서 원본이 비었음을 한 번만 기록한다.
             counted = List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start()));
         }
         List<SameDayFullOutcomeCount> toSave = counted;
-        attempt.run(SameDayInitializationAttempt.Stage.SAVE, () -> repository.upsertCounts(routeId, day, toSave));
+        attempt.run(SameDayInitializationAttempt.Stage.SAVE, () -> repository.upsertCounts(routeId, modelDeploymentId, day, toSave));
         return counted;
     }
 
@@ -136,13 +138,14 @@ public class SameDayFullOutcomesService {
 
     private record RouteDay(
         long routeId,
+        long modelDeploymentId,
         SeoulDay day
     ) {
 
         static RouteDay of(
             SettledForecast forecast
         ) {
-            return new RouteDay(forecast.routeId(), SeoulDay.containing(forecast.arrivedAt()));
+            return new RouteDay(forecast.routeId(), forecast.modelDeploymentId(), SeoulDay.containing(forecast.arrivedAt()));
         }
     }
 }

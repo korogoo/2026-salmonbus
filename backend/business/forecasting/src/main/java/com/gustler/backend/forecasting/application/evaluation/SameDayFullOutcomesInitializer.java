@@ -4,6 +4,7 @@ import com.gustler.backend.forecasting.api.evaluation.SameDayInitializationPolic
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
 import com.gustler.backend.forecasting.domain.evaluation.SameDayFullOutcomesStore;
 import com.gustler.backend.forecasting.domain.evaluation.SeoulDay;
+import com.gustler.backend.forecasting.domain.deployment.ModelDeploymentRepository;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -18,15 +19,18 @@ public class SameDayFullOutcomesInitializer {
     private final SameDayFullOutcomesStore repository;
     private final RouteDataQualityAccess quality;
     private final QueryTimeLimits limits;
+    private final ModelDeploymentRepository deployments;
     private final SameDayInitializationPolicy policy;
 
     public SameDayFullOutcomesInitializer(SameDayFullOutcomesService service, SameDayFullOutcomesStore repository,
-        RouteDataQualityAccess quality, QueryTimeLimits limits, SameDayInitializationPolicy policy) {
+        RouteDataQualityAccess quality, QueryTimeLimits limits, SameDayInitializationPolicy policy,
+        ModelDeploymentRepository deployments) {
         this.service = service;
         this.repository = repository;
         this.quality = quality;
         this.limits = limits;
         this.policy = policy;
+        this.deployments = deployments;
     }
 
     // 원본 SQL 25초에 준비 확인/저장/커밋 여유를 둔다. 노선 목록 조회 제한과는 별개다.
@@ -40,7 +44,9 @@ public class SameDayFullOutcomesInitializer {
         attempt.run(SameDayInitializationAttempt.Stage.CONFIGURE, this::configureTimeouts);
         attempt.run(SameDayInitializationAttempt.Stage.LOCK, () -> quality.lockByRoute(routeId));
         // 잠금을 기다리는 동안 준비됐을 수 있으므로 잠금 획득 후 다시 확인한다.
-        boolean initialized = service.initializeIfAbsent(routeId, day, attempt);
+        var deployment = deployments.findActive();
+        boolean initialized = deployment.isPresent()
+            && service.initializeIfAbsent(routeId, deployment.get().id(), day, attempt);
         attempt.awaitingCommit();
         return initialized;
     }
