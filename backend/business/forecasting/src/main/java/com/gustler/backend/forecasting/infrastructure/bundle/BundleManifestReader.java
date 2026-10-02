@@ -83,7 +83,7 @@ final class BundleManifestReader {
             textAt(root, "dataThrough"));
     }
 
-    private static String textOf(
+    static String textOf(
         byte[] content
     ) {
         try {

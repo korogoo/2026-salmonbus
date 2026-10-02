@@ -48,9 +48,9 @@ public class JdbcRouteVersionQuery implements RouteVersionQuery, RouteStopsQuery
         ORDER BY stop_order
         """;
 
-    /** 그 판본이 어느 Open API 노선인가. 계수 묶음이 노선 이름으로 계수를 고르는 데 쓴다. */
+    /** 모델 선택용 API 노선 ID와 로그 표시용 실제 노선명을 기존 조회에서 함께 읽는다. */
     private static final String SELECT_SOURCE_ROUTE_ID = """
-        SELECT route.public_route_id
+        SELECT route.public_route_id, route.display_name
         FROM route_version
         JOIN route ON route.id = route_version.route_id
         WHERE route_version.id = :routeVersionId
@@ -84,15 +84,10 @@ public class JdbcRouteVersionQuery implements RouteVersionQuery, RouteStopsQuery
                 resultSet.getBoolean("boarding_allowed"),
                 RouteDirection.valueOf(resultSet.getString("direction"))))
             .list();
-        return new RouteStops(routeVersionId, sourceRouteIdOf(routeVersionId), stops);
-    }
-
-    private String sourceRouteIdOf(
-        final long routeVersionId
-    ) {
         return jdbcClient.sql(SELECT_SOURCE_ROUTE_ID)
             .param("routeVersionId", routeVersionId)
-            .query(String.class)
+            .query((rs, row) -> new RouteStops(routeVersionId, rs.getString("public_route_id"),
+                stops, rs.getString("display_name")))
             .single();
     }
 }

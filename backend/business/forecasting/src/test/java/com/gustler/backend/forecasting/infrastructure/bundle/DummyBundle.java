@@ -44,6 +44,8 @@ public final class DummyBundle {
     private static final int GOLDEN_CURRENT_SEATS = 20;
     private static final int GOLDEN_CAPACITY = 44;
 
+    private byte[] routeReference;
+
     private final Map<String, Object> manifest = new LinkedHashMap<>();
     private final SafetensorsWriter weights = new SafetensorsWriter();
     private final List<String> routes;
@@ -68,6 +70,31 @@ public final class DummyBundle {
         DummyBundle bundle = new DummyBundle(routes);
         bundle.fillTensors(FEATURE_COUNT);
         bundle.fillManifest(FEATURE_COUNT);
+        return bundle;
+    }
+
+    public static DummyBundle conditional() {
+        DummyBundle bundle = new DummyBundle(ROUTES);
+        bundle.fillTensors(50);
+        bundle.fillManifest(50);
+        bundle.put("bundleSchemaVersion", "a18-live-bundle-v2");
+        bundle.put("featureContractVersion", com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.CONDITIONAL_VERSION);
+        bundle.put("featureNames", com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STOP_DIRECTION_TIME.featureNames());
+        bundle.put("normalizationConstants", Map.of("largestSeatCount", 68.0, "lowSeatBandWidth", 20.0));
+        bundle.put("timeSlotSource", "observation_batch.response_received_at;Asia/Seoul;new_time_slot=0");
+        bundle.put("cellStatisticsPolicy", "statistics-inputs-zero");
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (String route : ROUTES) {
+            references.add(Map.of("modelRoute", route,
+                "sourceRouteId", route.equals("1650") ? "234000050" : "204000057",
+                "stops", List.of(
+                    Map.of("order", 1, "id", "same", "boardingAllowed", true, "direction", "UP"),
+                    Map.of("order", 2, "id", "same", "boardingAllowed", true, "direction", "DOWN"),
+                    Map.of("order", 3, "id", "last", "boardingAllowed", true, "direction", "DOWN"))));
+        }
+        bundle.routeReference = Json.of(Map.of("version", ROUTE_REFERENCE_VERSION, "routes", references))
+            .getBytes(StandardCharsets.UTF_8);
+        bundle.put("routeReferenceDigest", Sha256.of(bundle.routeReference));
         return bundle;
     }
 
@@ -413,6 +440,9 @@ public final class DummyBundle {
         Path directory
     ) {
         try {
+            if (routeReference != null) {
+                Files.write(directory.resolve("route-reference.json"), routeReference);
+            }
             Files.write(directory.resolve(BundleFiles.MANIFEST_NAME), manifestBytes());
             Files.write(directory.resolve(BundleFiles.WEIGHTS_NAME), weightsBytes());
             return BundleFiles.under(directory);

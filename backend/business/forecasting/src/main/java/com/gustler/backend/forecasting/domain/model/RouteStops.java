@@ -23,10 +23,16 @@ import java.util.List;
 public record RouteStops(
     long routeVersionId,
     String sourceRouteId,
-    List<RouteStop> stops
+    List<RouteStop> stops,
+    String routeName
 ) {
 
+    public RouteStops(long routeVersionId, String sourceRouteId, List<RouteStop> stops) {
+        this(routeVersionId, sourceRouteId, stops, "");
+    }
+
     public RouteStops {
+        routeName = routeName == null ? "" : routeName;
         if (sourceRouteId == null || sourceRouteId.isBlank()) {
             throw new IllegalArgumentException("정류장 목록에는 어느 Open API 노선인지가 있어야 한다");
         }

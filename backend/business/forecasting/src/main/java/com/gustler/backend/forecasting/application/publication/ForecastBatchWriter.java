@@ -67,8 +67,9 @@ public class ForecastBatchWriter {
         this.collectionInputs = collectionInputs;
     }
 
+    /** 이번 호출에서 저장한 예보 수. 빈 발행도 기존처럼 처리 완료로 확정한다. */
     @Transactional
-    public void writeForecastsOf(
+    public int writeForecastsOf(
         PendingForecastBatch batch,
         RouteStops stops,
         RuntimeSnapshot runtime
@@ -87,6 +88,7 @@ public class ForecastBatchWriter {
             .map(prediction -> ForecastEvaluation.pending(prediction.vehicleObservationId(), prediction.targetStopOrder()))
             .toList());
         collectionInputs.confirmInput(batch.observationBatchId(), generatedAt);
+        return predictions.size();
     }
 
     /** 관측 시점에 사용할 수 있었던 통계 값과 버전을 함께 읽는다. */

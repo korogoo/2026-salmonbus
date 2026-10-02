@@ -34,6 +34,11 @@ public final class SeatDistributionForecastModel implements SeatForecastModel {
     }
 
     @Override
+    public boolean supportsRoute(RouteStops stops) {
+        return features == ForecastFeatureContract.LEGACY || reference.matches(stops);
+    }
+
+    @Override
     public SeatForecastResult predict(
         SeatForecastInput input
     ) {

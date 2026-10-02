@@ -40,6 +40,10 @@ public final class Route {
         newVersionStops = stops;
     }
 
+    public Optional<RouteVersion> latestVersion() {
+        return Optional.ofNullable(currentVersion);
+    }
+
     public long id() {
         return id;
     }

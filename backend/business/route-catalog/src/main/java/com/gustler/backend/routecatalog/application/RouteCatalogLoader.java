@@ -2,6 +2,7 @@ package com.gustler.backend.routecatalog.application;
 
 import com.gustler.backend.quota.api.ApiCallQuota;
 import com.gustler.backend.routecatalog.api.CurrentRouteVersion;
+import com.gustler.backend.routecatalog.api.RefreshRouteCatalog;
 import com.gustler.backend.routecatalog.api.RouteReference;
 import com.gustler.backend.routecatalog.domain.CurrentRouteVersionQuery;
 import com.gustler.backend.routecatalog.domain.RouteRegistry;
@@ -23,13 +24,15 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 노선 버전 없이는 수집 배치를 생성할 수 없다.
  *
  * <p>버전이 없을 때만 상류에서 노선정보를 받아 생성한다. 이미 있으면 아무것도 안 한다.
- * 노선이 개편돼도 앱을 다시 시작하는 것만으로는 새 버전이 생성되지 않는다.
- * 개편을 반영하려면 노선정보를 주기적으로 다시 받아 RouteVersionLoader에 넘겨야 하지만 아직 구현하지 않았다.
+ * 기존 노선의 변경 확인은 Worker의 별도 일일 작업이 refresh를 호출하여 수행한다.
+ * 관측 수집마다 외부 노선정보를 다시 읽지 않는다.
  */
 @Component
-public class RouteCatalogLoader implements CurrentRouteVersion {
+public class RouteCatalogLoader implements CurrentRouteVersion, RefreshRouteCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(RouteCatalogLoader.class);
+
+    private final java.util.Map<String, String> knownNames = new java.util.LinkedHashMap<>();
 
     private final CurrentRouteVersionQuery currentRouteVersionQuery;
     private final ApiCallQuota apiCallQuota;
@@ -68,12 +71,30 @@ public class RouteCatalogLoader implements CurrentRouteVersion {
         return created.isPresent() ? Optional.of(new RouteReference(created.getAsLong())) : Optional.empty();
     }
 
+    @Override
+    public Optional<RouteReference> refresh(String sourceRouteId, OffsetDateTime readAt) {
+        OptionalLong updated = openFromUpstream(sourceRouteId, readAt);
+        return updated.isPresent() ? Optional.of(new RouteReference(updated.getAsLong())) : Optional.empty();
+    }
+
+    @Override
+    public synchronized String knownRouteName(String sourceRouteId) {
+        return knownNames.getOrDefault(sourceRouteId, "");
+    }
+
+    private synchronized void rememberName(UpstreamRoute route) {
+        if (!knownNames.containsKey(route.sourceRouteId()) && knownNames.size() >= 256) {
+            knownNames.remove(knownNames.keySet().iterator().next());
+        }
+        knownNames.put(route.sourceRouteId(), route.displayName() == null ? "" : route.displayName());
+    }
+
     private OptionalLong openFromUpstream(
         String sourceRouteId,
         OffsetDateTime readAt
     ) {
         if (!apiCallQuota.reserveRouteCatalog(readAt, routeSource.requiredCallsPerRead())) {
-            log.warn("하루 호출 한도가 남지 않아 노선정보를 못 받았다. 이 노선은 수집을 못 한다. 노선={}",
+            log.warn("하루 호출 한도가 남지 않아 노선정보를 갱신하지 못했다. 노선={}",
                 sourceRouteId);
             return OptionalLong.empty();
         }
@@ -87,7 +108,10 @@ public class RouteCatalogLoader implements CurrentRouteVersion {
                 log.warn("노선정보를 읽지 못해 판본을 못 열었다. 노선={} 사유={}", sourceRouteId, failed.reason());
                 yield OptionalLong.empty();
             }
-            case Success success -> OptionalLong.of(open(success.route(), readAt));
+            case Success success -> {
+                rememberName(success.route());
+                yield OptionalLong.of(open(success.route(), readAt));
+            }
         };
     }
 

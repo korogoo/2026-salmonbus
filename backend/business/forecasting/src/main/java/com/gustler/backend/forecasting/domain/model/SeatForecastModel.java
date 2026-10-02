@@ -12,6 +12,10 @@ package com.gustler.backend.forecasting.domain.model;
  */
 public interface SeatForecastModel {
 
+    default boolean supportsRoute(RouteStops stops) {
+        return true;
+    }
+
     SeatForecastResult predict(
         SeatForecastInput input
     );

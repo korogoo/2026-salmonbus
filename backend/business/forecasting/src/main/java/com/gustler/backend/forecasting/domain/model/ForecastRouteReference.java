@@ -35,17 +35,32 @@ public final class ForecastRouteReference {
         }
     }
 
-    public void requireMatches(RouteStops actual) {
+    public boolean matches(RouteStops actual) {
         if (checked.get(actual.routeVersionId()) == actual) {
-            return;
+            return true;
+        }
+        if (!ModelRoute.covers(actual.sourceRouteId())) {
+            return false;
         }
         List<Stop> expected = routes.get(ModelRoute.of(actual.sourceRouteId()));
-        List<Stop> measured = actual.stops().stream()
-            .map(stop -> new Stop(stop.stopOrder(), stop.stopId(), stop.boardingAllowed(), stop.direction()))
-            .toList();
-        if (!measured.equals(expected)) {
-            throw new IllegalArgumentException("학습 정류장 기준과 운영 노선이 다르다: " + actual.sourceRouteId());
+        if (expected == null || expected.size() != actual.stops().size()) {
+            return false;
+        }
+        for (int index = 0; index < expected.size(); index++) {
+            Stop trained = expected.get(index);
+            RouteStop current = actual.stops().get(index);
+            if (trained.order() != current.stopOrder() || !trained.id().equals(current.stopId())
+                || trained.boardingAllowed() != current.boardingAllowed() || trained.direction() != current.direction()) {
+                return false;
+            }
         }
         checked.put(actual.routeVersionId(), actual);
+        return true;
+    }
+
+    public void requireMatches(RouteStops actual) {
+        if (!matches(actual)) {
+            throw new IllegalArgumentException("학습 정류장 기준과 운영 노선이 다르다: " + actual.sourceRouteId());
+        }
     }
 }

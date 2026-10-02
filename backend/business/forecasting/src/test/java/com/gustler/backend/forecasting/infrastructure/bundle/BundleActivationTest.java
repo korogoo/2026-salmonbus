@@ -375,6 +375,33 @@ class BundleActivationTest {
         assertThat(resolver().resolveActive()).isPresent();
     }
 
+    @Test
+    void 새_입력_번들은_수동_승격하고_이전_번들로_돌아갈_수_있다() {
+        BundleFiles legacy = DummyBundle.valid().writeTo(directoryUnder("legacy"));
+        assertThat(startUp(legacy, false)).isInstanceOf(ModelLoadResult.Activated.class);
+        var before = resolver().resolveActive().orElseThrow();
+        BundleFiles conditional = DummyBundle.conditional().put("releaseId", "conditional-release")
+            .writeTo(directoryUnder("conditional"));
+        assertThat(startUp(conditional, false)).isInstanceOf(ModelLoadResult.IdentityMismatch.class);
+        assertThat(resolver().resolveActive().orElseThrow().bundleDigest()).isEqualTo(before.bundleDigest());
+        assertThat(startUp(conditional, true)).isInstanceOf(ModelLoadResult.Promoted.class);
+        assertThat(resolver().resolveActive().orElseThrow().featureContractVersion())
+            .isEqualTo(com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.CONDITIONAL_VERSION);
+        assertThat(startUp(legacy, true)).isInstanceOf(ModelLoadResult.Promoted.class);
+        assertThat(resolver().resolveActive().orElseThrow().bundleDigest()).isEqualTo(before.bundleDigest());
+    }
+
+    @Test
+    void 정류장_파일이_변조된_새_번들은_기존_활성_배포를_바꾸지_않는다() throws Exception {
+        startUp(DummyBundle.valid().writeTo(directoryUnder("legacy")), false);
+        var before = deployments.findActive().orElseThrow();
+        BundleFiles conditional = DummyBundle.conditional().writeTo(directoryUnder("conditional"));
+        java.nio.file.Files.writeString(conditional.manifest().resolveSibling("route-reference.json"), "{}");
+        assertThat(startUp(conditional, true)).isInstanceOf(ModelLoadResult.Rejected.class);
+        assertThat(deployments.findActive()).contains(before);
+        assertThat(deploymentCount()).isEqualTo(1);
+    }
+
     /** 예보 경로는 모델 포트로 부르는데, 이 테스트는 열 31개를 곧바로 넣어 보려고 예측기를 꺼낸다. */
     private SeatDistributionPredictor predictorOf(
         RuntimeSnapshot snapshot

@@ -208,7 +208,7 @@ class BundleLoaderTest {
         // when & then
         assertRejectedBy(
             BundleCheck.BUNDLE_SCHEMA_VERSION,
-            loading(DummyBundle.valid().put("bundleSchemaVersion", "a18-live-bundle-v2")));
+            loading(DummyBundle.valid().put("bundleSchemaVersion", "a18-live-bundle-v999")));
     }
 
     @Test

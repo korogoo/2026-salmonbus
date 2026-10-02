@@ -55,8 +55,15 @@ public record BusRouteStationResponse(
 
         /** 이 정류소가 회차 지점인가. 회차하는 노선은 한 정류소만 {@code Y} 다. */
         @JsonProperty("turnYn")
-        String turnPoint
+        String turnPoint,
+
+        Double x,
+        Double y
     ) {
+
+        public RouteStationItem(String stopId, String name, Integer stopOrder, Integer turnSequence, String turnPoint) {
+            this(stopId, name, stopOrder, turnSequence, turnPoint, null, null);
+        }
 
         private static final String TURN_POINT = "Y";
 

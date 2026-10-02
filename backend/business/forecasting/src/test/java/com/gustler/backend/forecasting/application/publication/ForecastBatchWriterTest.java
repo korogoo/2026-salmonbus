@@ -202,9 +202,10 @@ class ForecastBatchWriterTest {
         when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(11, 43, 82), vehicle(12, 82, 82)));
 
         // when
-        writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
+        int savedCount = writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
 
         // then
+        assertThat(savedCount).isZero();
         assertThat(saved()).isEmpty();
         verify(inputs).confirmInput(100, NOW);
         assertThat(logs.list).hasSize(2);
@@ -216,9 +217,10 @@ class ForecastBatchWriterTest {
         when(trajectories.readTrajectories(100)).thenReturn(List.of());
 
         // when
-        writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
+        int savedCount = writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
 
         // then
+        assertThat(savedCount).isZero();
         assertThat(saved()).isEmpty();
         verify(inputs).confirmInput(100, NOW);
         assertThat(logs.list).isEmpty();

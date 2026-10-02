@@ -61,6 +61,7 @@ class JdbcRouteVersionQueryTest {
         RouteStops actual = repository.readStops(routeVersionId);
 
         // then
+        assertThat(actual.routeName()).isEqualTo("3330");
         assertThat(actual.stops())
             .extracting(RouteStop::stopOrder)
             .containsExactly(STOP_ORDER_1, STOP_ORDER_2, STOP_ORDER_3);
