@@ -41,7 +41,7 @@ class ForecastMonitoringTest {
         assertThat(ForecastMonitoring.quote("역 \"A\"\n출구")).isEqualTo("\"역 \\\"A\\\"\\n출구\"");
     }
     private SettledEvaluation sample(Double prediction, boolean usable) {
-        return new SettledEvaluation(1, 2, 3, 4, 2, .2, ScoringState.SETTLED,
+        return new SettledEvaluation(1, 6, 2, 3, 4, 2, .2, ScoringState.SETTLED,
             5L, 3, Instant.now(), Instant.now(), usable, "private-vehicle", 40, true,
             new EvaluationDiagnostics("3330", "야탑역 광장", "station1", "UP", 6, prediction, .25));
     }

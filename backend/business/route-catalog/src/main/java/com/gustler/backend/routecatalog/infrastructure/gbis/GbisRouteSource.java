@@ -134,7 +134,8 @@ public class GbisRouteSource implements RouteSource {
         List<RouteStationItem> stations
     ) {
         return stations.stream()
-            .map(station -> new UpstreamRouteStop(station.stopOrder(), station.stopId(), station.name()))
+            .map(station -> new UpstreamRouteStop(station.stopOrder(), station.stopId(), station.name(),
+                com.gustler.backend.routecatalog.domain.StopCoordinates.ofNullable(station.x(), station.y())))
             .toList();
     }
 

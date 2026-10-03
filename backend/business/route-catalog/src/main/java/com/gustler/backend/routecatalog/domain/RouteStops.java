@@ -61,7 +61,8 @@ public record RouteStops(
             upstreamStop.stopId(),
             upstreamStop.name(),
             directionOf(upstreamStop.stopOrder(), turnSequence),
-            BoardingPolicy.allowsBoardingAt(upstreamStop.stopId())
+            BoardingPolicy.allowsBoardingAt(upstreamStop.stopId()),
+            upstreamStop.coordinates()
         );
     }
 

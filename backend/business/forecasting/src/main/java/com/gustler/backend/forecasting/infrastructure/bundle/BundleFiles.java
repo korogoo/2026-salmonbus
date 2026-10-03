@@ -41,6 +41,17 @@ record BundleFiles(
         return read(weights);
     }
 
+    byte[] readRouteReference() {
+        Path path = manifest.resolveSibling("route-reference.json");
+        requireRegularFile(path, BundleCheck.ROUTE_REFERENCE);
+        try {
+            BundleCheck.ROUTE_REFERENCE.require(Files.size(path) <= 1_048_576, "정류장 기준 파일은 1MiB 이하여야 한다");
+        } catch (IOException error) {
+            throw new BundleRejectedException("정류장 기준 파일 크기를 읽지 못했다", error);
+        }
+        return read(path);
+    }
+
     private static void requireRegularFile(
         Path path,
         BundleCheck check

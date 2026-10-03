@@ -14,6 +14,8 @@ import com.gustler.backend.forecasting.api.ForecastPolicy;
 import com.gustler.backend.forecasting.domain.deployment.RuntimeSnapshot;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -42,6 +44,7 @@ public class PublishPendingForecastsService implements PublishPendingForecasts {
     private final ForecastPolicy properties;
     private final Clock clock;
     private Instant lastStaleWarningAt;
+    private final ForecastModelUsageLog modelUsage = new ForecastModelUsageLog();
 
     @PostConstruct
     void reportModelAvailability() {
@@ -90,6 +93,10 @@ public class PublishPendingForecastsService implements PublishPendingForecasts {
             RouteStops stops = WorkerOperationLog.measure("forecast_stops", routeVersionId,
                 () -> routeStops.readStops(routeVersionId));
             if (!runtime.get().covers(stops.sourceRouteId())) {
+                continue;
+            }
+            if (!runtime.get().model().supportsRoute(stops)) {
+                modelUsage.referenceMismatch(stops.sourceRouteId(), stops.routeName(), routeVersionId, runtime.get());
                 continue;
             }
             writeForecastsOf(routeVersionId, stops, notBefore, runtime.get());
@@ -147,8 +154,23 @@ public class PublishPendingForecastsService implements PublishPendingForecasts {
             () -> vehicleTrajectoryQuery.findBatchesAwaitingForecast(routeVersionId, notBefore,
                 properties.batchLimit()));
         for (PendingForecastBatch batch : batches) {
-            WorkerOperationLog.run("forecast_write_and_commit", routeVersionId,
+            int saved = WorkerOperationLog.measure("forecast_write_and_commit", routeVersionId,
                 () -> forecastBatchWriter.writeForecastsOf(batch, stops, runtime));
+            if (saved > 0) {
+                Runnable record = () -> modelUsage.committed(stops.sourceRouteId(), stops.routeName(),
+                    routeVersionId, batch.observationBatchId(), runtime);
+                // 외부 트랜잭션에 참여했다면 그 트랜잭션의 커밋까지 기다린다.
+                if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            record.run();
+                        }
+                    });
+                } else {
+                    record.run();
+                }
+            }
         }
     }
 }

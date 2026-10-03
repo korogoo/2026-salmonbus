@@ -92,7 +92,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
           AND forecast.target_stop_order = evaluation.target_stop_order
           AND (CAST(:arrivalObservationId AS bigint) IS NULL OR (
               arrival.id IS NOT NULL AND %s))
-        RETURNING version.route_id, forecast.route_version_id, evaluation.vehicle_observation_id,
+        RETURNING version.route_id, forecast.model_deployment_id, forecast.route_version_id, evaluation.vehicle_observation_id,
                   evaluation.target_stop_order, forecast.stops_to_target, forecast.seat_full_chance_raw,
                   evaluation.arrival_observation_id, evaluation.arrived_at, evaluation.seats_on_arrival,
                   evaluation.scoring_state, evaluation.scored_at,
@@ -150,7 +150,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
           AND forecast.target_stop_order = evaluation.target_stop_order
           AND (CAST(input.arrivalObservationId AS bigint) IS NULL OR (
               arrival.id IS NOT NULL AND %s))
-        RETURNING version.route_id, forecast.route_version_id, evaluation.vehicle_observation_id,
+        RETURNING version.route_id, forecast.model_deployment_id, forecast.route_version_id, evaluation.vehicle_observation_id,
                   evaluation.target_stop_order, forecast.stops_to_target, forecast.seat_full_chance_raw,
                   evaluation.arrival_observation_id, evaluation.arrived_at, evaluation.seats_on_arrival,
                   evaluation.scoring_state, evaluation.scored_at,
@@ -387,7 +387,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     }
 
     private static SettledEvaluation settledEvaluationOf(ResultSet row, int index) throws SQLException {
-        return new SettledEvaluation(row.getLong("route_id"), row.getLong("route_version_id"),
+        return new SettledEvaluation(row.getLong("route_id"), row.getLong("model_deployment_id"), row.getLong("route_version_id"),
                     row.getLong("vehicle_observation_id"), row.getInt("target_stop_order"),
                     row.getInt("stops_to_target"), row.getDouble("seat_full_chance_raw"),
                     ScoringState.valueOf(row.getString("scoring_state")),

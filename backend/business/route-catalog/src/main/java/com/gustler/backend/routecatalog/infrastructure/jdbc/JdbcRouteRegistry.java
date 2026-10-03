@@ -23,6 +23,8 @@ public class JdbcRouteRegistry implements RouteRegistry {
             SET display_name = EXCLUDED.display_name,
                 start_stop_name = EXCLUDED.start_stop_name,
                 end_stop_name = EXCLUDED.end_stop_name
+        WHERE (route.display_name, route.start_stop_name, route.end_stop_name)
+            IS DISTINCT FROM (EXCLUDED.display_name, EXCLUDED.start_stop_name, EXCLUDED.end_stop_name)
         RETURNING id
         """;
 
@@ -43,6 +45,8 @@ public class JdbcRouteRegistry implements RouteRegistry {
                 route.sourceRouteId(), SOURCE_ID, route.sourceRouteId(),
                 route.displayName(), route.startStopName(), route.endStopName())
             .query(Long.class)
-            .single();
+            .optional()
+            .orElseGet(() -> jdbcClient.sql("SELECT id FROM route WHERE public_route_id = ?")
+                .param(route.sourceRouteId()).query(Long.class).single());
     }
 }

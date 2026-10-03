@@ -13,12 +13,14 @@ public interface SameDayFullOutcomesStore {
 
     List<SameDayFullOutcomeCount> findCounts(
         long routeId,
+        long modelDeploymentId,
         SeoulDay day
     );
 
     /** 원본에서 다시 집계한 값으로 교체한다. 기존 누계에 더하지 않는다. */
     void upsertCounts(
         long routeId,
+        long modelDeploymentId,
         SeoulDay day,
         List<SameDayFullOutcomeCount> counts
     );
@@ -34,11 +36,12 @@ public interface SameDayFullOutcomesStore {
     );
 
     /** 이미 초기화된 날짜의 누계에 새 정산 증가분을 더한다. 호출자는 노선 잠금을 유지한다. */
-    void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments);
+    void addCounts(long routeId, long modelDeploymentId, SeoulDay day, List<SameDayFullOutcomeCount> increments);
 
     /** 저장된 누계 대신 현재 품질 조건에 맞는 평가 결과에서 직접 집계한다. */
     List<SameDayFullOutcomeCount> countFromSource(
         long routeId,
+        long modelDeploymentId,
         SeoulDay day,
         Instant until
     );

@@ -1,6 +1,8 @@
 package com.gustler.backend.forecasting.infrastructure.bundle;
 
 import com.gustler.backend.forecasting.domain.model.SeatDistributionInput;
+import com.gustler.backend.forecasting.domain.model.ForecastFeatureContract;
+import com.gustler.backend.forecasting.domain.model.ForecastRouteReference;
 import com.gustler.backend.forecasting.domain.model.SeatDistributionPredictor;
 import com.gustler.backend.forecasting.domain.deployment.SupportedForecastScope;
 
@@ -10,7 +12,8 @@ import com.gustler.backend.forecasting.domain.deployment.ModelRelease;
 /** 파일 구조와 대조 계산을 검증한 모델 계수다. */
 public record LoadedBundle(
     CoefficientBundle coefficients,
-    SeatDistributionPredictor predictor
+    SeatDistributionPredictor predictor,
+    ForecastRouteReference routeReference
 ) {
 
     /** 크기 묶음 아홉 개의 상대 경계. 학습 쪽 상수와 같아야 한다. */
@@ -31,8 +34,10 @@ public record LoadedBundle(
         BundleFiles files
     ) {
         CoefficientBundle coefficients = BundleLoader.load(files);
+        ForecastRouteReference reference = BundleLoader.featuresOf(coefficients.manifest()) != ForecastFeatureContract.LEGACY
+            ? BundleRouteReference.read(files.readRouteReference(), coefficients.manifest()) : null;
         LoadedBundle bundle = new LoadedBundle(
-            coefficients, new SeatDistributionPredictor(coefficients, RELATIVE_BIN_EDGES));
+            coefficients, new SeatDistributionPredictor(coefficients, RELATIVE_BIN_EDGES), reference);
         bundle.verifyGoldenVector();
         return bundle;
     }
@@ -65,7 +70,8 @@ public record LoadedBundle(
     public ModelRelease release() {
         BundleManifest manifest = coefficients.manifest();
         return new ModelRelease(manifest.releaseId(), manifest.modelVersion(), manifest.identityDigest(),
-            manifest.featureContractVersion(), manifest.dataThrough(), scope(), predictor);
+            manifest.featureContractVersion(), manifest.dataThrough(), scope(), predictor,
+            BundleLoader.featuresOf(manifest), routeReference);
     }
 
     public String releaseId() {

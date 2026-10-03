@@ -157,7 +157,7 @@ class SameDayTransactionBoundaryTest {
             written.countDown();
             await(release);
             return null;
-        }).when(countsSpy).addCounts(anyLong(), any(), any());
+        }).when(countsSpy).addCounts(anyLong(), anyLong(), any(), any());
         Future<?> running = workers.submit(settlement::settleArrivalLabels);
         try {
             await(written);
@@ -177,12 +177,12 @@ class SameDayTransactionBoundaryTest {
             call.callRealMethod();
             timeout();
             return null;
-        }).when(countsSpy).addCounts(anyLong(), any(), any());
+        }).when(countsSpy).addCounts(anyLong(), anyLong(), any(), any());
 
         assertThatThrownBy(settlement::settleArrivalLabels).isInstanceOf(QueryTimeoutException.class);
         assertUnsettled();
 
-        doAnswer(call -> call.callRealMethod()).when(countsSpy).addCounts(anyLong(), any(), any());
+        doAnswer(call -> call.callRealMethod()).when(countsSpy).addCounts(anyLong(), anyLong(), any(), any());
         settlement.settleArrivalLabels();
         settlement.settleArrivalLabels();
         assertSettledOnce();
@@ -243,14 +243,14 @@ class SameDayTransactionBoundaryTest {
     @Test
     void 별도_초기집계가_실패해도_예보와_묶음_완료는_커밋된다() {
         doAnswer(call -> { timeout(); return call.callRealMethod(); })
-            .when(countsSpy).countFromSource(anyLong(), any(), any());
+            .when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
         assertThatThrownBy(() -> initializer().initialize(routeId, SeoulDay.containing(NOW)))
             .isInstanceOf(QueryTimeoutException.class);
 
         writeForecast();
 
         assertForecastComplete();
-        assertThat(count("same_day_full_outcomes")).isZero();
+        assertThat(count("same_day_model_full_outcomes")).isZero();
     }
 
     @Test
@@ -262,14 +262,14 @@ class SameDayTransactionBoundaryTest {
         assertThat(jdbc.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id=?")
             .param(sourceId).query(String.class).single()).isEqualTo("SETTLED");
         assertThat(count("stop_demand_pending_sample")).isEqualTo(1);
-        assertThat(count("same_day_full_outcomes")).isZero();
+        assertThat(count("same_day_model_full_outcomes")).isZero();
     }
 
     @Test
     void 초기화_전후의_정산은_당일_합계에_정확히_한번씩_반영된다() {
         savePending();
         settlement.settleArrivalLabels();
-        assertThat(count("same_day_full_outcomes")).isZero();
+        assertThat(count("same_day_model_full_outcomes")).isZero();
         assertThat(initializer().initialize(routeId, SeoulDay.containing(NOW))).isTrue();
         long laterBatch = insertBatch(OBSERVED_AT.plusSeconds(2));
         long later = insertObservation(laterBatch, 1, 12);
@@ -278,7 +278,7 @@ class SameDayTransactionBoundaryTest {
         settlement.settleArrivalLabels();
         settlement.settleArrivalLabels();
         assertThat(initializer().initialize(routeId, SeoulDay.containing(NOW))).isFalse();
-        assertThat(countsSpy.findCounts(routeId, SeoulDay.containing(NOW))).singleElement()
+        assertThat(countsSpy.findCounts(routeId, modelId, SeoulDay.containing(NOW))).singleElement()
             .extracting(SameDayFullOutcomeCount::rowCount).isEqualTo(2);
         assertThat(count("stop_demand_pending_sample")).isEqualTo(2);
     }
@@ -291,7 +291,7 @@ class SameDayTransactionBoundaryTest {
         assertThat(jdbc.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id=?")
             .param(sourceId).query(String.class).single()).isEqualTo("PENDING");
         assertThat(count("stop_demand_pending_sample")).isZero();
-        assertThat(countsSpy.findCounts(routeId, SeoulDay.containing(ARRIVED_AT))).containsExactly(
+        assertThat(countsSpy.findCounts(routeId, modelId, SeoulDay.containing(ARRIVED_AT))).containsExactly(
             new SameDayFullOutcomeCount(0, 0, 0, 0, SeoulDay.containing(ARRIVED_AT).start()));
     }
 
@@ -299,7 +299,7 @@ class SameDayTransactionBoundaryTest {
         assertThat(jdbc.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id=?")
             .param(sourceId).query(String.class).single()).isEqualTo("SETTLED");
         assertThat(count("stop_demand_pending_sample")).isEqualTo(1);
-        assertThat(countsSpy.findCounts(routeId, SeoulDay.containing(ARRIVED_AT)).stream()
+        assertThat(countsSpy.findCounts(routeId, modelId, SeoulDay.containing(ARRIVED_AT)).stream()
             .filter(row -> row.rowCount() > 0).toList()).containsExactly(
             new SameDayFullOutcomeCount(1, 1, 1, .25, ARRIVED_AT));
     }
@@ -376,7 +376,7 @@ class SameDayTransactionBoundaryTest {
 
     void initializeEmptyDay() {
         var day = SeoulDay.containing(ARRIVED_AT);
-        countsSpy.upsertCounts(routeId, day, List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start())));
+        countsSpy.upsertCounts(routeId, modelId, day, List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start())));
     }
 
     void savePending() {

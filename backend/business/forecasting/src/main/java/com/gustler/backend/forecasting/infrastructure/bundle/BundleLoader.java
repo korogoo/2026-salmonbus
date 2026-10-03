@@ -3,7 +3,10 @@ package com.gustler.backend.forecasting.infrastructure.bundle;
 import com.gustler.backend.forecasting.domain.model.Sha256;
 
 import com.gustler.backend.forecasting.domain.model.SeatForecastDesignMatrix;
+import com.gustler.backend.forecasting.domain.model.ForecastFeatureContract;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Arrays;
@@ -32,6 +35,7 @@ public final class BundleLoader {
      * 서술형 이름이라 일련번호로 보기도 어렵다. 그래서 이 두 줄 밖으로는 안 퍼뜨린다.
      */
     private static final String BUNDLE_SCHEMA_VERSION = "a18-live-bundle-v1";
+    static final String CONDITIONAL_SCHEMA_VERSION = "a18-live-bundle-v2";
     private static final String MODEL_VERSION = "seat-distribution-a18-v1";
 
     /** 노선 순서가 계약이다. 뒤집으면 다른 노선 계수로 예보한다. */
@@ -53,7 +57,9 @@ public final class BundleLoader {
 
         BundleManifest manifest = BundleManifestReader.read(manifestContent);
         checkIdentity(manifest);
+        checkDeploymentMetadata(manifest);
         checkScope(manifest);
+        checkConditionalContract(manifest);
         checkWeightsDigest(manifest, weightsContent);
         checkGoldenVectorDigest(manifest);
 
@@ -66,7 +72,8 @@ public final class BundleLoader {
         BundleManifest manifest
     ) {
         BundleCheck.BUNDLE_SCHEMA_VERSION.require(
-            BUNDLE_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion()), manifest.bundleSchemaVersion());
+            (BUNDLE_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion())
+                || CONDITIONAL_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion())), manifest.bundleSchemaVersion());
         BundleCheck.MODEL_VERSION.require(
             MODEL_VERSION.equals(manifest.modelVersion()), manifest.modelVersion());
         BundleCheck.FEATURE_CONTRACT_VERSION.require(
@@ -77,6 +84,30 @@ public final class BundleLoader {
             manifest.routeReferenceDigest().length() == 64, manifest.routeReferenceDigest());
     }
 
+    /** DB 저장이나 메모리 적재 전에 배포 메타데이터를 확인한다. */
+    private static void checkDeploymentMetadata(
+        BundleManifest manifest
+    ) {
+        checkIdentifierLength("releaseId", manifest.releaseId(), 80);
+        checkIdentifierLength("featureContractVersion", manifest.featureContractVersion(), 40);
+        try {
+            Instant.parse(manifest.dataThrough());
+        } catch (DateTimeParseException error) {
+            throw BundleCheck.DATA_THROUGH.reject("dataThrough 는 Instant 형식이어야 한다");
+        }
+    }
+
+    private static void checkIdentifierLength(
+        String field,
+        String value,
+        final int maximum
+    ) {
+        final int characters = value.codePointCount(0, value.length());
+        BundleCheck.DEPLOYMENT_IDENTIFIER_LENGTH.require(
+            characters <= maximum,
+            "%s: %d자, 최대 %d자".formatted(field, characters, maximum));
+    }
+
     private static void checkScope(
         BundleManifest manifest
     ) {
@@ -84,12 +115,37 @@ public final class BundleLoader {
         BundleCheck.HORIZON_STOPS.require(
             expectedHorizonStops().equals(manifest.horizonStops()), manifest.horizonStops().toString());
         BundleCheck.FEATURE_NAMES.require(
-            SeatForecastDesignMatrix.COLUMN_NAMES.equals(manifest.featureNames()),
+            featuresOf(manifest).featureNames().equals(manifest.featureNames()),
             "우리 열 %d개, 계수 파일 %d개. 처음 어긋나는 자리는 %s"
                 .formatted(
-                    SeatForecastDesignMatrix.COLUMN_NAMES.size(),
+                    featuresOf(manifest).featureNames().size(),
                     manifest.featureNames().size(),
-                    firstDifferenceOf(manifest.featureNames())));
+                    firstDifferenceOf(featuresOf(manifest).featureNames(), manifest.featureNames())));
+    }
+
+    static ForecastFeatureContract featuresOf(BundleManifest manifest) {
+        if (!CONDITIONAL_SCHEMA_VERSION.equals(manifest.bundleSchemaVersion())) {
+            return ForecastFeatureContract.LEGACY;
+        }
+        return ForecastFeatureContract.STATISTICS_VERSION.equals(manifest.featureContractVersion())
+            ? ForecastFeatureContract.STOP_DIRECTION_TIME_STATISTICS : ForecastFeatureContract.STOP_DIRECTION_TIME;
+    }
+
+    private static void checkConditionalContract(BundleManifest manifest) {
+        boolean conditional = featuresOf(manifest) != ForecastFeatureContract.LEGACY;
+        boolean statistics = ForecastFeatureContract.STATISTICS_VERSION.equals(manifest.featureContractVersion());
+        BundleCheck.FEATURE_CONTRACT_VERSION.require(
+            conditional == (statistics || ForecastFeatureContract.CONDITIONAL_VERSION.equals(manifest.featureContractVersion())),
+            "새 입력 계약은 v2 번들에서만 지원한다: " + manifest.featureContractVersion());
+        if (conditional) {
+            BundleCheck.FEATURE_CONTRACT_VERSION.require(
+                manifest.normalizationConstants().equals(Map.of("largestSeatCount", 68.0, "lowSeatBandWidth", 20.0))
+                    && manifest.timeSlotSource().equals("observation_batch.response_received_at;Asia/Seoul;new_time_slot=0")
+                    && manifest.capacityPolicy().equals("maximum-seats-ever-observed")
+                    && manifest.cellStatisticsPolicy().equals(statistics
+                        ? ForecastFeatureContract.STATISTICS_POLICY : "statistics-inputs-zero"),
+                "위치·방향·시간 계약의 정규화·시간·정원·통계 규칙이 다르다");
+        }
     }
 
     private static List<Integer> expectedHorizonStops() {
@@ -146,9 +202,8 @@ public final class BundleLoader {
     }
 
     private static String firstDifferenceOf(
-        List<String> featureNames
+        List<String> expected, List<String> featureNames
     ) {
-        List<String> expected = SeatForecastDesignMatrix.COLUMN_NAMES;
         for (int index = 0; index < Math.min(expected.size(), featureNames.size()); index++) {
             if (!expected.get(index).equals(featureNames.get(index))) {
                 return "%d번 열. 우리 %s, 계수 파일 %s"

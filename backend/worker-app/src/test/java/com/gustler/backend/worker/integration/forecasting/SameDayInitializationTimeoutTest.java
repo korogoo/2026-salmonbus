@@ -49,12 +49,18 @@ class SameDayInitializationTimeoutTest {
 
     @BeforeEach
     void 작업자_설정으로_초기화할_노선을_준비한다() {
-        jdbc.sql("TRUNCATE route RESTART IDENTITY CASCADE").update();
+        jdbc.sql("TRUNCATE route, model_deployment RESTART IDENTITY CASCADE").update();
         routeId = jdbc.sql("""
             INSERT INTO route(public_route_id,source_id,source_route_id,display_name,start_stop_name,end_stop_name)
             VALUES ('fixture','fixture','fixture','fixture','start','end') RETURNING id
             """).query(Long.class).single();
         jdbc.sql("INSERT INTO route_data_quality(route_id) VALUES (?)").param(routeId).update();
+        jdbc.sql("""
+            INSERT INTO model_deployment(deployment_key,release_id,model_key,model_version,bundle_digest,
+                prediction_target_version,calculation_version,supported_scope_digest,data_until,state)
+            VALUES (?, 'fixture', 'seat-full-chance', '1', ?, 'SEAT_FULL_CHANCE_V1', 'fixture', ?, ?, 'ACTIVE')
+            """).params(java.util.UUID.randomUUID(), "0".repeat(64), "0".repeat(64),
+                OffsetDateTime.ofInstant(OBSERVED_AT, ZoneOffset.UTC)).update();
         jdbc.sql("INSERT INTO route_version(route_id,content_digest,valid_from,turn_sequence) VALUES (?,?,?,20)")
             .params(routeId, "0".repeat(64), OffsetDateTime.ofInstant(OBSERVED_AT, ZoneOffset.UTC)).update();
     }
@@ -73,12 +79,12 @@ class SameDayInitializationTimeoutTest {
             Object counted = call.callRealMethod();
             sourceQueryMs.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
             return counted;
-        }).when(countsSpy).countFromSource(anyLong(), any(), any());
+        }).when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
 
         assertThat(context.getBean(SameDayFullOutcomesInitializer.class)
             .initialize(routeId, SeoulDay.containing(NOW))).isTrue();
         assertThat(sourceQueryMs.get()).isGreaterThanOrEqualTo(2_000L);
-        assertThat(count("same_day_full_outcomes")).isEqualTo(1);
+        assertThat(count("same_day_model_full_outcomes")).isEqualTo(1);
     }
 
     long count(String table) { return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single(); }
