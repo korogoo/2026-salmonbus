@@ -147,7 +147,7 @@ class ForecastPublicationTransactionTest {
         runtime = runtime("first-release", input -> RESULT);
         when(statistics.readAsOf(eq(routeVersionId), any(), eq(CALCULATION_VERSION), eq(OBSERVED_AT)))
             .thenReturn(new StopDemandStatistics(routeVersionId, ForecastTimeSlot.of(batch, CLOCK), 0, List.of()));
-        when(outcomes.outcomesFor(routeId, OBSERVED_AT)).thenReturn(Map.of());
+        when(outcomes.outcomesFor(routeId, 1L, OBSERVED_AT)).thenReturn(Map.of());
         when(trajectories.readTrajectories(batchId)).thenReturn(List.of(trajectory(observationId)));
     }
 

@@ -136,7 +136,7 @@ class JdbcForecastEvaluationRepositoryTest {
         assertThat(evaluationRepository.findRouteVersionIdsWithPendingForecasts()).doesNotContain(routeVersionId);
         assertThat(jdbcClient.sql("SELECT count(*) FROM stop_demand_pending_sample WHERE route_version_id=?")
             .param(routeVersionId).query(Integer.class).single()).isZero();
-        assertThat(jdbcClient.sql("SELECT count(*) FROM same_day_full_outcomes WHERE route_id=?")
+        assertThat(jdbcClient.sql("SELECT count(*) FROM same_day_model_full_outcomes WHERE route_id=?")
             .param(routeId).query(Integer.class).single()).isZero();
         assertThat(jdbcClient.sql("SELECT remaining_seats FROM vehicle_observation WHERE id=?")
             .param(vehicleObservationId).query(Integer.class).single()).isEqualTo(SEATS_LEFT);
@@ -347,7 +347,7 @@ class JdbcForecastEvaluationRepositoryTest {
 
         // then
         assertThat(actual).containsExactly(new SettledForecast(
-            routeId, STOPS_TO_TARGET, 0.41, ARRIVAL_RESPONSE_RECEIVED_AT.toInstant(), SEATS_ON_ARRIVAL_WHEN_FULL));
+            routeId, modelDeploymentId, STOPS_TO_TARGET, 0.41, ARRIVAL_RESPONSE_RECEIVED_AT.toInstant(), SEATS_ON_ARRIVAL_WHEN_FULL));
     }
 
     @Test

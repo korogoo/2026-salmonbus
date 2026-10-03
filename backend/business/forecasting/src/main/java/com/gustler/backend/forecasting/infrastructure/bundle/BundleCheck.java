@@ -21,6 +21,8 @@ enum BundleCheck {
     BUNDLE_SCHEMA_VERSION("번들 판 이름이 다르다"),
     MODEL_VERSION("모델 판 이름이 다르다"),
     FEATURE_CONTRACT_VERSION("특징 계약 판 이름이 없다"),
+    DEPLOYMENT_IDENTIFIER_LENGTH("배포 식별자가 DB 저장 길이를 초과한다"),
+    DATA_THROUGH("학습 종료 시각을 읽을 수 없다"),
     ROUTE_REFERENCE("노선 참조 판 이름이나 요약값이 없다"),
     ROUTE_ORDER("노선 목록의 순서가 계약과 다르다"),
     HORIZON_STOPS("예보 거리 목록이 1정류장 앞부터 12정류장 앞까지가 아니다"),

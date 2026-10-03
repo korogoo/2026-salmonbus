@@ -233,6 +233,55 @@ class RouteVersionLoaderTest {
         assertThat(validToOf(versionId)).isEqualTo(SECOND_READ_AT);
     }
 
+    @Test
+    void 같은_좌표를_반복_수신해도_이력은_늘지_않는다() {
+        long versionId = loader.load(routeId, stopsWithCoordinates(127.0), TIMETABLE_1650, FIRST_READ_AT);
+        long again = loader.load(routeId, stopsWithCoordinates(127.0), TIMETABLE_1650, SECOND_READ_AT);
+
+        assertThat(again).isEqualTo(versionId);
+        assertThat(coordinateHistoryCount(versionId)).isEqualTo(1);
+        assertThat(jdbcClient.sql("SELECT observed_at FROM route_stop_location_history WHERE route_version_id = ?")
+            .param(versionId).query(OffsetDateTime.class).single()).isEqualTo(FIRST_READ_AT);
+    }
+
+    @Test
+    void 좌표만_바뀌면_노선_버전은_유지하고_좌표_이력만_저장한다() {
+        long versionId = loader.load(routeId, stopsWithCoordinates(127.0), TIMETABLE_1650, FIRST_READ_AT);
+        long again = loader.load(routeId, stopsWithCoordinates(127.1), TIMETABLE_1650, SECOND_READ_AT);
+
+        assertThat(again).isEqualTo(versionId);
+        assertThat(versionCount()).isEqualTo(1);
+        assertThat(coordinateHistoryCount(versionId)).isEqualTo(2);
+        assertThat(jdbcClient.sql("SELECT x FROM route_stop_location_history WHERE route_version_id = ? ORDER BY observed_at")
+            .param(versionId).query(Double.class).list()).containsExactly(127.0, 127.1);
+    }
+
+    @Test
+    void 처음_좌표가_없어도_나중에_받은_시점부터만_저장한다() {
+        long versionId = loader.load(routeId, threeStops(), TIMETABLE_1650, FIRST_READ_AT);
+        assertThat(coordinateHistoryCount(versionId)).isZero();
+        loader.load(routeId, stopsWithCoordinates(127.0), TIMETABLE_1650, SECOND_READ_AT);
+        loader.load(routeId, threeStops(), TIMETABLE_1650, THIRD_READ_AT);
+
+        assertThat(coordinateHistoryCount(versionId)).isEqualTo(1);
+        assertThat(jdbcClient.sql("SELECT observed_at FROM route_stop_location_history WHERE route_version_id = ?")
+            .param(versionId).query(OffsetDateTime.class).single()).isEqualTo(SECOND_READ_AT);
+    }
+
+    private RouteStops stopsWithCoordinates(double x) {
+        return RouteStops.from(TURN_SEQUENCE, List.of(
+            new UpstreamRouteStop(1, STOP_205000217, "범계역",
+                new com.gustler.backend.routecatalog.domain.StopCoordinates(x, 37.4)),
+            new UpstreamRouteStop(2, STOP_277103149, "안양대교(경유)"),
+            new UpstreamRouteStop(3, STOP_208000069, "안양역")
+        ));
+    }
+
+    private int coordinateHistoryCount(long versionId) {
+        return jdbcClient.sql("SELECT count(*) FROM route_stop_location_history WHERE route_version_id = ?")
+            .param(versionId).query(Integer.class).single();
+    }
+
     private void insertClosedVersion() {
         jdbcClient.sql("""
                 INSERT INTO route_version (route_id, content_digest, valid_from, valid_to)

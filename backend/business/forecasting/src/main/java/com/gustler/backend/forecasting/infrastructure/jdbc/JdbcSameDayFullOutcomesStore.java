@@ -18,23 +18,24 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
 
     private static final String SELECT_COUNTS = """
         SELECT stops_to_target, row_count, actual_full_count, raw_full_chance_sum, settled_through
-        FROM same_day_full_outcomes
+        FROM same_day_model_full_outcomes
         WHERE route_id = :routeId
+          AND model_deployment_id = :modelDeploymentId
           AND outcome_date = :outcomeDate
           AND quality_revision = (SELECT quality_revision FROM route_data_quality WHERE route_id = :routeId)
         ORDER BY stops_to_target
         """;
 
     private static final String UPSERT_COUNT = """
-        INSERT INTO same_day_full_outcomes (
-            route_id, outcome_date, stops_to_target,
+        INSERT INTO same_day_model_full_outcomes (
+            route_id, model_deployment_id, outcome_date, stops_to_target,
             row_count, actual_full_count, raw_full_chance_sum, settled_through, quality_revision
         ) VALUES (
-            :routeId, :outcomeDate, :stopsToTarget,
+            :routeId, :modelDeploymentId, :outcomeDate, :stopsToTarget,
             :rowCount, :actualFullCount, :rawFullChanceSum, :settledThrough,
             (SELECT quality_revision FROM route_data_quality WHERE route_id = :routeId)
         )
-        ON CONFLICT (route_id, outcome_date, stops_to_target) DO UPDATE SET
+        ON CONFLICT (route_id, model_deployment_id, outcome_date, stops_to_target) DO UPDATE SET
             row_count = EXCLUDED.row_count,
             actual_full_count = EXCLUDED.actual_full_count,
             raw_full_chance_sum = EXCLUDED.raw_full_chance_sum,
@@ -43,24 +44,24 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
         """;
 
     private static final String ADD_TO_COUNT = """
-        INSERT INTO same_day_full_outcomes (
-            route_id, outcome_date, stops_to_target,
+        INSERT INTO same_day_model_full_outcomes (
+            route_id, model_deployment_id, outcome_date, stops_to_target,
             row_count, actual_full_count, raw_full_chance_sum, settled_through, quality_revision
         ) VALUES (
-            :routeId, :outcomeDate, :stopsToTarget, :rowCount, :fullCount, :rawFullChance, :arrivedAt,
+            :routeId, :modelDeploymentId, :outcomeDate, :stopsToTarget, :rowCount, :fullCount, :rawFullChance, :arrivedAt,
             (SELECT quality_revision FROM route_data_quality WHERE route_id = :routeId)
         )
-        ON CONFLICT (route_id, outcome_date, stops_to_target) DO UPDATE SET
-            row_count = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
-                THEN same_day_full_outcomes.row_count + EXCLUDED.row_count ELSE EXCLUDED.row_count END,
-            actual_full_count = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
-                THEN same_day_full_outcomes.actual_full_count + EXCLUDED.actual_full_count
+        ON CONFLICT (route_id, model_deployment_id, outcome_date, stops_to_target) DO UPDATE SET
+            row_count = CASE WHEN same_day_model_full_outcomes.quality_revision = EXCLUDED.quality_revision
+                THEN same_day_model_full_outcomes.row_count + EXCLUDED.row_count ELSE EXCLUDED.row_count END,
+            actual_full_count = CASE WHEN same_day_model_full_outcomes.quality_revision = EXCLUDED.quality_revision
+                THEN same_day_model_full_outcomes.actual_full_count + EXCLUDED.actual_full_count
                 ELSE EXCLUDED.actual_full_count END,
-            raw_full_chance_sum = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
-                THEN same_day_full_outcomes.raw_full_chance_sum + EXCLUDED.raw_full_chance_sum
+            raw_full_chance_sum = CASE WHEN same_day_model_full_outcomes.quality_revision = EXCLUDED.quality_revision
+                THEN same_day_model_full_outcomes.raw_full_chance_sum + EXCLUDED.raw_full_chance_sum
                 ELSE EXCLUDED.raw_full_chance_sum END,
-            settled_through = CASE WHEN same_day_full_outcomes.quality_revision = EXCLUDED.quality_revision
-                THEN GREATEST(same_day_full_outcomes.settled_through, EXCLUDED.settled_through)
+            settled_through = CASE WHEN same_day_model_full_outcomes.quality_revision = EXCLUDED.quality_revision
+                THEN GREATEST(same_day_model_full_outcomes.settled_through, EXCLUDED.settled_through)
                 ELSE EXCLUDED.settled_through END,
             quality_revision = EXCLUDED.quality_revision
         """;
@@ -90,6 +91,7 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
           AND evaluation.arrived_at >= :dayStart
           AND evaluation.arrived_at < :dayEnd
           AND evaluation.arrived_at <= :until
+          AND forecast.model_deployment_id = :modelDeploymentId
           AND evaluation.scoring_state = 'SETTLED'
           AND evaluation.seats_on_arrival IS NOT NULL
           AND forecast.quality_revision = (SELECT quality_revision FROM route_data_quality WHERE route_id = :routeId)
@@ -116,10 +118,12 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
     @Override
     public List<SameDayFullOutcomeCount> findCounts(
         final long routeId,
+        long modelDeploymentId,
         SeoulDay day
     ) {
         return jdbcClient.sql(SELECT_COUNTS)
             .param("routeId", routeId)
+            .param("modelDeploymentId", modelDeploymentId)
             .param("outcomeDate", day.date())
             .query(JdbcSameDayFullOutcomesStore::countOf)
             .list();
@@ -128,12 +132,14 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
     @Override
     public void upsertCounts(
         final long routeId,
+        long modelDeploymentId,
         SeoulDay day,
         List<SameDayFullOutcomeCount> counts
     ) {
         for (SameDayFullOutcomeCount count : counts) {
             jdbcClient.sql(UPSERT_COUNT)
                 .param("routeId", routeId)
+            .param("modelDeploymentId", modelDeploymentId)
                 .param("outcomeDate", day.date())
                 .param("stopsToTarget", count.stopsToTarget())
                 .param("rowCount", count.rowCount())
@@ -148,13 +154,13 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
     public void add(
         SettledForecast settled
     ) {
-        addCounts(settled.routeId(), SeoulDay.containing(settled.arrivedAt()), List.of(
+        addCounts(settled.routeId(), settled.modelDeploymentId(), SeoulDay.containing(settled.arrivedAt()), List.of(
             new SameDayFullOutcomeCount(settled.stopsToTarget(), 1, settled.wasFull() ? 1 : 0,
                 settled.rawFullChance(), settled.arrivedAt())));
     }
 
     @Override
-    public void addCounts(long routeId, SeoulDay day, List<SameDayFullOutcomeCount> increments) {
+    public void addCounts(long routeId, long modelDeploymentId, SeoulDay day, List<SameDayFullOutcomeCount> increments) {
         for (SameDayFullOutcomeCount count : increments) {
             if (count.rowCount() <= 0 || count.stopsToTarget() <= 0) {
                 throw new IllegalArgumentException("증가분에는 실제 정산 결과가 필요합니다");
@@ -163,6 +169,7 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
         for (SameDayFullOutcomeCount count : increments) {
             jdbcClient.sql(ADD_TO_COUNT)
                 .param("routeId", routeId)
+            .param("modelDeploymentId", modelDeploymentId)
                 .param("outcomeDate", day.date())
                 .param("stopsToTarget", count.stopsToTarget())
                 .param("rowCount", count.rowCount())
@@ -176,11 +183,13 @@ public class JdbcSameDayFullOutcomesStore implements SameDayFullOutcomesStore {
     @Override
     public List<SameDayFullOutcomeCount> countFromSource(
         final long routeId,
+        long modelDeploymentId,
         SeoulDay day,
         Instant until
     ) {
         return jdbcClient.sql(COUNT_FROM_SOURCE)
             .param("routeId", routeId)
+            .param("modelDeploymentId", modelDeploymentId)
             .param("dayStart", offsetOf(day.start()))
             .param("dayEnd", offsetOf(day.end()))
             .param("until", offsetOf(until))

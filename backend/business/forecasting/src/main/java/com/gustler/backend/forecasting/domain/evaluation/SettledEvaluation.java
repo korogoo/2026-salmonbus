@@ -6,6 +6,7 @@ import java.util.Optional;
 
 public record SettledEvaluation(
     long routeId,
+    long modelDeploymentId,
     long routeVersionId,
     long vehicleObservationId,
     int targetStopOrder,
@@ -34,6 +35,6 @@ public record SettledEvaluation(
         if (!state.scorable() || !usableForCalibration) {
             return Optional.empty();
         }
-        return Optional.of(new SettledForecast(routeId, stopsToTarget, rawFullChance, arrivedAt, seatsOnArrival));
+        return Optional.of(new SettledForecast(routeId, modelDeploymentId, stopsToTarget, rawFullChance, arrivedAt, seatsOnArrival));
     }
 }

@@ -61,6 +61,7 @@ class JdbcRouteVersionQueryTest {
         RouteStops actual = repository.readStops(routeVersionId);
 
         // then
+        assertThat(actual.routeName()).isEqualTo("3330");
         assertThat(actual.stops())
             .extracting(RouteStop::stopOrder)
             .containsExactly(STOP_ORDER_1, STOP_ORDER_2, STOP_ORDER_3);
@@ -100,6 +101,17 @@ class JdbcRouteVersionQueryTest {
         assertThat(actual.stops())
             .extracting(RouteStop::stopOrder)
             .containsExactly(STOP_ORDER_1, STOP_ORDER_2);
+    }
+
+    @Test
+    void 정류장에_저장된_UP_DOWN을_예보_입력으로_읽는다() {
+        long version = insertCurrentRouteVersion(ROUTE_204000057);
+        insertBoardingStop(version, STOP_ORDER_1);
+        insertBoardingStop(version, STOP_ORDER_2);
+        jdbcClient.sql("UPDATE route_stop SET direction = 'DOWN' WHERE route_version_id = ? AND stop_order = ?")
+            .params(version, STOP_ORDER_2).update();
+        assertThat(repository.readStops(version).stops()).extracting(stop -> stop.direction().name())
+            .containsExactly("UP", "DOWN");
     }
 
     private long insertCurrentRouteVersion(

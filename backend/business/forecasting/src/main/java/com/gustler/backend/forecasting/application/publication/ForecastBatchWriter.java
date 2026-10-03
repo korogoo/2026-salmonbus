@@ -21,6 +21,7 @@ import com.gustler.backend.observations.api.CollectionInputs;
 
 import com.gustler.backend.forecasting.domain.deployment.RuntimeSnapshot;
 import com.gustler.backend.forecasting.domain.model.SameDayFullOutcomes;
+import com.gustler.backend.forecasting.domain.model.ForecastFeatureContract;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -67,8 +68,9 @@ public class ForecastBatchWriter {
         this.collectionInputs = collectionInputs;
     }
 
+    /** 이번 호출에서 저장한 예보 수. 빈 발행도 기존처럼 처리 완료로 확정한다. */
     @Transactional
-    public void writeForecastsOf(
+    public int writeForecastsOf(
         PendingForecastBatch batch,
         RouteStops stops,
         RuntimeSnapshot runtime
@@ -78,7 +80,7 @@ public class ForecastBatchWriter {
         TimeSlot timeSlot = ForecastTimeSlot.of(batch, clock);
         StopDemandStatistics statistics = stopDemandStatisticsOf(batch, runtime, timeSlot);
         Map<Integer, SameDayFullOutcomes> sameDayOutcomes =
-            sameDayFullOutcomesService.outcomesFor(batch.routeId(), batch.responseReceivedAt());
+            sameDayFullOutcomesService.outcomesFor(batch.routeId(), runtime.deploymentId(), batch.responseReceivedAt());
         List<SeatForecast> predictions = forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt);
         publications.save(new ForecastPublication(
             batch.observationBatchId(), batch.routeVersionId(), runtime.deploymentId(), statistics.revision(),
@@ -87,6 +89,7 @@ public class ForecastBatchWriter {
             .map(prediction -> ForecastEvaluation.pending(prediction.vehicleObservationId(), prediction.targetStopOrder()))
             .toList());
         collectionInputs.confirmInput(batch.observationBatchId(), generatedAt);
+        return predictions.size();
     }
 
     /** 관측 시점에 사용할 수 있었던 통계 값과 버전을 함께 읽는다. */
@@ -95,8 +98,12 @@ public class ForecastBatchWriter {
         RuntimeSnapshot runtime,
         TimeSlot timeSlot
     ) {
+        String statisticsVersion = ForecastFeatureContract.STATISTICS_VERSION
+            .equals(runtime.featureContractVersion())
+            ? ForecastFeatureContract.STATISTICS_CALCULATION_VERSION
+            : runtime.featureContractVersion();
         return stopDemandStatisticsRepository.readAsOf(
-            batch.routeVersionId(), timeSlot, runtime.featureContractVersion(), batch.responseReceivedAt());
+            batch.routeVersionId(), timeSlot, statisticsVersion, batch.responseReceivedAt());
     }
 
     private List<SeatForecast> forecastsOf(

@@ -98,7 +98,7 @@ class ForecastBatchWriterTest {
     void setUp() {
         when(quality.lock(anyLong())).thenReturn(1L);
         when(statistics.readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW)).thenReturn(STATISTICS);
-        when(outcomes.outcomesFor(1, NOW)).thenReturn(Map.of());
+        when(outcomes.outcomesFor(1, 7L, NOW)).thenReturn(Map.of());
         logs.start();
         ((Logger) LoggerFactory.getLogger(ForecastBatchWriter.class)).addAppender(logs);
     }
@@ -202,9 +202,10 @@ class ForecastBatchWriterTest {
         when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(11, 43, 82), vehicle(12, 82, 82)));
 
         // when
-        writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
+        int savedCount = writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
 
         // then
+        assertThat(savedCount).isZero();
         assertThat(saved()).isEmpty();
         verify(inputs).confirmInput(100, NOW);
         assertThat(logs.list).hasSize(2);
@@ -216,9 +217,10 @@ class ForecastBatchWriterTest {
         when(trajectories.readTrajectories(100)).thenReturn(List.of());
 
         // when
-        writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
+        int savedCount = writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
 
         // then
+        assertThat(savedCount).isZero();
         assertThat(saved()).isEmpty();
         verify(inputs).confirmInput(100, NOW);
         assertThat(logs.list).isEmpty();
@@ -333,6 +335,20 @@ class ForecastBatchWriterTest {
         new SeatDistributionInput(new double[] {1}, "3330", input.target().distance().stopCount(),
             input.target().remainingSeats(), input.maximumSeatsEverObserved(), null);
         return RESULT;
+    }
+
+    @Test
+    void 통계_사용_모델은_모델_이름이_아닌_통계_계산_버전으로_관측시점_자료를_읽는다() {
+        String version = com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STATISTICS_CALCULATION_VERSION;
+        when(statistics.readAsOf(1, STATISTICS.timeSlot(), version, NOW)).thenReturn(STATISTICS);
+        when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(10, 20, 44)));
+        var runtime = new RuntimeSnapshot(new ActiveModelDeployment(7,
+            com.gustler.backend.forecasting.domain.model.ForecastFeatureContract.STATISTICS_VERSION,
+            "statistics-release", "0".repeat(64)), new SupportedForecastScope(List.of("1650", "3330")),
+            input -> { assertThat(input.statistics()).isSameAs(STATISTICS); return RESULT; }, NOW.minusSeconds(60));
+        writer.writeForecastsOf(BATCH, STOPS, runtime);
+        verify(statistics).readAsOf(1, STATISTICS.timeSlot(), version, NOW);
+        verify(outcomes).outcomesFor(1, 7L, NOW);
     }
 
     private RuntimeSnapshot runtime(SeatForecastModel model) {

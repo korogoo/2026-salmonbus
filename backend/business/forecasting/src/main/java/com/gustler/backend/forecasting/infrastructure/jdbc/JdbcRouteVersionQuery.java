@@ -1,6 +1,7 @@
 package com.gustler.backend.forecasting.infrastructure.jdbc;
 
 import com.gustler.backend.forecasting.domain.model.RouteStop;
+import com.gustler.backend.forecasting.domain.model.RouteDirection;
 import com.gustler.backend.forecasting.domain.model.RouteStops;
 import com.gustler.backend.forecasting.domain.publication.RouteStopsQuery;
 import com.gustler.backend.forecasting.domain.route.RouteVersionQuery;
@@ -38,18 +39,18 @@ public class JdbcRouteVersionQuery implements RouteVersionQuery, RouteStopsQuery
      * <p>승차할 수 없는 경유 지점도 빼지 않고 준다. 예보 대상에서 거르는 판정은 RouteStops 가
      * boarding_allowed 를 보고 한다. 여기서 걸러 버리면 도메인이 그 자리를 아예 못 본다.
      *
-     * <p>name 과 direction 은 안 읽는다. forecasting 의 RouteStop 이 그 둘을 들지 않는다.
+     * <p>정류장 이름 대신 순번과 실제 UP/DOWN 방향을 예보 입력에 전달한다.
      */
     private static final String SELECT_STOPS_OF_VERSION = """
-        SELECT route_version_id, stop_order, stop_id, boarding_allowed
+        SELECT route_version_id, stop_order, stop_id, boarding_allowed, direction
         FROM route_stop
         WHERE route_version_id = :routeVersionId
         ORDER BY stop_order
         """;
 
-    /** 그 판본이 어느 Open API 노선인가. 계수 묶음이 노선 이름으로 계수를 고르는 데 쓴다. */
+    /** 모델 선택용 API 노선 ID와 로그 표시용 실제 노선명을 기존 조회에서 함께 읽는다. */
     private static final String SELECT_SOURCE_ROUTE_ID = """
-        SELECT route.public_route_id
+        SELECT route.public_route_id, route.display_name
         FROM route_version
         JOIN route ON route.id = route_version.route_id
         WHERE route_version.id = :routeVersionId
@@ -80,17 +81,13 @@ public class JdbcRouteVersionQuery implements RouteVersionQuery, RouteStopsQuery
                 resultSet.getLong("route_version_id"),
                 resultSet.getInt("stop_order"),
                 resultSet.getString("stop_id"),
-                resultSet.getBoolean("boarding_allowed")))
+                resultSet.getBoolean("boarding_allowed"),
+                RouteDirection.valueOf(resultSet.getString("direction"))))
             .list();
-        return new RouteStops(routeVersionId, sourceRouteIdOf(routeVersionId), stops);
-    }
-
-    private String sourceRouteIdOf(
-        final long routeVersionId
-    ) {
         return jdbcClient.sql(SELECT_SOURCE_ROUTE_ID)
             .param("routeVersionId", routeVersionId)
-            .query(String.class)
+            .query((rs, row) -> new RouteStops(routeVersionId, rs.getString("public_route_id"),
+                stops, rs.getString("display_name")))
             .single();
     }
 }

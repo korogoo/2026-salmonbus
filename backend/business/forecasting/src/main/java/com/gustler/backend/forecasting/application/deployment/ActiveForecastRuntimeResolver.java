@@ -56,7 +56,7 @@ public final class ActiveForecastRuntimeResolver implements ForecastRuntime {
         return new RuntimeSnapshot(
             deployment,
             bundle.scope(),
-            new SeatDistributionForecastModel(bundle.predictor()),
+            new SeatDistributionForecastModel(bundle.predictor(), bundle.features(), bundle.routeReference()),
             dataUntilOf(bundle));
     }
 

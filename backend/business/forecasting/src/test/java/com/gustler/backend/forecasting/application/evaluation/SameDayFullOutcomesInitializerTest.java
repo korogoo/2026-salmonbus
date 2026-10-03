@@ -48,7 +48,7 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
             await(read);
             settling = workers.submit(settlement::settleArrivalLabels);
             awaitLockWait();
-            assertThat(count("same_day_full_outcomes")).isZero();
+            assertThat(count("same_day_model_full_outcomes")).isZero();
         } finally {
             release.countDown();
         }
@@ -74,7 +74,7 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
         }
         first.get(5, TimeUnit.SECONDS);
         assertThat(second.get(5, TimeUnit.SECONDS)).isFalse();
-        verify(countsSpy, times(1)).countFromSource(routeId, day, day.end());
+        verify(countsSpy, times(1)).countFromSource(routeId, modelId, day, day.end());
     }
 
     @Test
@@ -82,9 +82,9 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
         doAnswer(call -> {
             jdbc.sql("SELECT pg_sleep(1)").query().singleRow();
             return call.callRealMethod();
-        }).when(countsSpy).countFromSource(anyLong(), any(), any());
+        }).when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
         assertThatThrownBy(() -> initializer.initialize(routeId, day)).isInstanceOf(QueryTimeoutException.class);
-        assertThat(count("same_day_full_outcomes")).isZero();
+        assertThat(count("same_day_model_full_outcomes")).isZero();
         new TransactionTemplate(new DataSourceTransactionManager(dataSource)).executeWithoutResult(status ->
             jdbc.sql("SELECT id FROM route WHERE id = ? FOR UPDATE NOWAIT").param(routeId).query(Long.class).single());
     }
@@ -93,14 +93,14 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
     void 초기집계_재시도는_이미_커밋한_정산을_누락하거나_중복하지_않는다() {
         committedSettlementWithoutCounts();
         doAnswer(call -> { timeout(); return call.callRealMethod(); })
-            .when(countsSpy).countFromSource(anyLong(), any(), any());
+            .when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
         assertThatThrownBy(() -> initializer.initialize(routeId, day)).isInstanceOf(QueryTimeoutException.class);
         assertThat(count("stop_demand_pending_sample")).isEqualTo(1);
-        doAnswer(call -> call.callRealMethod()).when(countsSpy).countFromSource(anyLong(), any(), any());
+        doAnswer(call -> call.callRealMethod()).when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
         assertThat(initializer.initialize(routeId, day)).isTrue();
         assertThat(initializer.initialize(routeId, day)).isFalse();
         assertThat(total()).isEqualTo(1);
-        assertThat(countsSpy.countFromSource(routeId, day, day.end()).getFirst().rowCount()).isEqualTo(1);
+        assertThat(countsSpy.countFromSource(routeId, modelId, day, day.end()).getFirst().rowCount()).isEqualTo(1);
     }
 
     @Test
@@ -108,8 +108,8 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
         assertThat(initializer.activeRouteIds()).containsExactly(routeId);
         assertThat(initializer.initialize(routeId, day)).isTrue();
         assertThat(initializer.initialize(routeId, day)).isFalse();
-        assertThat(countsSpy.findCounts(routeId, day)).containsExactly(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start()));
-        verify(countsSpy, times(1)).countFromSource(routeId, day, day.end());
+        assertThat(countsSpy.findCounts(routeId, modelId, day)).containsExactly(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start()));
+        verify(countsSpy, times(1)).countFromSource(routeId, modelId, day, day.end());
     }
 
     @Test
@@ -122,11 +122,11 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
             written.countDown();
             await(release);
             return null;
-        }).when(countsSpy).upsertCounts(anyLong(), any(), any());
+        }).when(countsSpy).upsertCounts(anyLong(), anyLong(), any(), any());
         Future<?> seed = workers.submit(() -> initializer.initialize(routeId, day));
         try {
             await(written);
-            assertThat(count("same_day_full_outcomes")).isZero();
+            assertThat(count("same_day_model_full_outcomes")).isZero();
         } finally {
             release.countDown();
         }
@@ -155,16 +155,16 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
         }
         seed.get(5, TimeUnit.SECONDS);
         quality.get(5, TimeUnit.SECONDS);
-        assertThat(countsSpy.findCounts(routeId, day)).isEmpty();
+        assertThat(countsSpy.findCounts(routeId, modelId, day)).isEmpty();
         assertThat(initializer.initialize(routeId, day)).isTrue();
-        assertThat(countsSpy.findCounts(routeId, day)).hasSize(1);
+        assertThat(countsSpy.findCounts(routeId, modelId, day)).hasSize(1);
     }
 
     private void committedSettlementWithoutCounts() {
         savePending();
         initializeEmptyDay();
         settlement.settleArrivalLabels();
-        jdbc.sql("TRUNCATE same_day_full_outcomes").update();
+        jdbc.sql("TRUNCATE same_day_model_full_outcomes").update();
     }
 
     private void pauseSource(CountDownLatch read, CountDownLatch release) {
@@ -176,7 +176,7 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
                 await(release);
             }
             return result;
-        }).when(countsSpy).countFromSource(anyLong(), any(), any());
+        }).when(countsSpy).countFromSource(anyLong(), anyLong(), any(), any());
     }
 
     private void awaitLockWait() throws InterruptedException {
@@ -189,6 +189,6 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
     }
 
     private long total() {
-        return jdbc.sql("SELECT coalesce(sum(row_count),0) FROM same_day_full_outcomes").query(Long.class).single();
+        return jdbc.sql("SELECT coalesce(sum(row_count),0) FROM same_day_model_full_outcomes").query(Long.class).single();
     }
 }
