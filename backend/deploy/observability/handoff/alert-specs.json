@@ -1,59 +1,7 @@
 {
-  "format": "handoff-contract-v1-not-grafana-import",
-  "group": "salmonbus-additions-v1",
-  "contact_point": "UNRESOLVED; reuse only explicitly chosen destination; never overwrite policies",
-  "rules": [
-    {
-      "name": "API scrape 중단",
-      "source": "prometheus",
-      "expr": "(max(up{job=\"salmonbus/api\"}) == bool 0) or absent(up{job=\"salmonbus/api\"})",
-      "threshold": "last > 0",
-      "pending": "3m",
-      "noData": "Alerting",
-      "error": "Alerting",
-      "enabled_after": "해당 앱 scrape 배포·수집 확인",
-      "action": "앱 관리 포트와 Alloy/전송 확인"
-    },
-    {
-      "name": "worker scrape 중단",
-      "source": "prometheus",
-      "expr": "(max(up{job=\"salmonbus/worker\"}) == bool 0) or absent(up{job=\"salmonbus/worker\"})",
-      "threshold": "last > 0",
-      "pending": "3m",
-      "noData": "Alerting",
-      "error": "Alerting",
-      "enabled_after": "해당 앱 scrape 배포·수집 확인",
-      "action": "앱 관리 포트와 Alloy/전송 확인"
-    },
-    {
-      "name": "worker 스케줄러 heartbeat 지연",
-      "source": "prometheus",
-      "expr": "((time() - max(salmonbus_monitoring_heartbeat_timestamp{job=\"salmonbus/worker\"})) > bool 180) or absent(salmonbus_monitoring_heartbeat_timestamp{job=\"salmonbus/worker\"})",
-      "threshold": "last > 0",
-      "pending": "3m",
-      "noData": "Alerting",
-      "error": "Alerting",
-      "action": "앱 지표 수집과 스케줄러·풀 대기 구분"
-    },
-    {
-      "name": "worker journal heartbeat 부재",
-      "source": "loki",
-      "expr": "sum(absent_over_time({unit=\"salmonbus-worker.service\"} |= \"event=monitoring_heartbeat \" [5m])) or vector(0)",
-      "threshold": "last > 0",
-      "pending": "2m",
-      "noData": "Alerting",
-      "error": "Alerting",
-      "action": "worker heartbeat와 journal/Alloy/Loki 경로 확인"
-    },
-    {
-      "name": "정확도 집계 누락",
-      "source": "prometheus",
-      "expr": "salmonbus_accuracy_dropped_samples{job=\"salmonbus/worker\"} > bool 0",
-      "threshold": "last > 0",
-      "pending": "1m",
-      "noData": "NoData",
-      "error": "Alerting",
-      "action": "정확도 통계를 불완전으로 표시하고 그룹 상한/로그 비용 확인"
-    }
-  ]
+  "format": "superseded-alert-proposal",
+  "current_rules": "../diagnostics/alert-rules.paused.json",
+  "state": "Four rules registered paused; activate only after deployment and failure/recovery verification",
+  "receiver": "salmonbus-service-discord",
+  "existing_rules": "Preserved; review duplicate notifications before activation"
 }
