@@ -183,6 +183,28 @@ class WorkerOperationLogTest {
             .endsWith("transactionOutcome=NOT_OBSERVED routeName=\"3330\"");
     }
 
+    @Test
+    void 수집_최신성은_외부_트랜잭션_커밋_뒤에만_갱신한다() {
+        AtomicLong calls = new AtomicLong();
+        WorkerOperationLog.setListener(new WorkerOperationLog.Listener() {
+            @Override public void completed(String operation, Object route, long elapsed, boolean failed) { }
+            @Override public void collectionCommitted(String route, long observedAt, int rows) { calls.incrementAndGet(); }
+        });
+        new TransactionTemplate(new TestTransactionManager(false)).executeWithoutResult(status -> {
+            WorkerOperationLog.collectionCommitted("234000886", 123, 0);
+            assertThat(calls.get()).isZero();
+        });
+        assertThat(calls.get()).isEqualTo(1);
+        new TransactionTemplate(new TestTransactionManager(false)).executeWithoutResult(status -> {
+            WorkerOperationLog.collectionCommitted("234000886", 124, 1);
+            status.setRollbackOnly();
+        });
+        assertThat(calls.get()).isEqualTo(1);
+        assertThatThrownBy(() -> new TransactionTemplate(new TestTransactionManager(true)).executeWithoutResult(status ->
+            WorkerOperationLog.collectionCommitted("234000886", 125, 1))).isInstanceOf(TransactionSystemException.class);
+        assertThat(calls.get()).isEqualTo(1);
+    }
+
     private void slowQuery() {
         recorder.measure("query", 1L, () -> { nanos.addAndGet(TimeUnit.SECONDS.toNanos(1)); return List.of(1); });
     }

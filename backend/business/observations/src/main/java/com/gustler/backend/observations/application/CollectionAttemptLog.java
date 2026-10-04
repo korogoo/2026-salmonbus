@@ -114,7 +114,8 @@ final class CollectionAttemptLog implements AutoCloseable {
             + " responseRouteMismatchRows=" + safe(MDC.get("collectionRouteMismatchRows"))
             + " outcome=" + outcome + " failureCode=" + failureCode + " resultCode=" + resultCode
             + " providerRows=" + providerRows + " candidateRows=" + storedCandidates + " excludedRows=" + excludedRows
-            + " resultCommitConfirmed=" + committed;
+            + " resultCommitConfirmed=" + committed
+            + com.gustler.backend.diagnostics.WorkerOperationLog.routeContext("collection_attempt", routeId);
     }
 
     private static String safe(String value) {

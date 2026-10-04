@@ -40,6 +40,33 @@ class ForecastMonitoringTest {
     @Test void 이름의_공백_따옴표_개행을_로그_필드에서_안전하게_표현한다() {
         assertThat(ForecastMonitoring.quote("역 \"A\"\n출구")).isEqualTo("\"역 \\\"A\\\"\\n출구\"");
     }
+    @Test void 재시작_직후는_미확인이고_빈_차량_수집과_미발행_지연을_구분한다() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        var clock = java.time.Clock.fixed(Instant.ofEpochSecond(1000), java.time.ZoneOffset.UTC);
+        ForecastMonitoring monitoring = new ForecastMonitoring(registry, mock(DataSource.class), clock);
+        var register = ForecastMonitoring.class.getDeclaredMethod("registerRoute", long.class, String.class);
+        register.setAccessible(true);
+        Object state = register.invoke(monitoring, 1L, "9300");
+        var routes = ForecastMonitoring.class.getDeclaredField("routes"); routes.setAccessible(true);
+        ((java.util.Map) routes.get(monitoring)).put(1L, state);
+        var sources = ForecastMonitoring.class.getDeclaredField("sourceRoutes"); sources.setAccessible(true);
+        sources.set(monitoring, java.util.Map.of("234000886", 1L));
+        var versions = ForecastMonitoring.class.getDeclaredField("versionRoutes"); versions.setAccessible(true);
+        versions.set(monitoring, java.util.Map.of(4L, 1L));
+        assertThat(registry.get("salmonbus.collection.last.success.timestamp").gauge().value()).isNaN();
+        monitoring.collectionAttempted("234000886", 900);
+        monitoring.collectionAttempted("234000886", 910);
+        assertThat(registry.get("salmonbus.collection.first.attempt.timestamp").gauge().value()).isEqualTo(900);
+        monitoring.collectionCommitted("234000886", 990, 0);
+        assertThat(registry.get("salmonbus.collection.last.success.timestamp").gauge().value()).isEqualTo(990);
+        assertThat(registry.get("salmonbus.collection.usable.rows").gauge().value()).isZero();
+        monitoring.pending(4L, Instant.ofEpochSecond(600));
+        assertThat(registry.get("salmonbus.forecast.pending.age.seconds").gauge().value()).isEqualTo(400);
+        monitoring.pending(4L, null);
+        assertThat(registry.get("salmonbus.forecast.pending.age.seconds").gauge().value()).isZero();
+        assertThat(monitoring.context("collection_attempt", "234000886")).contains("routeName=\"9300\"");
+    }
+
     private SettledEvaluation sample(Double prediction, boolean usable) {
         return new SettledEvaluation(1, 6, 2, 3, 4, 2, .2, ScoringState.SETTLED,
             5L, 3, Instant.now(), Instant.now(), usable, "private-vehicle", 40, true,

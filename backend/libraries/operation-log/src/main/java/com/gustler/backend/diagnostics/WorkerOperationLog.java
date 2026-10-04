@@ -22,6 +22,8 @@ public final class WorkerOperationLog {
 
     public interface Listener {
         void completed(String operation, Object route, long nanos, boolean failed);
+        default void collectionAttempted(String sourceRoute, long epochSecond) { }
+        default void collectionCommitted(String sourceRoute, long observedEpochSecond, int usableRows) { }
         default String context(String operation, Object route) { return ""; }
     }
     private static final Listener NONE = (operation, route, nanos, failed) -> { };
@@ -34,6 +36,24 @@ public final class WorkerOperationLog {
         catch (RuntimeException ignored) { return ""; }
     }
     private WorkerOperationLog() { }
+    public static String routeContext(String operation, Object route) { return context(operation, route); }
+    public static void collectionAttempted(String sourceRoute, long epochSecond) {
+        try { listener.collectionAttempted(sourceRoute, epochSecond); } catch (RuntimeException ignored) { }
+    }
+
+    /** 저장 메서드 반환 후 호출한다. 외부 트랜잭션이 있으면 커밋까지 기다린다. */
+    public static void collectionCommitted(String sourceRoute, long observedEpochSecond, int usableRows) {
+        Runnable record = () -> {
+            try { listener.collectionCommitted(sourceRoute, observedEpochSecond, usableRows); }
+            catch (RuntimeException ignored) { /* 진단 실패가 수집 결과를 바꾸지 않는다. */ }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+            && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { record.run(); }
+            });
+        } else { record.run(); }
+    }
 
     public static <T> T measure(String operation, Object route, Supplier<T> action) {
         return RECORDER.measure(operation, route, action);
@@ -77,9 +97,11 @@ public final class WorkerOperationLog {
             } catch (RuntimeException failure) {
                 failed = true;
                 Set<Throwable> chain = Collections.newSetFromMap(new IdentityHashMap<>());
-                Throwable root = failure;
+                Throwable primary = failure instanceof org.springframework.transaction.TransactionSystemException tx
+                    && tx.getApplicationException() != null ? tx.getApplicationException() : failure;
+                Throwable root = primary;
                 String sqlState = "-";
-                for (Throwable cause = failure; cause != null && chain.add(cause); cause = cause.getCause()) {
+                for (Throwable cause = primary; cause != null && chain.add(cause); cause = cause.getCause()) {
                     root = cause;
                     if (cause instanceof SQLException sql && sql.getSQLState() != null) {
                         sqlState = sql.getSQLState();
@@ -91,6 +113,7 @@ public final class WorkerOperationLog {
                         failure.getClass().getSimpleName(), root.getClass().getSimpleName(), context(operation, route));
                 }
                 reported.get().addAll(chain);
+                reported.get().add(failure);
                 throw failure;
             } finally {
                 try { listener.completed(operation, route, nanoTime.getAsLong() - start, failed); }

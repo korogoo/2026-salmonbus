@@ -29,12 +29,14 @@ import org.springframework.transaction.annotation.Propagation;
 public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepository {
 
     private static final String INSERT_PENDING = """
+        /* salmonbus:forecast_evaluation.insert_pending */
         INSERT INTO forecast_evaluation (vehicle_observation_id, target_stop_order, route_version_id)
         VALUES (?, ?, ?)
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
         """;
 
     private static final String SELECT_PENDING_KEYS = """
+        /* salmonbus:forecast_evaluation.select_pending_keys */
         SELECT vehicle_observation_id, target_stop_order
         FROM forecast_evaluation
         WHERE scoring_state = 'PENDING' AND route_version_id = :routeVersionId
@@ -44,6 +46,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         """;
 
     private static final String SELECT_PENDING = """
+        /* salmonbus:forecast_evaluation.select_pending */
         SELECT forecast.vehicle_observation_id, forecast.target_stop_order, forecast.route_version_id,
                source.vehicle_id, forecast.stops_to_target, batch.response_received_at,
                forecast.generated_at, source.quality_direction
@@ -62,6 +65,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
 
     /** 근거의 정류장 순번은 원 관측의 stop_order다. 평가 판정에 사용하는 passed_stop_order와 구분한다. */
     private static final String COMPLETE = """
+        /* salmonbus:forecast_evaluation.complete */
         UPDATE forecast_evaluation evaluation
         SET scoring_state = :scoringState,
             arrival_observation_id = :arrivalObservationId,
@@ -108,6 +112,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
 
     /** 같은 관측을 쓰는 여러 예보의 품질 조회를 묶음 안에서 한 번만 수행한다. */
     private static final String COMPLETE_BATCH = """
+        /* salmonbus:forecast_evaluation.complete_batch */
         WITH input(vehicleObservationId, targetStopOrder, arrivalObservationId, scoringState, seatsOnArrival, scoredAt)
             AS MATERIALIZED (VALUES %s),
         eligible AS MATERIALIZED (

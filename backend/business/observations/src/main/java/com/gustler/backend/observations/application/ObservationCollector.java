@@ -49,6 +49,7 @@ public class ObservationCollector implements com.gustler.backend.observations.ap
     ) {
         try (CollectionAttemptLog attempt = new CollectionAttemptLog(sourceRouteId)) {
             OffsetDateTime scheduledAt = now();
+            WorkerOperationLog.collectionAttempted(sourceRouteId, scheduledAt.toEpochSecond());
             try {
                 attempt.stage("ROUTE_VERSION");
                 Optional<RouteReference> reference = WorkerOperationLog.measure("collection_route_version", sourceRouteId,
@@ -104,6 +105,9 @@ public class ObservationCollector implements com.gustler.backend.observations.ap
         ObservationResponse response = WorkerOperationLog.measure("collection_save_and_commit", sourceRouteId,
             () -> batchLedger.conclude(reservation.batchId(), diagnosed, now()));
         attempt.committed();
+        response.observations().filter(rows -> rows.providerRows() == 0 || !rows.storableRows().isEmpty())
+            .ifPresent(rows -> WorkerOperationLog.collectionCommitted(sourceRouteId,
+                response.receivedAt().toEpochSecond(), rows.storableRows().size()));
         attempt.stage("KEY_EXCLUSION");
         excludeKeyIfRejected(reservation.keyAlias(), response, requestedAt);
         attempt.stage(response.observations().isPresent() ? "COMPLETE" : "UPSTREAM_RESULT");

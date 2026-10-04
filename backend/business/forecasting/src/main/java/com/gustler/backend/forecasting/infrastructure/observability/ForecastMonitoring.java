@@ -38,6 +38,8 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
     private final Map<String, Timer> timers = new ConcurrentHashMap<>();
     private final Map<Long, RouteState> routes = new ConcurrentHashMap<>();
     private volatile Map<Long, String> versionNames = Map.of();
+    private volatile Map<String, Long> sourceRoutes = Map.of();
+    private volatile Map<Long, Long> versionRoutes = Map.of();
     private final Map<Key, Totals> accuracy = new HashMap<>();
     private final AtomicLong dropped = new AtomicLong();
     private final AtomicLong heartbeat = new AtomicLong();
@@ -47,6 +49,7 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
         this.clock = clock;
         catalog = new JdbcTemplate(dataSource);
         catalog.setQueryTimeout(1);
+        Gauge.builder("salmonbus.collection.expected.interval.seconds", () -> com.gustler.backend.observations.api.CollectionTiming.intervalSeconds(clock.instant())).register(registry);
         Gauge.builder("salmonbus.monitoring.heartbeat.timestamp", heartbeat, AtomicLong::get).register(registry);
         Gauge.builder("salmonbus.accuracy.dropped.samples", dropped, AtomicLong::get).register(registry);
     }
@@ -54,6 +57,11 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
     @PreDestroy void stop() { WorkerOperationLog.clearListener(this); }
 
     @Override public String context(String operation, Object route) {
+        if (operation.startsWith("collection_") && route instanceof String source) {
+            Long id = sourceRoutes.get(source);
+            RouteState state = id == null ? null : routes.get(id);
+            return " routeName=" + quote(state == null ? "" : state.name);
+        }
         if (!(route instanceof Number number)) { return ""; }
         String name = null;
         if (operation.startsWith("forecast_") || operation.startsWith("statistics_")
@@ -85,6 +93,27 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
         state.committedAt = now;
         // 0행 발행은 배치 완료일 수 있지만 사용자에게 제공할 새 예보는 아니다.
         if (predictions > 0) { state.nonemptyAt = now; state.observedAt = observedAt.toEpochMilli() / 1000.0; }
+    }
+
+    @Override public void collectionAttempted(String sourceRoute, long epochSecond) {
+        Long id = sourceRoutes.get(sourceRoute);
+        RouteState state = id == null ? null : routes.get(id);
+        if (state != null && Double.isNaN(state.firstAttemptAt)) { state.firstAttemptAt = epochSecond; }
+    }
+
+    @Override public void collectionCommitted(String sourceRoute, long observedEpochSecond, int usableRows) {
+        Long id = sourceRoutes.get(sourceRoute);
+        RouteState state = id == null ? null : routes.get(id);
+        if (state != null) { state.collectionAt = observedEpochSecond; state.usableRows = usableRows; }
+    }
+
+    @Override public void pending(long routeVersionId, Instant oldestObservedAt) {
+        Long id = versionRoutes.get(routeVersionId);
+        RouteState state = id == null ? null : routes.get(id);
+        if (state != null) {
+            state.pendingAge = oldestObservedAt == null ? 0 : Math.max(0, Duration.between(oldestObservedAt, clock.instant()).toSeconds());
+            state.pendingCheckedAt = clock.instant().getEpochSecond();
+        }
     }
 
     @Override public synchronized void settled(List<SettledEvaluation> results) {
@@ -123,12 +152,16 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
         try {
             Map<Long, String> names = new HashMap<>();
             Map<Long, String> versions = new HashMap<>();
+            Map<String, Long> sources = new HashMap<>();
+            Map<Long, Long> versionIds = new HashMap<>();
             catalog.query("""
-                SELECT r.id, r.display_name, v.id AS version_id FROM route r
+                SELECT r.id, r.source_route_id, r.display_name, v.id AS version_id FROM route r
                 JOIN route_version v ON v.route_id = r.id AND v.valid_to IS NULL
                 ORDER BY r.id LIMIT 201
                 """, row -> { names.put(row.getLong("id"), row.getString("display_name"));
-                    versions.put(row.getLong("version_id"), row.getString("display_name")); });
+                    versions.put(row.getLong("version_id"), row.getString("display_name"));
+                    sources.put(row.getString("source_route_id"), row.getLong("id"));
+                    versionIds.put(row.getLong("version_id"), row.getLong("id")); });
             if (names.size() > 200) { throw new IllegalStateException("route limit"); }
             routes.entrySet().removeIf(entry -> {
                 if (entry.getValue().name.equals(names.get(entry.getKey()))) { return false; }
@@ -137,6 +170,8 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
             });
             names.forEach((id, name) -> routes.computeIfAbsent(id, ignored -> registerRoute(id, name)));
             versionNames = Map.copyOf(versions);
+            sourceRoutes = Map.copyOf(sources);
+            versionRoutes = Map.copyOf(versionIds);
         } catch (RuntimeException failure) {
             registry.counter("salmonbus.monitoring.catalog.failures").increment();
             log.warn("event=monitoring_catalog_failed exceptionType={}", failure.getClass().getSimpleName());
@@ -146,6 +181,16 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
     private RouteState registerRoute(long id, String name) {
         RouteState state = new RouteState(name);
         state.gauges = List.of(
+            Gauge.builder("salmonbus.collection.first.attempt.timestamp", state, s -> s.firstAttemptAt)
+                .tags("route_id", Long.toString(id), "route_name", name).register(registry),
+            Gauge.builder("salmonbus.collection.last.success.timestamp", state, s -> s.collectionAt)
+                .tags("route_id", Long.toString(id), "route_name", name).register(registry),
+            Gauge.builder("salmonbus.collection.usable.rows", state, s -> s.usableRows)
+                .tags("route_id", Long.toString(id), "route_name", name).register(registry),
+            Gauge.builder("salmonbus.forecast.pending.age.seconds", state, s -> s.pendingAge)
+                .tags("route_id", Long.toString(id), "route_name", name).register(registry),
+            Gauge.builder("salmonbus.forecast.pending.checked.timestamp", state, s -> s.pendingCheckedAt)
+                .tags("route_id", Long.toString(id), "route_name", name).register(registry),
             Gauge.builder("salmonbus.forecast.last.commit.timestamp", state, s -> s.committedAt)
                 .tags("route_id", Long.toString(id), "route_name", name).register(registry),
             Gauge.builder("salmonbus.forecast.last.nonempty.timestamp", state, s -> s.nonemptyAt)
@@ -183,6 +228,7 @@ public class ForecastMonitoring implements ForecastTelemetry, WorkerOperationLog
     private static final class RouteState {
         final String name;
         volatile double committedAt = Double.NaN, nonemptyAt = Double.NaN, observedAt = Double.NaN;
+        volatile double firstAttemptAt = Double.NaN, collectionAt = Double.NaN, usableRows = Double.NaN, pendingAge = Double.NaN, pendingCheckedAt = Double.NaN;
         List<Gauge> gauges = List.of();
         RouteState(String name) { this.name = name; }
     }

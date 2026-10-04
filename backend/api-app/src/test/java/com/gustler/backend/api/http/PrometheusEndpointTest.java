@@ -38,6 +38,16 @@ class PrometheusEndpointTest {
     private DataSource dataSource;
 
     @Test
+    void DB에서_API_연결을_구분할_이름을_설정한다() throws Exception {
+        try (Connection connection = dataSource.getConnection();
+             var statement = connection.createStatement();
+             var result = statement.executeQuery("SHOW application_name")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("salmonbus-api");
+        }
+    }
+
+    @Test
     void 지표는_관리_포트에만_있고_공개_readyz는_유지된다() throws Exception {
         assertThat(managementPort).isNotEqualTo(publicPort);
         assertThat(get(publicPort, "/actuator/prometheus").statusCode()).isEqualTo(404);
