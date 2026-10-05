@@ -34,9 +34,9 @@ first=f'salmonbus_collection_first_attempt_timestamp{base}'
 # 마지막 심야 표본이 빠질 때까지 실제 장애 알림도 늦어질 수 있다.
 period=f'(max(max_over_time(salmonbus_collection_expected_interval_seconds{base}[10m])) <= 300)'
 age=f'(time() - (({last} > 0) or on(route_id,route_name) {first}))'
-rule('salmonbus-diag-collection-age','노선 정상 관측 갱신 중단',f'{age} and on() {period}',300,'1m',
+rule('salmonbus-diag-collection-age','노선 정상 관측 갱신 중단',f'{age} and on() {period}',180,'0s',
      '[긴급] {{ $labels.route_name }}번 정상 관측 갱신 중단',
-     '정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.')
+     '3분 초과 시 추가 대기 없이 판단합니다. 정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.')
 commit=f'salmonbus_forecast_last_commit_timestamp{base}'
 commit_age=f'(time() - (({commit} > 0) or on(route_id,route_name) {first}))'
 work=f'((salmonbus_forecast_pending_age_seconds{base} > 0) or (time() - salmonbus_forecast_pending_checked_timestamp{base} > 300))'

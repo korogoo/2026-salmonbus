@@ -95,7 +95,7 @@
     "rule_group": "salmonbus-diagnostics-prepared",
     "title": "노선 정상 관측 갱신 중단",
     "condition": "B",
-    "for": "1m",
+    "for": "0s",
     "is_paused": true,
     "no_data_state": "OK",
     "exec_err_state": "Alerting",
@@ -106,7 +106,7 @@
     },
     "annotations": {
       "summary": "[긴급] {{ $labels.route_name }}번 정상 관측 갱신 중단",
-      "description": "정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.",
+      "description": "3분 초과 시 추가 대기 없이 판단합니다. 정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.",
       "runbook_url": "https://higgs95.grafana.net/d/salmonbus-db-diagnostics",
       "__dashboardUid__": "salmonbus-db-diagnostics",
       "__panelId__": "39"
@@ -163,7 +163,7 @@
               "evaluator": {
                 "type": "gt",
                 "params": [
-                  300
+                  180
                 ]
               },
               "operator": {

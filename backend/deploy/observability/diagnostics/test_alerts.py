@@ -37,7 +37,7 @@ def inputs(period, last='1+0x20', commit='1+0x20'):
 
 def check(uid, minute, firing=False):
     labels = dict(LABELS, service='salmonbus', severity='critical', prepared_by='SAL-158')
-    return {'eval_time': f'{minute}m', 'alertname': uid,
+    return {'eval_time': minute if isinstance(minute, str) else f'{minute}m', 'alertname': uid,
             'exp_alerts': [{'exp_labels': labels, 'exp_annotations': {}}] if firing else []}
 
 
@@ -54,10 +54,10 @@ def run(promtool):
                             'expr': f"({r['data'][0]['model']['expr']}) > {threshold}",
                             'for': r['for'], 'labels': r['labels']})
     tests = [
-        {'name': 'daytime outage still fires after threshold and pending interval',
-         'input_series': inputs('20+0x20'),
-         'alert_rule_test': [check(COLLECTION, 5), check(COLLECTION, 6),
-                             check(COLLECTION, 7, True)]},
+        {'name': 'daytime outage fires immediately above 180 seconds and recovers',
+         'input_series': inputs('20+0x20', last='1+0x4 300+60x15'),
+         'alert_rule_test': [check(COLLECTION, '3m1s'), check(COLLECTION, '3m2s', True),
+                             check(COLLECTION, 4, True), check(COLLECTION, 5)]},
         {'name': 'nighttime suppresses collection and forecast warnings',
          'input_series': inputs('600+0x20'),
          'alert_rule_test': [check(COLLECTION, 15), check(FORECAST, 15)]},
@@ -65,7 +65,7 @@ def run(promtool):
         {'name': '04:00 transition suppresses old collection; persistent outage eventually fires',
          'input_series': inputs('600 20+0x19'),
          'alert_rule_test': [check(COLLECTION, 1), check(COLLECTION, 9),
-                             check(COLLECTION, 10), check(COLLECTION, 11, True)]},
+                             check(COLLECTION, 10, True), check(COLLECTION, 11, True)]},
         {'name': 'collection resumes before grace expires and never alerts',
          'input_series': inputs('600 20+0x19', last='1+0x4 300+60x15'),
          'alert_rule_test': [check(COLLECTION, 5), check(COLLECTION, 11),
@@ -83,7 +83,7 @@ def run(promtool):
         (root/'rules.yaml').write_text(yaml.safe_dump(
             {'groups': [{'name': 'diagnostics', 'rules': alert_rules}]}, sort_keys=False))
         (root/'tests.yaml').write_text(yaml.safe_dump(
-            {'rule_files': ['rules.yaml'], 'evaluation_interval': '1m', 'tests': tests},
+            {'rule_files': ['rules.yaml'], 'evaluation_interval': '1s', 'tests': tests},
             sort_keys=False))
         subprocess.run([str(Path(promtool).resolve()), 'test', 'rules', 'tests.yaml'],
                        cwd=root, check=True)
