@@ -30,18 +30,20 @@ rule('salmonbus-diag-api-5xx','API 조회 실패 반복',f'(sum(increase({errors
 base='{job="salmonbus/worker"}'
 last=f'salmonbus_collection_last_success_timestamp{base}'
 first=f'salmonbus_collection_first_attempt_timestamp{base}'
-period=f'(max(salmonbus_collection_expected_interval_seconds{base}) <= 300)'
+# 최근 10분에 심야 수집 주기가 있었다면 전환 직후 경고를 보류한다.
+# 마지막 심야 표본이 빠질 때까지 실제 장애 알림도 늦어질 수 있다.
+period=f'(max(max_over_time(salmonbus_collection_expected_interval_seconds{base}[10m])) <= 300)'
 age=f'(time() - (({last} > 0) or on(route_id,route_name) {first}))'
 rule('salmonbus-diag-collection-age','노선 정상 관측 갱신 중단',f'{age} and on() {period}',300,'1m',
      '[긴급] {{ $labels.route_name }}번 정상 관측 갱신 중단',
-     '정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 심야 10분 수집 구간은 제외하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.')
+     '정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.')
 commit=f'salmonbus_forecast_last_commit_timestamp{base}'
 commit_age=f'(time() - (({commit} > 0) or on(route_id,route_name) {first}))'
 work=f'((salmonbus_forecast_pending_age_seconds{base} > 0) or (time() - salmonbus_forecast_pending_checked_timestamp{base} > 300))'
 rule('salmonbus-diag-forecast-pending','관측 수집 후 예보 배치 처리 중단',
      f'{commit_age} and on(route_id,route_name) {work} and on(route_id,route_name) ((time() - {last}) < 300) and on(route_id,route_name) (salmonbus_collection_usable_rows{base} > 0) and on() {period}',
      300,'1m','[긴급] {{ $labels.route_name }}번 예보 배치 처리 중단',
-     '마지막 예보 배치 커밋 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. 관측은 최신이지만 처리 대상이 남았거나 예보 회차 관측이 멈췄습니다. forecast_write_and_commit, 모델 상태, 잠금과 연결 대기를 확인하세요. 정상 0건 예보 커밋은 갱신으로 인정합니다. 한 번도 대상 조회를 하지 않은 노선은 별도 확인합니다.')
+     '마지막 예보 배치 커밋 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. 관측은 최신이지만 처리 대상이 남았거나 예보 회차 관측이 멈췄습니다. forecast_write_and_commit, 모델 상태, 잠금과 연결 대기를 확인하세요. 정상 0건 예보 커밋은 갱신으로 인정합니다. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류합니다. 한 번도 대상 조회를 하지 않은 노선은 별도 확인합니다.')
 expr='(1 - min by(job) (up{job=~"salmonbus/(api|worker|postgres)"}))'
 for job in ['api','worker','postgres']:expr+=f' or absent(up{{job="salmonbus/{job}"}})'
 rule('salmonbus-diag-monitoring','앱 또는 DB 지표 수집 중단',expr,0,'3m',
@@ -50,5 +52,6 @@ rule('salmonbus-diag-monitoring','앱 또는 DB 지표 수집 중단',expr,0,'3m
 rules[-1]['no_data_state']='Alerting'
 panel_ids={'salmonbus-diag-api-5xx':'2','salmonbus-diag-collection-age':'39','salmonbus-diag-forecast-pending':'40','salmonbus-diag-monitoring':'44'}
 for r in rules: r['annotations']['__panelId__']=panel_ids[r['rule_uid']]
-(ROOT/'alert-rules.paused.json').write_text(json.dumps(rules,ensure_ascii=False,indent=2)+'\n')
-print('Prepared',len(rules),'paused rules; symptom rules require monitoring rule enabled together')
+if __name__ == '__main__':
+    (ROOT/'alert-rules.paused.json').write_text(json.dumps(rules,ensure_ascii=False,indent=2)+'\n')
+    print('Prepared',len(rules),'paused rules; symptom rules require monitoring rule enabled together')

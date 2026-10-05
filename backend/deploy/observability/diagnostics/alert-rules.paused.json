@@ -106,7 +106,7 @@
     },
     "annotations": {
       "summary": "[긴급] {{ $labels.route_name }}번 정상 관측 갱신 중단",
-      "description": "정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 심야 10분 수집 구간은 제외하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.",
+      "description": "정상 관측 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. collection_attempt의 stage와 reason을 확인하세요. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류하며 정상 빈 차량 응답은 성공입니다. 한 번도 수집 시도하지 않은 노선은 이 규칙으로 탐지하지 못합니다.",
       "runbook_url": "https://higgs95.grafana.net/d/salmonbus-db-diagnostics",
       "__dashboardUid__": "salmonbus-db-diagnostics",
       "__panelId__": "39"
@@ -130,7 +130,7 @@
         },
         "model": {
           "refId": "A",
-          "expr": "(time() - ((salmonbus_collection_last_success_timestamp{job=\"salmonbus/worker\"} > 0) or on(route_id,route_name) salmonbus_collection_first_attempt_timestamp{job=\"salmonbus/worker\"})) and on() (max(salmonbus_collection_expected_interval_seconds{job=\"salmonbus/worker\"}) <= 300)",
+          "expr": "(time() - ((salmonbus_collection_last_success_timestamp{job=\"salmonbus/worker\"} > 0) or on(route_id,route_name) salmonbus_collection_first_attempt_timestamp{job=\"salmonbus/worker\"})) and on() (max(max_over_time(salmonbus_collection_expected_interval_seconds{job=\"salmonbus/worker\"}[10m])) <= 300)",
           "instant": true,
           "range": false,
           "intervalMs": 60000,
@@ -194,7 +194,7 @@
     },
     "annotations": {
       "summary": "[긴급] {{ $labels.route_name }}번 예보 배치 처리 중단",
-      "description": "마지막 예보 배치 커밋 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. 관측은 최신이지만 처리 대상이 남았거나 예보 회차 관측이 멈췄습니다. forecast_write_and_commit, 모델 상태, 잠금과 연결 대기를 확인하세요. 정상 0건 예보 커밋은 갱신으로 인정합니다. 한 번도 대상 조회를 하지 않은 노선은 별도 확인합니다.",
+      "description": "마지막 예보 배치 커밋 또는 재시작 후 첫 수집 시도로부터 {{ $values.A.Value }}초 경과. 관측은 최신이지만 처리 대상이 남았거나 예보 회차 관측이 멈췄습니다. forecast_write_and_commit, 모델 상태, 잠금과 연결 대기를 확인하세요. 정상 0건 예보 커밋은 갱신으로 인정합니다. 최근 10분 안에 심야 수집 주기가 있었다면 알림을 보류합니다. 한 번도 대상 조회를 하지 않은 노선은 별도 확인합니다.",
       "runbook_url": "https://higgs95.grafana.net/d/salmonbus-db-diagnostics",
       "__dashboardUid__": "salmonbus-db-diagnostics",
       "__panelId__": "40"
@@ -218,7 +218,7 @@
         },
         "model": {
           "refId": "A",
-          "expr": "(time() - ((salmonbus_forecast_last_commit_timestamp{job=\"salmonbus/worker\"} > 0) or on(route_id,route_name) salmonbus_collection_first_attempt_timestamp{job=\"salmonbus/worker\"})) and on(route_id,route_name) ((salmonbus_forecast_pending_age_seconds{job=\"salmonbus/worker\"} > 0) or (time() - salmonbus_forecast_pending_checked_timestamp{job=\"salmonbus/worker\"} > 300)) and on(route_id,route_name) ((time() - salmonbus_collection_last_success_timestamp{job=\"salmonbus/worker\"}) < 300) and on(route_id,route_name) (salmonbus_collection_usable_rows{job=\"salmonbus/worker\"} > 0) and on() (max(salmonbus_collection_expected_interval_seconds{job=\"salmonbus/worker\"}) <= 300)",
+          "expr": "(time() - ((salmonbus_forecast_last_commit_timestamp{job=\"salmonbus/worker\"} > 0) or on(route_id,route_name) salmonbus_collection_first_attempt_timestamp{job=\"salmonbus/worker\"})) and on(route_id,route_name) ((salmonbus_forecast_pending_age_seconds{job=\"salmonbus/worker\"} > 0) or (time() - salmonbus_forecast_pending_checked_timestamp{job=\"salmonbus/worker\"} > 300)) and on(route_id,route_name) ((time() - salmonbus_collection_last_success_timestamp{job=\"salmonbus/worker\"}) < 300) and on(route_id,route_name) (salmonbus_collection_usable_rows{job=\"salmonbus/worker\"} > 0) and on() (max(max_over_time(salmonbus_collection_expected_interval_seconds{job=\"salmonbus/worker\"}[10m])) <= 300)",
           "instant": true,
           "range": false,
           "intervalMs": 60000,
