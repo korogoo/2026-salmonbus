@@ -88,7 +88,13 @@ final class CollectionAttemptLog implements AutoCloseable {
     }
 
     void finish(String status, String reason) {
-        if ("FAILED".equals(status)) { log.error("{}", summary(status, reason)); }
+        if ("FAILED".equals(status)) {
+            // 분류된 외부 실패는 갱신 중단 알림으로 감지한다. 예상하지 못한 내부 예외는 ERROR를 유지한다.
+            if ("UPSTREAM_RESULT".equals(stage)
+                && !"UNEXPECTED_EXCEPTION".equals(MDC.get("collectionTransport"))) {
+                log.warn("{}", summary(status, reason));
+            } else { log.error("{}", summary(status, reason)); }
+        }
         else if (!"0".equals(MDC.get("collectionRouteMismatchRows"))
             && MDC.get("collectionRouteMismatchRows") != null) { log.warn("{}", summary(status, reason)); }
         else { log.debug("{}", summary(status, reason)); }

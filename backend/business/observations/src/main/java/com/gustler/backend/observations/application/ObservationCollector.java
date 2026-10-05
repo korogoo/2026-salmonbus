@@ -122,7 +122,7 @@ public class ObservationCollector implements com.gustler.backend.observations.ap
     ) {
         response.keyRejectionCode().ifPresent(reasonCode ->
             callQuota.excludeLocationKey(keyAlias, requestedAt).ifPresent(reservedCallsBefore ->
-                log.error("포털이 GBIS 키를 거절해 그 키를 한국 자정까지 쓰지 않는다. 슬롯={} 사유={} 채우기 전 사용량={}",
+                log.warn("포털이 GBIS 키를 거절해 그 키를 한국 자정까지 쓰지 않는다. 슬롯={} 사유={} 채우기 전 사용량={}",
                     keyAlias, reasonCode, reservedCallsBefore)));
     }
 
