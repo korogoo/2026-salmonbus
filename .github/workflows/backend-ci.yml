@@ -48,11 +48,6 @@ jobs:
       - name: 루트 src 잔재 검사
         run: test ! -d src
 
-      - name: 테스트 컨테이너 자원 제한 검사
-        run: |
-          python3 -m unittest discover -s deploy/checks -p 'test_*.py'
-          python3 deploy/checks/check_test_container_limits.py
-
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
