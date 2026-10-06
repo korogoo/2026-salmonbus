@@ -13,12 +13,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @Testcontainers
 class ApiSqlOriginPostgresTest {
+    // CodeBuild에서 cgroup 설정 오류가 발생해 컨테이너별 CPU/메모리 제한은 지정하지 않는다.
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18")
         .withCommand("postgres", "-c", "shared_preload_libraries=pg_stat_statements",
-            "-c", "shared_buffers=16MB")
-        .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig()
-            .withMemory(256L * 1024 * 1024).withNanoCPUs(500_000_000L));
+            "-c", "shared_buffers=16MB");
 
     @BeforeEach void prepare() throws Exception {
         execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
