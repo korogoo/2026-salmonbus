@@ -34,29 +34,39 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
         """;
 
-    private static final String SELECT_PENDING_KEYS = """
-        SELECT /* salmonbus:forecast_evaluation.select_pending_keys */ vehicle_observation_id, target_stop_order
-        FROM forecast_evaluation
-        WHERE scoring_state = 'PENDING' AND route_version_id = :routeVersionId
-          AND (vehicle_observation_id, target_stop_order) > (:afterObservationId, :afterStopOrder)
-        ORDER BY vehicle_observation_id, target_stop_order
-        LIMIT :limit
-        """;
-
-    private static final String SELECT_PENDING = """
-        SELECT /* salmonbus:forecast_evaluation.select_pending */ forecast.vehicle_observation_id, forecast.target_stop_order, forecast.route_version_id,
-               source.vehicle_id, forecast.stops_to_target, batch.response_received_at,
-               forecast.generated_at, source.quality_direction
-        FROM forecast_evaluation evaluation
-        JOIN seat_forecast forecast ON forecast.vehicle_observation_id = evaluation.vehicle_observation_id
-         AND forecast.target_stop_order = evaluation.target_stop_order
-        JOIN forecast_eligible_observation source ON source.id = evaluation.vehicle_observation_id
-        JOIN observation_batch batch ON batch.id = source.observation_batch_id
-        WHERE evaluation.scoring_state = 'PENDING' AND evaluation.route_version_id = :routeVersionId
-          AND (evaluation.vehicle_observation_id, evaluation.target_stop_order)
-              > (:afterObservationId, :afterStopOrder)
-          AND (evaluation.vehicle_observation_id, evaluation.target_stop_order)
-              <= (:lastObservationId, :lastStopOrder)
+    // 대상 키는 한 번만 읽고, 같은 관측을 쓰는 여러 정류장 예보의 품질 조회를 공유한다.
+    // 품질을 통과하지 못한 키도 반환해야 다음 페이지 이동과 확정 제외 처리를 유지할 수 있다.
+    private static final String SELECT_PENDING_PAGE = """
+        WITH /* salmonbus:forecast_evaluation.select_pending_page */ pending AS MATERIALIZED (
+            SELECT vehicle_observation_id, target_stop_order
+            FROM forecast_evaluation
+            WHERE scoring_state = 'PENDING' AND route_version_id = :routeVersionId
+              AND (vehicle_observation_id, target_stop_order) > (:afterObservationId, :afterStopOrder)
+            ORDER BY vehicle_observation_id, target_stop_order
+            LIMIT :limit
+        ), source_ids AS MATERIALIZED (
+            SELECT DISTINCT vehicle_observation_id AS id FROM pending
+        ), sources AS MATERIALIZED (
+            SELECT source.id, source.vehicle_id, source.quality_direction, batch.response_received_at
+            FROM source_ids keys
+            JOIN forecast_eligible_observation source ON source.id = keys.id
+            JOIN observation_batch batch ON batch.id = source.observation_batch_id
+        ), eligible_forecasts AS MATERIALIZED (
+            SELECT evaluation.vehicle_observation_id, evaluation.target_stop_order,
+                   forecast.route_version_id, source.vehicle_id, forecast.stops_to_target,
+                   source.response_received_at, forecast.generated_at, source.quality_direction
+            FROM pending evaluation
+            JOIN sources source ON source.id = evaluation.vehicle_observation_id
+            JOIN seat_forecast forecast ON forecast.vehicle_observation_id = evaluation.vehicle_observation_id
+             AND forecast.target_stop_order = evaluation.target_stop_order
+        )
+        SELECT evaluation.vehicle_observation_id, evaluation.target_stop_order,
+               detail.route_version_id, detail.vehicle_id, detail.stops_to_target,
+               detail.response_received_at, detail.generated_at, detail.quality_direction,
+               detail.vehicle_observation_id IS NOT NULL AS eligible
+        FROM pending evaluation
+        LEFT JOIN eligible_forecasts detail ON detail.vehicle_observation_id = evaluation.vehicle_observation_id
+         AND detail.target_stop_order = evaluation.target_stop_order
         ORDER BY evaluation.vehicle_observation_id, evaluation.target_stop_order
         """;
 
@@ -220,12 +230,13 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         PendingKey after = PendingKey.BEFORE_FIRST;
         int exclusionBudget = EXCLUSION_LIMIT;
         while (pending.size() < limit) {
-            List<PendingKey> keys = findPendingKeys(routeVersionId, after, limit);
+            PendingPage page = findPendingPage(routeVersionId, after, limit);
+            List<PendingKey> keys = page.keys();
             if (keys.isEmpty()) {
                 break;
             }
             PendingKey last = keys.getLast();
-            List<PendingForecast> eligible = findEligiblePending(routeVersionId, after, last);
+            List<PendingForecast> eligible = page.eligible();
             if (exclusionBudget > 0 && eligible.size() < keys.size()) {
                 exclusionBudget -= closeConfirmedExclusions(routeVersionId, keys, eligible, exclusionBudget);
             }
@@ -284,30 +295,30 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         return closing.size();
     }
 
-    private List<PendingKey> findPendingKeys(final long routeVersionId, PendingKey after, final int limit) {
-        return jdbcClient.sql(SELECT_PENDING_KEYS)
+    private PendingPage findPendingPage(final long routeVersionId, PendingKey after, final int limit) {
+        return jdbcClient.sql(SELECT_PENDING_PAGE)
             .param("routeVersionId", routeVersionId)
             .param("afterObservationId", after.vehicleObservationId())
             .param("afterStopOrder", after.targetStopOrder())
             .param("limit", limit)
-            .query((row, index) -> new PendingKey(row.getLong("vehicle_observation_id"), row.getInt("target_stop_order")))
-            .list();
-    }
-
-    private List<PendingForecast> findEligiblePending(final long routeVersionId, PendingKey after, PendingKey last) {
-        return jdbcClient.sql(SELECT_PENDING)
-            .param("routeVersionId", routeVersionId)
-            .param("afterObservationId", after.vehicleObservationId())
-            .param("afterStopOrder", after.targetStopOrder())
-            .param("lastObservationId", last.vehicleObservationId())
-            .param("lastStopOrder", last.targetStopOrder())
-            .query((row, index) -> new PendingForecast(
-                row.getLong("vehicle_observation_id"), row.getInt("target_stop_order"),
-                row.getLong("route_version_id"), row.getString("vehicle_id"), row.getInt("stops_to_target"),
-                row.getObject("response_received_at", OffsetDateTime.class).toInstant(),
-                row.getObject("generated_at", OffsetDateTime.class).toInstant(),
-                row.getObject("quality_direction", Long.class)))
-            .list();
+            .query(rows -> {
+                List<PendingKey> keys = new ArrayList<>();
+                List<PendingForecast> eligible = new ArrayList<>();
+                while (rows.next()) {
+                    long observationId = rows.getLong("vehicle_observation_id");
+                    int stopOrder = rows.getInt("target_stop_order");
+                    keys.add(new PendingKey(observationId, stopOrder));
+                    if (rows.getBoolean("eligible")) {
+                        eligible.add(new PendingForecast(
+                            observationId, stopOrder, rows.getLong("route_version_id"),
+                            rows.getString("vehicle_id"), rows.getInt("stops_to_target"),
+                            rows.getObject("response_received_at", OffsetDateTime.class).toInstant(),
+                            rows.getObject("generated_at", OffsetDateTime.class).toInstant(),
+                            rows.getObject("quality_direction", Long.class)));
+                    }
+                }
+                return new PendingPage(keys, eligible);
+            });
     }
 
     @Override
@@ -414,6 +425,9 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
 
     private static OffsetDateTime offsetOf(Instant timestamp) {
         return timestamp.atOffset(ZoneOffset.UTC);
+    }
+
+    private record PendingPage(List<PendingKey> keys, List<PendingForecast> eligible) {
     }
 
     private record PendingKey(long vehicleObservationId, int targetStopOrder) {
