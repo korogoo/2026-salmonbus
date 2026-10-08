@@ -29,8 +29,11 @@ import org.springframework.transaction.annotation.Propagation;
 public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepository {
 
     private static final String INSERT_PENDING = """
-        INSERT /* salmonbus:forecast_evaluation.insert_pending */ INTO forecast_evaluation (vehicle_observation_id, target_stop_order, route_version_id)
-        VALUES (?, ?, ?)
+        INSERT /* salmonbus:forecast_evaluation.insert_pending */ INTO forecast_evaluation_pending (vehicle_observation_id, target_stop_order, route_version_id)
+        SELECT :observation, :stop, :version
+        WHERE NOT EXISTS (
+            SELECT 1 FROM forecast_evaluation_result
+            WHERE vehicle_observation_id = :observation AND target_stop_order = :stop)
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
         """;
 
@@ -39,8 +42,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     private static final String SELECT_PENDING_PAGE = """
         WITH /* salmonbus:forecast_evaluation.select_pending_page */ pending AS MATERIALIZED (
             SELECT vehicle_observation_id, target_stop_order
-            FROM forecast_evaluation
-            WHERE scoring_state = 'PENDING' AND route_version_id = :routeVersionId
+            FROM forecast_evaluation_pending
+            WHERE route_version_id = :routeVersionId
               AND (vehicle_observation_id, target_stop_order) > (:afterObservationId, :afterStopOrder)
             ORDER BY vehicle_observation_id, target_stop_order
             LIMIT :limit
@@ -70,53 +73,9 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         ORDER BY evaluation.vehicle_observation_id, evaluation.target_stop_order
         """;
 
-    /** 근거의 정류장 순번은 원 관측의 stop_order다. 평가 판정에 사용하는 passed_stop_order와 구분한다. */
-    private static final String COMPLETE = """
-        UPDATE /* salmonbus:forecast_evaluation.complete */ forecast_evaluation evaluation
-        SET scoring_state = :scoringState,
-            arrival_observation_id = :arrivalObservationId,
-            seats_on_arrival = :seatsOnArrival,
-            scored_at = :scoredAt,
-            arrived_at = arrival_batch.response_received_at,
-            arrival_route_version_id = arrival.route_version_id,
-            arrival_vehicle_id = arrival.vehicle_id,
-            arrival_stop_order = arrival.stop_order,
-            arrival_running_state = arrival.running_state,
-            arrival_remaining_seats = arrival.remaining_seats,
-            arrival_seat_unknown_reason = arrival.seat_unknown_reason,
-            arrival_vehicle_trip_key = arrival.vehicle_trip_key,
-            arrival_quality_direction = arrival.quality_direction
-        FROM seat_forecast forecast
-        JOIN route_version version ON version.id = forecast.route_version_id
-        JOIN route route_info ON route_info.id = version.route_id
-        LEFT JOIN route_stop target_stop ON target_stop.route_version_id = forecast.route_version_id
-          AND target_stop.stop_order = forecast.target_stop_order
-        JOIN route_data_quality quality ON quality.route_id = version.route_id
-        JOIN forecast_eligible_observation source ON source.id = forecast.vehicle_observation_id
-        LEFT JOIN forecast_eligible_observation arrival ON arrival.id = :arrivalObservationId
-        LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
-        WHERE evaluation.vehicle_observation_id = :vehicleObservationId
-          AND evaluation.target_stop_order = :targetStopOrder
-          AND evaluation.scoring_state = 'PENDING'
-          AND forecast.vehicle_observation_id = evaluation.vehicle_observation_id
-          AND forecast.target_stop_order = evaluation.target_stop_order
-          AND (CAST(:arrivalObservationId AS bigint) IS NULL OR (
-              arrival.id IS NOT NULL AND %s))
-        RETURNING version.route_id, forecast.model_deployment_id, forecast.route_version_id, evaluation.vehicle_observation_id,
-                  evaluation.target_stop_order, forecast.stops_to_target, forecast.seat_full_chance_raw,
-                  evaluation.arrival_observation_id, evaluation.arrived_at, evaluation.seats_on_arrival,
-                  evaluation.scoring_state, evaluation.scored_at,
-                  forecast.quality_revision = quality.quality_revision AS usable_for_calibration,
-                  source.vehicle_id AS prediction_vehicle_id, source.remaining_seats AS prediction_remaining_seats,
-                  COALESCE(target_stop.boarding_allowed, false) AS target_boarding_allowed,
-                  route_info.display_name AS route_name, target_stop.name AS stop_name,
-                  target_stop.stop_id, target_stop.direction, forecast.model_deployment_id,
-                  forecast.expected_seats, forecast.seat_full_chance
-        """.formatted(EligibleObservationSql.ARRIVAL_MATCHES_SOURCE);
-
     private static final int SETTLEMENT_BATCH_SIZE = 100;
 
-    /** 같은 관측을 쓰는 여러 예보의 품질 조회를 묶음 안에서 한 번만 수행한다. */
+    /** 품질을 재확인한 대기 행만 제거하고, 같은 SQL에서 완료 근거를 보관한다. */
     private static final String COMPLETE_BATCH = """
         WITH /* salmonbus:forecast_evaluation.complete_batch */ input(vehicleObservationId, targetStopOrder, arrivalObservationId, scoringState, seatsOnArrival, scoredAt)
             AS MATERIALIZED (VALUES %s),
@@ -127,49 +86,59 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                 UNION
                 SELECT arrivalObservationId FROM input WHERE arrivalObservationId IS NOT NULL
             ) keys ON keys.id = observation.id
+        ), candidates AS MATERIALIZED (
+            SELECT pending.vehicle_observation_id, pending.target_stop_order, pending.route_version_id,
+                   input.scoringState AS scoring_state, input.arrivalObservationId AS arrival_observation_id,
+                   input.seatsOnArrival AS seats_on_arrival, input.scoredAt AS scored_at,
+                   arrival_batch.response_received_at AS arrived_at,
+                   arrival.route_version_id AS arrival_route_version_id,
+                   arrival.vehicle_id AS arrival_vehicle_id, arrival.stop_order AS arrival_stop_order,
+                   arrival.running_state AS arrival_running_state, arrival.remaining_seats AS arrival_remaining_seats,
+                   arrival.seat_unknown_reason AS arrival_seat_unknown_reason,
+                   arrival.vehicle_trip_key AS arrival_vehicle_trip_key,
+                   arrival.quality_direction AS arrival_quality_direction,
+                   version.route_id, forecast.model_deployment_id, forecast.stops_to_target,
+                   forecast.seat_full_chance_raw,
+                   forecast.quality_revision = quality.quality_revision AS usable_for_calibration,
+                   source.vehicle_id AS prediction_vehicle_id, source.remaining_seats AS prediction_remaining_seats,
+                   COALESCE(target_stop.boarding_allowed, false) AS target_boarding_allowed,
+                   route_info.display_name AS route_name, target_stop.name AS stop_name,
+                   target_stop.stop_id, target_stop.direction, forecast.expected_seats, forecast.seat_full_chance
+            FROM input
+            JOIN forecast_evaluation_pending pending ON pending.vehicle_observation_id = input.vehicleObservationId
+             AND pending.target_stop_order = input.targetStopOrder
+            JOIN seat_forecast forecast ON forecast.vehicle_observation_id = input.vehicleObservationId
+             AND forecast.target_stop_order = input.targetStopOrder
+            JOIN route_version version ON version.id = forecast.route_version_id
+            JOIN route route_info ON route_info.id = version.route_id
+            LEFT JOIN route_stop target_stop ON target_stop.route_version_id = forecast.route_version_id
+             AND target_stop.stop_order = forecast.target_stop_order
+            JOIN route_data_quality quality ON quality.route_id = version.route_id
+            JOIN eligible source ON source.id = forecast.vehicle_observation_id
+            LEFT JOIN eligible arrival ON arrival.id = input.arrivalObservationId
+            LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
+            WHERE CAST(input.arrivalObservationId AS bigint) IS NULL OR (arrival.id IS NOT NULL AND %s)
+        ), removed AS (
+            DELETE FROM forecast_evaluation_pending pending USING candidates candidate
+            WHERE pending.vehicle_observation_id = candidate.vehicle_observation_id
+              AND pending.target_stop_order = candidate.target_stop_order
+            RETURNING pending.vehicle_observation_id, pending.target_stop_order
+        ), saved AS (
+            INSERT INTO forecast_evaluation_result (
+                vehicle_observation_id, target_stop_order, route_version_id, scoring_state,
+                arrival_observation_id, seats_on_arrival, scored_at, arrived_at, arrival_route_version_id,
+                arrival_vehicle_id, arrival_stop_order, arrival_running_state, arrival_remaining_seats,
+                arrival_seat_unknown_reason, arrival_vehicle_trip_key, arrival_quality_direction)
+            SELECT candidate.vehicle_observation_id, candidate.target_stop_order, candidate.route_version_id,
+                   candidate.scoring_state, candidate.arrival_observation_id, candidate.seats_on_arrival,
+                   candidate.scored_at, candidate.arrived_at, candidate.arrival_route_version_id,
+                   candidate.arrival_vehicle_id, candidate.arrival_stop_order, candidate.arrival_running_state,
+                   candidate.arrival_remaining_seats, candidate.arrival_seat_unknown_reason,
+                   candidate.arrival_vehicle_trip_key, candidate.arrival_quality_direction
+            FROM candidates candidate JOIN removed USING (vehicle_observation_id, target_stop_order)
+            RETURNING vehicle_observation_id, target_stop_order
         )
-        UPDATE forecast_evaluation evaluation
-        SET scoring_state = input.scoringState,
-            arrival_observation_id = input.arrivalObservationId,
-            seats_on_arrival = input.seatsOnArrival,
-            scored_at = input.scoredAt,
-            arrived_at = arrival_batch.response_received_at,
-            arrival_route_version_id = arrival.route_version_id,
-            arrival_vehicle_id = arrival.vehicle_id,
-            arrival_stop_order = arrival.stop_order,
-            arrival_running_state = arrival.running_state,
-            arrival_remaining_seats = arrival.remaining_seats,
-            arrival_seat_unknown_reason = arrival.seat_unknown_reason,
-            arrival_vehicle_trip_key = arrival.vehicle_trip_key,
-            arrival_quality_direction = arrival.quality_direction
-        FROM input
-        JOIN seat_forecast forecast ON forecast.vehicle_observation_id = input.vehicleObservationId
-         AND forecast.target_stop_order = input.targetStopOrder
-        JOIN route_version version ON version.id = forecast.route_version_id
-        JOIN route route_info ON route_info.id = version.route_id
-        LEFT JOIN route_stop target_stop ON target_stop.route_version_id = forecast.route_version_id
-          AND target_stop.stop_order = forecast.target_stop_order
-        JOIN route_data_quality quality ON quality.route_id = version.route_id
-        JOIN eligible source ON source.id = forecast.vehicle_observation_id
-        LEFT JOIN eligible arrival ON arrival.id = input.arrivalObservationId
-        LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
-        WHERE evaluation.vehicle_observation_id = input.vehicleObservationId
-          AND evaluation.target_stop_order = input.targetStopOrder
-          AND evaluation.scoring_state = 'PENDING'
-          AND forecast.vehicle_observation_id = evaluation.vehicle_observation_id
-          AND forecast.target_stop_order = evaluation.target_stop_order
-          AND (CAST(input.arrivalObservationId AS bigint) IS NULL OR (
-              arrival.id IS NOT NULL AND %s))
-        RETURNING version.route_id, forecast.model_deployment_id, forecast.route_version_id, evaluation.vehicle_observation_id,
-                  evaluation.target_stop_order, forecast.stops_to_target, forecast.seat_full_chance_raw,
-                  evaluation.arrival_observation_id, evaluation.arrived_at, evaluation.seats_on_arrival,
-                  evaluation.scoring_state, evaluation.scored_at,
-                  forecast.quality_revision = quality.quality_revision AS usable_for_calibration,
-                  source.vehicle_id AS prediction_vehicle_id, source.remaining_seats AS prediction_remaining_seats,
-                  COALESCE(target_stop.boarding_allowed, false) AS target_boarding_allowed,
-                  route_info.display_name AS route_name, target_stop.name AS stop_name,
-                  target_stop.stop_id, target_stop.direction, forecast.model_deployment_id,
-                  forecast.expected_seats, forecast.seat_full_chance
+        SELECT candidate.* FROM candidates candidate JOIN saved USING (vehicle_observation_id, target_stop_order)
         """;
 
     private static final int EXCLUSION_LIMIT = 500;
@@ -203,9 +172,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             SELECT version.id
             FROM route_version version
             WHERE EXISTS (
-                SELECT 1 FROM forecast_evaluation evaluation
+                SELECT 1 FROM forecast_evaluation_pending evaluation
                 WHERE evaluation.route_version_id = version.id
-                  AND evaluation.scoring_state = 'PENDING'
             )
             ORDER BY version.route_id, version.id
             """).query(Long.class).list();
@@ -278,14 +246,19 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         // 잠금을 얻은 뒤 최신 조사/편도 상태를 다시 확인한다. PENDING 조건으로 재시도도 중복 갱신하지 않는다.
         JdbcClient.StatementSpec query = jdbcClient.sql("""
             WITH keys(observation_id, target_stop_order) AS MATERIALIZED (VALUES %s)
-            UPDATE forecast_evaluation evaluation
-            SET scoring_state = 'QUALITY_EXCLUDED', scored_at = CURRENT_TIMESTAMP
-            FROM keys
-            %s
-            WHERE evaluation.vehicle_observation_id = keys.observation_id
-              AND evaluation.target_stop_order = keys.target_stop_order
-              AND evaluation.route_version_id = :version AND source.route_version_id = :version
-              AND evaluation.scoring_state = 'PENDING' AND %s
+            , removed AS (
+                DELETE FROM forecast_evaluation_pending evaluation
+                USING keys
+                %s
+                WHERE evaluation.vehicle_observation_id = keys.observation_id
+                  AND evaluation.target_stop_order = keys.target_stop_order
+                  AND evaluation.route_version_id = :version AND source.route_version_id = :version AND %s
+                RETURNING evaluation.vehicle_observation_id, evaluation.target_stop_order, evaluation.route_version_id
+            )
+            INSERT INTO forecast_evaluation_result (
+                vehicle_observation_id, target_stop_order, route_version_id, scoring_state, scored_at)
+            SELECT vehicle_observation_id, target_stop_order, route_version_id, 'QUALITY_EXCLUDED', CURRENT_TIMESTAMP
+            FROM removed
             """.formatted(values, EXCLUSION_SOURCE, CONFIRMED_EXCLUSION)).param("version", version);
         for (int index = 0; index < closing.size(); index++) {
             query = query.param("observation" + index, closing.get(index).vehicleObservationId())
@@ -326,7 +299,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     public void addPending(final long routeVersionId, List<ForecastEvaluation> evaluations) {
         for (ForecastEvaluation evaluation : evaluations) {
             jdbcClient.sql(INSERT_PENDING)
-                .params(evaluation.vehicleObservationId(), evaluation.targetStopOrder(), routeVersionId)
+                .param("observation", evaluation.vehicleObservationId())
+                .param("stop", evaluation.targetStopOrder()).param("version", routeVersionId)
                 .update();
         }
     }
@@ -387,12 +361,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             if (evaluation.state() == ScoringState.PENDING) {
                 throw new IllegalArgumentException("완료된 평가만 저장할 수 있다");
             }
-            newlySettled.addAll(parameters(COMPLETE, evaluation)
-                .param("scoringState", evaluation.state().name())
-                .param("seatsOnArrival", evaluation.result().seatsOnArrival())
-                .param("scoredAt", offsetOf(evaluation.scoredAt()))
-                .query(JdbcForecastEvaluationRepository::settledEvaluationOf)
-                .list());
+            newlySettled.addAll(settleBatch(List.of(evaluation)));
         }
         return List.copyOf(newlySettled);
     }
@@ -411,12 +380,6 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                     new EvaluationDiagnostics(row.getString("route_name"), row.getString("stop_name"),
                         row.getString("stop_id"), row.getString("direction"), row.getLong("model_deployment_id"),
                         row.getObject("expected_seats", Double.class), row.getDouble("seat_full_chance")));
-    }
-
-    private JdbcClient.StatementSpec parameters(String sql, ForecastEvaluation evaluation) {
-        return jdbcClient.sql(sql).param("vehicleObservationId", evaluation.vehicleObservationId())
-            .param("targetStopOrder", evaluation.targetStopOrder())
-            .param("arrivalObservationId", evaluation.result().arrivalObservationId());
     }
 
     private static Instant instantOrNull(OffsetDateTime timestamp) {
