@@ -44,7 +44,8 @@ class MigrationOrderTest {
      * <p>이 브랜치는 선행 평가 테이블 분리 이후 파일 통계의 게시 기록을 저장한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
-        List.of("file_statistics_publication", "evaluation_archive_tracking", "evaluation_archive_route_lookup");
+        List.of("file_statistics_publication", "evaluation_archive_tracking", "evaluation_archive_route_lookup",
+            "evaluation_archive_retention");
 
     private static final String MIGRATION_LOCATION = "db/migration";
     private static final String STAGED_SCHEMA = "staged_deploy";

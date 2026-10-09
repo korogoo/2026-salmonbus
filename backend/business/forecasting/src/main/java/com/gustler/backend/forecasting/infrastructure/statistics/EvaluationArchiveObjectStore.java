@@ -1,6 +1,7 @@
 package com.gustler.backend.forecasting.infrastructure.statistics;
 
 import com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveStorage;
+import com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveSource;
 import com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch;
 import java.io.IOException;
@@ -12,7 +13,7 @@ import java.util.List;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 팀 경로의 불변 객체만 사용한다. 작업 전용 디렉터리는 호출이 끝나면 정리한다. */
-public final class EvaluationArchiveObjectStore implements EvaluationArchiveStorage, StatisticsArchiveReader {
+public final class EvaluationArchiveObjectStore implements EvaluationArchiveStorage, EvaluationArchiveSource, StatisticsArchiveReader {
     private static final String BUCKET = "techcourse-project-2026";
     private static final String ROOT = "salmonbus-be/evaluation-archive/v1/";
     private final Path workDirectory;
@@ -149,6 +150,15 @@ public final class EvaluationArchiveObjectStore implements EvaluationArchiveStor
                 }
             }
         }
+    }
+
+    @Override
+    public List<EvaluationArchiveBatch.Row> readOriginal(EvaluationArchiveBatch verified) {
+        return read(new Reference(verified.id(), verified.routeVersionId(), verified.qualityRevision(),
+            verified.rowCount(), verified.manifestSha256())).stream()
+            .map(row -> new EvaluationArchiveBatch.Row(
+                new EvaluationArchiveBatch.Key(row.key().observationId(), row.key().stopOrder()),
+                row.originalJson(), row.sha256())).toList();
     }
 
     private byte[] downloadBounded(String key, Path path, long limit) throws IOException {

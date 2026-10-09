@@ -225,6 +225,21 @@ class EvaluationArchiveObjectStoreTest {
     }
 
     @Test
+    void 삭제와_복원을_위한_원본도_저장한_모든_열과_검증값을_그대로_반환한다() throws Exception {
+        // given
+        var saved = store(1024 * 1024).storeAndVerify(batch, List.of(row(ORIGINAL)));
+        var verified = new EvaluationArchiveBatch(batch.id(), batch.routeVersionId(), batch.qualityRevision(),
+            batch.leaseToken(), batch.leaseUntil(), State.VERIFIED, batch.rowCount(), saved.manifestSha256());
+
+        // when
+        var rows = store(1024 * 1024).readOriginal(verified);
+
+        // then
+        assertThat(rows).containsExactly(row(ORIGINAL));
+        assertDirectoryEmpty();
+    }
+
+    @Test
     void 저장_완료_뒤_원본_객체가_바뀌면_재집계_입력으로_사용하지_않는다() {
         // given
         var stored = store(1024 * 1024).storeAndVerify(batch, List.of(row(ORIGINAL)));
