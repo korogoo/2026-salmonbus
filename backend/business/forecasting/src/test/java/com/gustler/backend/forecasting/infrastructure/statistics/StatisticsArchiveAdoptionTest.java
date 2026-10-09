@@ -51,6 +51,7 @@ class StatisticsArchiveAdoptionTest {
     @MockitoBean Clock clock;
     @MockitoSpyBean JdbcClient jdbc;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired javax.sql.DataSource dataSource;
     private JdbcStatisticsInputExtractor extractor;
     private long route;
     private long source;
@@ -561,7 +562,47 @@ class StatisticsArchiveAdoptionTest {
 
     private int finishPipeline() {
         for (int i = 1; i <= 1000; i++) {
-            if (pipeline.step(route).status() == DemandStatisticsPipeline.Step.Status.COMPLETED) return i;
+            try {
+                if (pipeline.step(route).status() == DemandStatisticsPipeline.Step.Status.COMPLETED) return i;
+            } catch (org.springframework.dao.QueryTimeoutException failure) {
+                var prepared = jdbc.sql("""
+                    SELECT name,statement,generic_plans,custom_plans FROM pg_prepared_statements
+                    WHERE statement LIKE '%INSERT INTO stop_demand_rebuild_total%'
+                    """).query().listOfRows();
+                Map<String,Object> diagnostic = new java.util.LinkedHashMap<>();
+                diagnostic.put("failedStep", i);
+                diagnostic.put("prepared", prepared);
+                String message = failure.getMessage();
+                int sqlStart = message.indexOf("SQL [");
+                int sqlEnd = message.lastIndexOf("]; ERROR:");
+                if (sqlStart >= 0 && sqlEnd > sqlStart) {
+                    String[] fragments = message.substring(sqlStart + 5, sqlEnd).split("\\?", -1);
+                    StringBuilder sql = new StringBuilder(fragments[0]);
+                    for (int parameter = 1; parameter < fragments.length; parameter++) {
+                        sql.append('$').append(parameter).append(fragments[parameter]);
+                    }
+                    try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                        statement.setQueryTimeout(5);
+                        try (var result = statement.executeQuery("EXPLAIN (FORMAT JSON, GENERIC_PLAN TRUE) " + sql)) {
+                            result.next();
+                            diagnostic.put("failedQueryPlan", result.getString(1));
+                        }
+                    } catch (java.sql.SQLException | RuntimeException explainFailure) {
+                        diagnostic.put("failedQueryPlanError", explainFailure.getMessage());
+                    }
+                }
+                for (var statement : prepared) {
+                    try {
+                        diagnostic.put(statement.get("name").toString(), jdbc.sql(
+                            "EXPLAIN (FORMAT JSON, GENERIC_PLAN TRUE) " + statement.get("statement"))
+                            .query(String.class).single());
+                    } catch (RuntimeException explainFailure) {
+                        diagnostic.put("explainFailure", explainFailure.getMessage());
+                    }
+                }
+                report("pipeline-timeout", diagnostic);
+                throw failure;
+            }
         }
         throw new AssertionError("통계 파이프라인이 제한된 단계 안에 완료되지 않았다");
     }

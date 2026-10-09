@@ -27,6 +27,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** 바깥 테스트 트랜잭션 없이 제품의 실제 커밋·롤백을 검증한다. */
 @ForecastingIntegrationTest
+@org.springframework.test.context.TestPropertySource(properties = "sal175.archive-store-test=true")
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class JdbcEvaluationArchiveStoreTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-09T00:00:00Z"), ZoneId.of("Asia/Seoul"));
     @Autowired JdbcClient jdbc;
@@ -342,6 +344,56 @@ class JdbcEvaluationArchiveStoreTest {
 
     private EvaluationArchiveBatch reserve(int stop) {
         return store.reserve(route, List.of(new Key(source, stop))).orElseThrow();
+    }
+
+    @Test
+    void 외부_전송이_실패하면_검증_완료로_기록하지_않는다() {
+        // given
+        var batch = reserve(9);
+        var service = new com.gustler.backend.forecasting.application.evaluation.ArchiveCompletedEvaluationsService(
+            store, (reserved, rows) -> { throw new IllegalStateException("전송 실패 주입"); });
+
+        // when & then
+        assertThatThrownBy(() -> service.archive(batch)).isInstanceOf(IllegalStateException.class);
+        assertThat(state(batch)).isEqualTo("RESERVED");
+        assertThat(store.readOwned(batch)).hasSize(1);
+    }
+
+    @Test
+    void 외부_전송_중에는_트랜잭션을_종료하고_원본을_그대로_유지한다() {
+        // given
+        var batch = reserve(9);
+        var service = new com.gustler.backend.forecasting.application.evaluation.ArchiveCompletedEvaluationsService(
+            store, (reserved, rows) -> {
+                assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                assertThat(rows).hasSize(1);
+                return new com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveStorage.Verification(
+                    "s3://test-only", "a".repeat(64));
+            });
+
+        // when
+        service.archive(batch);
+
+        // then
+        assertThat(state(batch)).isEqualTo("VERIFIED");
+        assertThat(store.readOwned(batch)).hasSize(1);
+    }
+
+    @Test
+    void 전송_중_원본이_바뀌면_파일_검증에_성공했어도_확정하지_않는다() {
+        // given
+        var batch = reserve(9);
+        var service = new com.gustler.backend.forecasting.application.evaluation.ArchiveCompletedEvaluationsService(
+            store, (reserved, rows) -> {
+                jdbc.sql("UPDATE forecast_evaluation_result SET scoring_state='SKIPPED' WHERE vehicle_observation_id=? AND target_stop_order=9")
+                    .param(source).update();
+                return new com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveStorage.Verification(
+                    "s3://test-only", "a".repeat(64));
+            });
+
+        // when & then
+        assertThatThrownBy(() -> service.archive(batch)).isInstanceOf(IllegalStateException.class);
+        assertThat(state(batch)).isEqualTo("RESERVED");
     }
 
     private void addPending(int stop) {
