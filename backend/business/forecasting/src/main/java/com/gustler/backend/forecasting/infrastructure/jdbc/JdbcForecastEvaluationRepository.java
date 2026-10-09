@@ -34,6 +34,9 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         WHERE NOT EXISTS (
             SELECT 1 FROM forecast_evaluation_result
             WHERE vehicle_observation_id = :observation AND target_stop_order = :stop)
+          AND NOT EXISTS (
+            SELECT 1 FROM evaluation_archive_member
+            WHERE vehicle_observation_id = :observation AND target_stop_order = :stop)
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
         """;
 
