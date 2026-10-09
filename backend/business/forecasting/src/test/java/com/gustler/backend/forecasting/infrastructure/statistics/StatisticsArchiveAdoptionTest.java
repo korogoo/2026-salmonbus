@@ -581,7 +581,14 @@ class StatisticsArchiveAdoptionTest {
                     for (int parameter = 1; parameter < fragments.length; parameter++) {
                         sql.append('$').append(parameter).append(fragments[parameter]);
                     }
-                    try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                    // GENERIC_PLAN의 $n은 JDBC 바인딩 값이 아니다. 단순 프로토콜로 서버에 전달한다.
+                    var pool = (com.zaxxer.hikari.HikariDataSource) dataSource;
+                    var diagnosticProperties = new java.util.Properties();
+                    diagnosticProperties.setProperty("user", pool.getUsername());
+                    diagnosticProperties.setProperty("password", pool.getPassword());
+                    diagnosticProperties.setProperty("preferQueryMode", "simple");
+                    try (var connection = java.sql.DriverManager.getConnection(pool.getJdbcUrl(), diagnosticProperties);
+                         var statement = connection.createStatement()) {
                         statement.setQueryTimeout(5);
                         try (var result = statement.executeQuery("EXPLAIN (FORMAT JSON, GENERIC_PLAN TRUE) " + sql)) {
                             result.next();

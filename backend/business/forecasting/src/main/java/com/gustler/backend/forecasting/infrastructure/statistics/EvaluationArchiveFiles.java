@@ -3,6 +3,7 @@ package com.gustler.backend.forecasting.infrastructure.statistics;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch.Key;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch.Row;
+import com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Reference;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -80,6 +81,57 @@ final class EvaluationArchiveFiles {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    static Manifest manifest(Reference reference, byte[] bytes, long maxBytes) {
+        if (bytes.length > 16384 || !digest(bytes).equals(reference.manifestSha256())) {
+            throw new IllegalArgumentException("S3 설명 파일이 DB의 검증 기록과 다르다");
+        }
+        Manifest manifest = JSON.readValue(bytes, Manifest.class);
+        if (manifest == null || !"evaluation-archive-v1".equals(manifest.format())
+            || !reference.batchId().equals(manifest.batchId()) || reference.routeVersionId() != manifest.routeVersionId()
+            || reference.qualityRevision() != manifest.qualityRevision() || reference.rowCount() != manifest.rowCount()
+            || !"evaluations.jsonl".equals(manifest.file()) || manifest.bytes() < 1 || manifest.bytes() > maxBytes
+            || manifest.sha256() == null || !manifest.sha256().matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("이관 설명 파일의 범위나 크기가 올바르지 않다");
+        }
+        return manifest;
+    }
+
+    static List<Row> decode(Reference reference, byte[] manifestBytes, byte[] data, long maxBytes) {
+        Manifest manifest = manifest(reference, manifestBytes, maxBytes);
+        if (data.length != manifest.bytes() || !digest(data).equals(manifest.sha256())) {
+            throw new IllegalArgumentException("보존한 원본의 크기나 검증값이 다르다");
+        }
+        String text;
+        try {
+            text = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(data)).toString();
+        } catch (java.nio.charset.CharacterCodingException exception) {
+            throw new IllegalArgumentException("이관 원본의 UTF-8이 올바르지 않다", exception);
+        }
+        String[] lines = text.split("\n", -1);
+        if (lines.length != reference.rowCount() + 1 || !lines[lines.length - 1].isEmpty()) {
+            throw new IllegalArgumentException("이관 원본의 건수가 설명 파일과 다르다");
+        }
+        List<Row> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < lines.length - 1; i++) {
+            var node = JSON.readTree(lines[i]);
+            if (node == null || !node.isObject() || !node.hasNonNull("vehicle_observation_id")
+                || !node.hasNonNull("target_stop_order") || !node.get("vehicle_observation_id").isIntegralNumber()
+                || !node.get("vehicle_observation_id").canConvertToLong() || !node.get("target_stop_order").isIntegralNumber()
+                || !node.get("target_stop_order").canConvertToInt()) {
+                throw new IllegalArgumentException("원본 키가 올바르지 않다");
+            }
+            rows.add(new Row(new Key(node.get("vehicle_observation_id").asLong(), node.get("target_stop_order").asInt()),
+                lines[i], digest(lines[i].getBytes(StandardCharsets.UTF_8))));
+        }
+        // 같은 열·중복·정렬·노선 검사를 읽을 때도 적용한다. lease는 파일 내용에 포함되지 않는다.
+        var batch = new EvaluationArchiveBatch(reference.batchId(), reference.routeVersionId(), reference.qualityRevision(),
+            new UUID(0, 0), java.time.Instant.EPOCH, EvaluationArchiveBatch.State.RESERVED, reference.rowCount(), null);
+        if (!java.util.Arrays.equals(encode(batch, rows, maxBytes).rows(), data)) {
+            throw new IllegalArgumentException("원본 파일의 정렬이나 표현이 올바르지 않다");
+        }
+        return List.copyOf(rows);
     }
 
     record Encoded(byte[] rows, byte[] manifest) { }

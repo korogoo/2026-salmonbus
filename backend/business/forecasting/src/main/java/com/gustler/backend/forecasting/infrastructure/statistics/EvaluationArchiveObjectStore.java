@@ -1,8 +1,8 @@
 package com.gustler.backend.forecasting.infrastructure.statistics;
 
 import com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveStorage;
+import com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch;
-import com.gustler.backend.forecasting.domain.evaluation.EvaluationArchiveBatch.Row;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -12,7 +12,7 @@ import java.util.List;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 팀 경로의 불변 객체만 사용한다. 작업 전용 디렉터리는 호출이 끝나면 정리한다. */
-public final class EvaluationArchiveObjectStore implements EvaluationArchiveStorage {
+public final class EvaluationArchiveObjectStore implements EvaluationArchiveStorage, StatisticsArchiveReader {
     private static final String BUCKET = "techcourse-project-2026";
     private static final String ROOT = "salmonbus-be/evaluation-archive/v1/";
     private final Path workDirectory;
@@ -34,7 +34,7 @@ public final class EvaluationArchiveObjectStore implements EvaluationArchiveStor
     }
 
     @Override
-    public synchronized Verification storeAndVerify(EvaluationArchiveBatch batch, List<Row> rows) {
+    public synchronized Verification storeAndVerify(EvaluationArchiveBatch batch, List<EvaluationArchiveBatch.Row> rows) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("S3 전송 중 DB 트랜잭션을 유지하지 않는다");
         }
@@ -109,5 +109,55 @@ public final class EvaluationArchiveObjectStore implements EvaluationArchiveStor
             }
             throw exception;
         }
+    }
+
+    @Override
+    public synchronized List<StatisticsArchiveReader.Row> read(Reference reference) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("이관 파일은 DB 트랜잭션 밖에서 읽어야 한다");
+        }
+        Path directory = null;
+        RuntimeException failure = null;
+        try {
+            if (Files.getFileStore(workDirectory).getUsableSpace() < 2 * maxBytes + 1024 * 1024) {
+                throw new IOException("이관 파일을 읽을 디스크 여유가 부족하다");
+            }
+            directory = Files.createTempDirectory(workDirectory, "evaluation-read-");
+            String prefix = ROOT + "route-version=" + reference.routeVersionId() + "/batch=" + reference.batchId() + "/";
+            byte[] manifest = downloadBounded(prefix + "manifest.json", directory.resolve("manifest.json"), 16384);
+            var metadata = EvaluationArchiveFiles.manifest(reference, manifest, maxBytes);
+            byte[] data = downloadBounded(prefix + "evaluations.jsonl", directory.resolve("evaluations.jsonl"), metadata.bytes());
+            return EvaluationArchiveFiles.decode(reference, manifest, data, maxBytes).stream()
+                .map(row -> new StatisticsArchiveReader.Row(
+                    new StatisticsArchiveReader.Key(row.key().observationId(), row.key().stopOrder()),
+                    row.originalJson(), row.sha256())).toList();
+        } catch (IOException exception) {
+            failure = new IllegalStateException("이관 원본을 다시 읽지 못했다", exception);
+            throw failure;
+        } catch (RuntimeException exception) {
+            failure = exception;
+            throw exception;
+        } finally {
+            if (directory != null) {
+                try {
+                    Files.deleteIfExists(directory.resolve("manifest.json"));
+                    Files.deleteIfExists(directory.resolve("evaluations.jsonl"));
+                    Files.delete(directory);
+                } catch (IOException exception) {
+                    if (failure != null) failure.addSuppressed(exception);
+                    else throw new IllegalStateException("읽기 임시 파일을 정리하지 못했다", exception);
+                }
+            }
+        }
+    }
+
+    private byte[] downloadBounded(String key, Path path, long limit) throws IOException {
+        command.run(List.of("aws", "s3api", "get-object", "--bucket", BUCKET, "--key", key,
+            "--range", "bytes=0-" + limit, "--region", "ap-northeast-2", "--cli-connect-timeout", "5",
+            "--cli-read-timeout", "15", "--no-cli-pager", "--no-cli-auto-prompt", path.toAbsolutePath().toString()));
+        if (Files.isSymbolicLink(path) || Files.size(path) > limit) {
+            throw new IllegalArgumentException("이관 파일의 크기 한도를 넘었다");
+        }
+        return Files.readAllBytes(path);
     }
 }

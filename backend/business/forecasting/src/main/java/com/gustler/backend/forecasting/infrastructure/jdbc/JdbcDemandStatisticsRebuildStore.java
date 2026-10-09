@@ -159,6 +159,15 @@ public class JdbcDemandStatisticsRebuildStore implements DemandStatisticsRebuild
         if (observationIds.isEmpty()) {
             return;
         }
+        boolean missing = jdbc.sql("""
+            SELECT EXISTS(SELECT 1 FROM evaluation_archive_member m JOIN seat_forecast f
+                ON f.vehicle_observation_id=m.vehicle_observation_id AND f.target_stop_order=m.target_stop_order
+                  AND f.stops_to_target=1
+                WHERE m.vehicle_observation_id IN (:ids) AND m.route_version_id=:route
+                  AND NOT EXISTS(SELECT 1 FROM forecast_evaluation_result e
+                      WHERE e.vehicle_observation_id=m.vehicle_observation_id AND e.target_stop_order=m.target_stop_order))
+            """).param("ids", observationIds).param("route", rebuild.routeVersionId()).query(Boolean.class).single();
+        if (missing) throw new IllegalStateException("이관된 정산을 제외한 DB 전용 재집계는 실행하지 않는다");
         jdbc.sql(AGGREGATE).param("version", rebuild.routeVersionId()).param("vehicle", rebuild.scope().vehicleId())
             .param("request", rebuild.requestId()).param("ids", observationIds)
             .param("until", offsetOf(rebuild.dataUntil())).param("inputUntil", rebuild.inputUntilId())

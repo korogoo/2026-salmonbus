@@ -207,6 +207,49 @@ class EvaluationArchiveObjectStoreTest {
         return new EvaluationArchiveObjectStore(directory, maxBytes, objects::run);
     }
 
+    @Test
+    void 저장_당시_검증_기록으로_다시_읽어_같은_정산을_반환한다() throws Exception {
+        // given
+        var stored = store(1024 * 1024).storeAndVerify(batch, List.of(row(ORIGINAL)));
+        var reference = new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Reference(
+            batch.id(), batch.routeVersionId(), batch.qualityRevision(), batch.rowCount(), stored.manifestSha256());
+
+        // when
+        var rows = store(1024 * 1024).read(reference);
+
+        // then
+        assertThat(rows).containsExactly(new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Row(
+            new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Key(7, 9),
+            ORIGINAL, EvaluationArchiveFiles.digest(ORIGINAL.getBytes(StandardCharsets.UTF_8))));
+        assertDirectoryEmpty();
+    }
+
+    @Test
+    void 저장_완료_뒤_원본_객체가_바뀌면_재집계_입력으로_사용하지_않는다() {
+        // given
+        var stored = store(1024 * 1024).storeAndVerify(batch, List.of(row(ORIGINAL)));
+        var reference = new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Reference(
+            batch.id(), batch.routeVersionId(), batch.qualityRevision(), batch.rowCount(), stored.manifestSha256());
+        objects.values.get(prefix() + "evaluations.jsonl")[0] ^= 1;
+
+        // when & then
+        assertThatThrownBy(() -> store(1024 * 1024).read(reference)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 설명_파일이_다른_묶음으로_바뀌면_원본을_읽지_않는다() {
+        // given
+        var stored = store(1024 * 1024).storeAndVerify(batch, List.of(row(ORIGINAL)));
+        var reference = new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Reference(
+            batch.id(), batch.routeVersionId(), batch.qualityRevision(), batch.rowCount(), stored.manifestSha256());
+        objects.values.get(prefix() + "manifest.json")[0] ^= 1;
+        objects.actions.clear();
+
+        // when & then
+        assertThatThrownBy(() -> store(1024 * 1024).read(reference)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(objects.actions).containsExactly("get:manifest.json");
+    }
+
     private Row row(String json) {
         return new Row(new Key(7, 9), json, EvaluationArchiveFiles.digest(json.getBytes(StandardCharsets.UTF_8)));
     }
