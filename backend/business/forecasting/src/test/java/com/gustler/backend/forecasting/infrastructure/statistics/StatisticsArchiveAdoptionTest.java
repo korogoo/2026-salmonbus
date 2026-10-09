@@ -414,6 +414,106 @@ class StatisticsArchiveAdoptionTest {
 
     private record ScanProbe(long rows, long bytes, long bufferPages, double executionMs) { }
 
+    @Test
+    void 같은_파일을_재시도하거나_게시_객체를_다시_만들어도_통계는_한번만_저장된다() {
+        // given
+        settle();
+        var bundle = export();
+
+        // when
+        int first = publisher().publish(bundle, Map.of("bus", 20), 100);
+        int restarted = publisher().publish(bundle, Map.of("bus", 20), 100);
+
+        // then
+        assertThat(first).isEqualTo(1);
+        assertThat(restarted).isEqualTo(first);
+        assertThat(publicationCount()).isEqualTo(1);
+        assertThat(versionCount()).isEqualTo(1);
+        assertThat(statistics.readAsOf(route, TimeSlot.MORNING,
+            DemandStatisticsVersion.CURRENT_CALCULATION_VERSION, UNTIL).cells().getFirst().sampleCount()).isEqualTo(1);
+        report("publication-replay", Map.of("firstRevision", first, "restartedRevision", restarted,
+            "versions", versionCount(), "receipts", publicationCount(),
+            "scope", "new publisher instance; same PostgreSQL; not an EC2 process kill"));
+    }
+
+    @Test
+    void 처리_기록_저장이_실패하면_통계_버전과_결과도_함께_롤백된다() {
+        // given
+        settle();
+        var bundle = export();
+        doAnswer(invocation -> { throw new org.springframework.dao.DataIntegrityViolationException("기록 실패 주입"); })
+            .when(jdbc).sql(org.mockito.ArgumentMatchers.startsWith("INSERT INTO file_statistics_publication"));
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(bundle, Map.of("bus", 20), 100))
+            .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(publicationCount()).isZero();
+        assertThat(versionCount()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM stop_demand_statistics WHERE route_version_id=?")
+            .param(route).query(Long.class).single()).isZero();
+        report("publication-rollback", Map.of("versions", versionCount(), "receipts", publicationCount()));
+    }
+
+    @Test
+    void 추출한_뒤_품질_판본이_바뀌면_이전_파일의_계산_결과를_게시하지_않는다() {
+        // given
+        settle();
+        var bundle = export();
+        jdbc.sql("""
+            UPDATE route_data_quality SET quality_revision=quality_revision+1
+            WHERE route_id=(SELECT route_id FROM route_version WHERE id=?)
+            """).param(route).update();
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(bundle, Map.of("bus", 20), 100))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("품질 판본");
+        assertThat(publicationCount()).isZero();
+        assertThat(versionCount()).isZero();
+        report("stale-quality-publication", Map.of("versions", 0, "receipts", 0, "staleInputRejected", true));
+    }
+
+    @Test
+    void 파일을_읽기_전에_외부에서_열린_DB_트랜잭션을_거부한다() {
+        // given
+        settle();
+        var bundle = export();
+
+        // when & then
+        assertThatThrownBy(() -> transaction(() -> publisher().publish(bundle, Map.of("bus", 20), 100)))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("트랜잭션 밖");
+        assertThat(versionCount()).isZero();
+    }
+
+    @Test
+    void 더_최근_통계가_있으면_늦게_도착한_과거_계산으로_덮어쓰지_않는다() {
+        // given
+        settle();
+        var bundle = export();
+        statistics.append(new DemandStatisticsVersion(route, DemandStatisticsVersion.CURRENT_CALCULATION_VERSION,
+            1, UNTIL.plusSeconds(1), UNTIL.plusSeconds(1), reference()));
+        when(clock.instant()).thenReturn(UNTIL.plusSeconds(2));
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(bundle, Map.of("bus", 20), 100))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("더 최근");
+        assertThat(versionCount()).isEqualTo(1);
+        assertThat(publicationCount()).isZero();
+    }
+
+    private StatisticsFilePublisher publisher() {
+        return new StatisticsFilePublisher(jdbc, transactions, quality, statistics, clock);
+    }
+
+    private long publicationCount() {
+        return jdbc.sql("SELECT count(*) FROM file_statistics_publication WHERE route_version_id=?")
+            .param(route).query(Long.class).single();
+    }
+
+    private long versionCount() {
+        return jdbc.sql("SELECT count(*) FROM demand_statistics_version WHERE route_version_id=?")
+            .param(route).query(Long.class).single();
+    }
+
     private long settle() {
         long arrival = observation(batch("2026-10-08T23:10:00Z"), "bus", 9, 5);
         jdbc.sql("""
