@@ -107,7 +107,7 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
             return jdbc.sql("""
                 UPDATE evaluation_archive_batch SET lease_token=:token,
                     lease_until=clock_timestamp()+interval '5 minutes'
-                WHERE id=:id AND lease_until<=clock_timestamp() RETURNING *
+                WHERE id=:id AND lease_until<=clock_timestamp() AND abandoned_at IS NULL RETURNING *
                 """).param("id", batchId).param("token", UUID.randomUUID())
                 .query(JdbcEvaluationArchiveStore::batchOf).optional();
         });
@@ -228,7 +228,7 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
         return jdbc.sql("""
             SELECT * FROM evaluation_archive_batch
             WHERE id=:id AND route_version_id=:route AND quality_revision=:quality AND row_count=:count
-              AND lease_token=:token AND lease_until>clock_timestamp() AND state='VERIFIED'
+              AND lease_token=:token AND lease_until>clock_timestamp() AND state='VERIFIED' AND abandoned_at IS NULL
             FOR UPDATE
             """).param("id", owned.id()).param("route", owned.routeVersionId())
             .param("quality", owned.qualityRevision()).param("count", owned.rowCount())
@@ -334,7 +334,7 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
         boolean owned = jdbc.sql("""
             SELECT EXISTS(SELECT 1 FROM evaluation_archive_batch WHERE id=:id AND route_version_id=:route
               AND quality_revision=:quality AND row_count=:count AND lease_token=:token
-              AND lease_until>clock_timestamp())
+              AND lease_until>clock_timestamp() AND abandoned_at IS NULL)
             """).param("id", batch.id()).param("route", batch.routeVersionId())
             .param("quality", batch.qualityRevision()).param("count", batch.rowCount())
             .param("token", batch.leaseToken()).query(Boolean.class).single();

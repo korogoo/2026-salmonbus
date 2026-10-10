@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.time.Clock;
 import java.lang.management.ManagementFactory;
 import com.gustler.backend.forecasting.application.statistics.DemandStatisticsPipeline;
+import com.gustler.backend.forecasting.application.statistics.DemandStatisticsRebuildStore;
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
 import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcStopDemandStatisticsRepository;
 import com.gustler.backend.forecasting.domain.statistics.*;
@@ -27,11 +28,14 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.mockito.Mockito.when;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.JsonNode;
 import java.util.HashMap;
 import java.nio.file.Files;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
@@ -52,6 +56,11 @@ class StatisticsArchiveAdoptionTest {
     @MockitoSpyBean JdbcClient jdbc;
     @Autowired PlatformTransactionManager transactions;
     @Autowired javax.sql.DataSource dataSource;
+    @MockitoSpyBean DemandStatisticsRebuildStore rebuildStore;
+    private DemandStatisticsRebuild measuredRebuild;
+    private List<Long> measuredObservationIds;
+    private String measuredAggregateSql;
+    private String measuredPlanMode = "auto";
     private JdbcStatisticsInputExtractor extractor;
     private long route;
     private long source;
@@ -225,9 +234,11 @@ class StatisticsArchiveAdoptionTest {
             "dbSamplesAfterRestore", restored.getFirst().cell().sampleCount()));
     }
 
-    @Test
-    void 동일한_대량_입력으로_실행_중인_파이프라인과_파일_계산의_시간과_결과를_비교한다() throws Exception {
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"force_custom_plan", "force_generic_plan"})
+    void 대량_재집계는_실행_계획을_재사용해도_관측을_반복해서_전체_조회하지_않는다(String planMode) throws Exception {
         // given
+        measuredPlanMode = planMode;
         final int sampleCount = 3000;
         final int vehicleCount = 20;
         String batchPrefix = UUID.randomUUID().toString().substring(0, 8);
@@ -288,7 +299,20 @@ class StatisticsArchiveAdoptionTest {
         }
         AtomicInteger sqlCalls = new AtomicInteger();
         doAnswer(invocation -> {
+            jdbc.sql("SELECT set_config('plan_cache_mode', :mode, true)").param("mode", planMode)
+                .query(String.class).single();
+            if (measuredRebuild == null) {
+                measuredRebuild = invocation.getArgument(0);
+                measuredObservationIds = List.copyOf(invocation.<List<Long>>getArgument(1));
+            }
+            return invocation.callRealMethod();
+        }).when(rebuildStore).addRebuildTotals(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList());
+        doAnswer(invocation -> {
             sqlCalls.incrementAndGet();
+            String sql = invocation.getArgument(0);
+            if (measuredAggregateSql == null && sql.contains("INSERT INTO stop_demand_rebuild_total AS total")) {
+                measuredAggregateSql = sql;
+            }
             return invocation.callRealMethod();
         }).when(jdbc).sql(org.mockito.ArgumentMatchers.anyString());
 
@@ -360,7 +384,14 @@ class StatisticsArchiveAdoptionTest {
         metrics.put("fileBytes", Files.size(bundle.directory().resolve("rows.jsonl")));
         metrics.put("heapPoolPeakSumBytes", heapPoolPeaks);
         metrics.put("scope", "synthetic; no S3; capacity map supplied; JVM pool peaks are not process RSS; sql calls include settings and transaction work");
-        report("bounded-performance", metrics);
+        report("bounded-performance-" + planMode, metrics);
+        var plan = explainMeasuredAggregate();
+        assertThat(plan).as("집계 SQL의 실제 실행 계획을 기록한다").isNotNull();
+        long storedObservations = jdbc.sql("SELECT count(*) FROM vehicle_observation").query(Long.class).single();
+        // 순차 읽기 자체를 금지하지 않는다. 전체를 한두 번 읽는 계획과 페이지마다 되풀이하는 계획을 구분한다.
+        assertThat(observationRowsVisited(plan.path("Plan")))
+            .as("한 페이지 때문에 전체 관측을 반복 조회하지 않는다")
+            .isLessThanOrEqualTo(storedObservations * 2 + measuredObservationIds.size());
     }
 
     @Test
@@ -565,6 +596,7 @@ class StatisticsArchiveAdoptionTest {
             try {
                 if (pipeline.step(route).status() == DemandStatisticsPipeline.Step.Status.COMPLETED) return i;
             } catch (org.springframework.dao.QueryTimeoutException failure) {
+                explainMeasuredAggregate();
                 var prepared = jdbc.sql("""
                     SELECT name,statement,generic_plans,custom_plans FROM pg_prepared_statements
                     WHERE statement LIKE '%INSERT INTO stop_demand_rebuild_total%'
@@ -616,6 +648,43 @@ class StatisticsArchiveAdoptionTest {
 
     private void transaction(Runnable action) {
         new TransactionTemplate(transactions).executeWithoutResult(status -> action.run());
+    }
+
+    private JsonNode explainMeasuredAggregate() {
+        if (measuredAggregateSql == null || measuredRebuild == null) return null;
+        // 실제 업무의 500ms 제한은 그대로 둔다. 실패 분석용 EXPLAIN만 일회용 DB에서 실행하고 롤백한다.
+        try {
+            String plan = new TransactionTemplate(transactions).execute(status -> {
+                status.setRollbackOnly();
+                jdbc.sql("SET LOCAL statement_timeout='5s'").update();
+                jdbc.sql("SELECT set_config('plan_cache_mode', :mode, true)").param("mode", measuredPlanMode)
+                    .query(String.class).single();
+                return jdbc.sql("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + measuredAggregateSql)
+                    .param("version", measuredRebuild.routeVersionId())
+                    .param("vehicle", measuredRebuild.scope().vehicleId())
+                    .param("request", UUID.randomUUID()).param("ids", measuredObservationIds)
+                    .param("until", measuredRebuild.dataUntil().atOffset(java.time.ZoneOffset.UTC))
+                    .param("inputUntil", measuredRebuild.inputUntilId()).query(String.class).single();
+            });
+            var parsed = JsonMapper.builder().build().readTree(plan);
+            report("rebuild-page-plan-" + measuredPlanMode, Map.of("observationIds", measuredObservationIds,
+                "sql", measuredAggregateSql, "plan", parsed,
+                "scope", "disposable PostgreSQL; EXPLAIN writes rolled back; diagnostic timeout 5s only"));
+            return parsed.get(0);
+        } catch (RuntimeException failure) {
+            report("rebuild-page-plan-" + measuredPlanMode, Map.of("diagnosticFailure", failure.getClass().getSimpleName()));
+            return null;
+        }
+    }
+
+    private static long observationRowsVisited(JsonNode plan) {
+        long visited = 0;
+        if ("vehicle_observation".equals(plan.path("Relation Name").asText())) {
+            visited = (long) Math.ceil((plan.path("Actual Rows").asDouble()
+                + plan.path("Rows Removed by Filter").asDouble()) * plan.path("Actual Loops").asLong());
+        }
+        for (var child : plan.path("Plans")) visited += observationRowsVisited(child);
+        return visited;
     }
 
     private long pendingCount() {

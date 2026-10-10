@@ -57,6 +57,7 @@ class EvaluationArchiveRetentionTest {
     @Autowired JdbcStopDemandStatisticsRepository statistics;
     @Autowired JdbcSameDayFullOutcomesStore outcomes;
     @Autowired ForecastEvaluationRepository evaluations;
+    @Autowired JdbcEvaluationArchiveQueue queue;
     private JdbcEvaluationArchiveStore store;
     private long route;
     private long source;
@@ -80,6 +81,7 @@ class EvaluationArchiveRetentionTest {
                 row.originalJson(), row.sha256())).toList();
         });
         store = new JdbcEvaluationArchiveStore(jdbc, quality, clock, transactions);
+        jdbc.sql("UPDATE evaluation_archive_scan SET next_attempt_at='-infinity' WHERE id=1").update();
         String key = UUID.randomUUID().toString().substring(0, 20);
         long routeId = jdbc.sql("""
             INSERT INTO route(public_route_id,source_id,source_route_id,display_name,start_stop_name,end_stop_name)
@@ -504,6 +506,168 @@ class EvaluationArchiveRetentionTest {
         assertThat(after).isEqualTo(before);
         assertThat(after.getFirst().rowCount()).isOne();
         assertThat(liveCount()).isOne();
+    }
+
+    @Test
+    void 자동_실행은_집계된_과거_정산을_찾아_보존한_뒤_원본을_삭제한다() {
+        // given
+        finish();
+        seekCurrent();
+
+        // when
+        automatic(true).advance();
+
+        // then
+        assertThat(liveCount()).isZero();
+        assertThat(archived).hasSize(1);
+        assertThat(jdbc.sql("SELECT storage_state FROM evaluation_archive_batch WHERE route_version_id=?")
+            .param(route).query(String.class).single()).isEqualTo("PURGED");
+    }
+
+    @Test
+    void 삭제_설정이_꺼져_있으면_자동_보존이_끝나도_원본을_유지한다() {
+        // given
+        finish();
+        seekCurrent();
+
+        // when
+        automatic(false).advance();
+
+        // then
+        assertThat(liveCount()).isEqualTo(2);
+        assertThat(archived).hasSize(1);
+        assertThat(jdbc.sql("SELECT state FROM evaluation_archive_batch WHERE route_version_id=?")
+            .param(route).query(String.class).single()).isEqualTo("VERIFIED");
+    }
+
+    @Test
+    void 재시작한_실행자는_만료된_예약을_인계받아_삭제까지_완료한다() {
+        // given
+        finish();
+        var reserved = store.reserve(route, keys()).orElseThrow();
+        jdbc.sql("UPDATE evaluation_archive_batch SET lease_until=clock_timestamp()-interval '1 second' WHERE id=?")
+            .param(reserved.id()).update();
+
+        // when
+        automatic(true).advance();
+
+        // then
+        assertThat(liveCount()).isZero();
+        assertThat(location(reserved)).isEqualTo("PURGED");
+    }
+
+    @Test
+    void 파일_저장이_실패하면_삭제하지_않고_새_후보_탐색도_잠시_멈춘다() {
+        // given
+        finish();
+        seekCurrent();
+        var service = new com.gustler.backend.forecasting.application.evaluation.AdvanceEvaluationArchiveService(
+            queue, store,
+            new com.gustler.backend.forecasting.application.evaluation.ArchiveCompletedEvaluationsService(store,
+                (batch, rows) -> { throw new IllegalStateException("시험용 저장 실패"); }),
+            new PurgeArchivedEvaluationsService(store, external),
+            new com.gustler.backend.forecasting.api.evaluation.EvaluationArchivePolicy(true, 100), clock);
+
+        // when
+        service.advance();
+        service.advance();
+
+        // then
+        assertThat(liveCount()).isEqualTo(2);
+        assertThat(queue.available()).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM evaluation_archive_batch WHERE route_version_id=?")
+            .param(route).query(Long.class).single()).isOne();
+    }
+
+    @Test
+    void 탐색_끝에_도달하면_다시_순회하여_늦게_완료된_정산을_발견한다() {
+        // given
+        finish();
+        seekCurrent();
+        jdbc.sql("UPDATE forecast_evaluation_result SET scored_at='2026-10-09T00:00:00Z' WHERE vehicle_observation_id=?")
+            .param(source).update();
+        assertThat(queue.next(100)).isEmpty();
+        assertThat(queue.next(100)).isEmpty();
+        jdbc.sql("UPDATE forecast_evaluation_result SET scored_at='2026-10-08T11:00:00Z' WHERE vehicle_observation_id=?")
+            .param(source).update();
+
+        // when
+        boolean found = false;
+        for (int i=0; i<100 && !found; i++) {
+            found = queue.next(100).map(candidate -> candidate.routeVersionId() == route
+                && candidate.keys().contains(new Key(source, 9))).orElse(false);
+        }
+
+        // then
+        assertThat(found).isTrue();
+    }
+
+    @Test
+    void 부적격_행이_있어도_지정한_페이지_개수만_검사하고_다음_키로_이어간다() {
+        // given
+        seekCurrent();
+
+        // when
+        assertThat(queue.next(1)).isEmpty();
+
+        // then
+        assertThat(jdbc.sql("SELECT stop_order FROM evaluation_archive_scan WHERE id=1").query(Integer.class).single())
+            .isEqualTo(9);
+        assertThat(queue.next(1)).isEmpty();
+        assertThat(jdbc.sql("SELECT stop_order FROM evaluation_archive_scan WHERE id=1").query(Integer.class).single())
+            .isEqualTo(10);
+    }
+
+    @Test
+    void 품질이_바뀐_예약은_원본을_유지한_채_중단하여_새로_예약할_수_있다() {
+        // given
+        var batch = ready();
+        changeQuality();
+
+        // when
+        boolean retired = queue.retireChanged(batch);
+        var renewed = store.reserve(route, keys()).orElseThrow();
+
+        // then
+        assertThat(retired).isTrue();
+        assertThat(liveCount()).isEqualTo(2);
+        assertThat(renewed.id()).isNotEqualTo(batch.id());
+        assertThat(renewed.qualityRevision()).isEqualTo(2);
+        assertThat(jdbc.sql("SELECT abandoned_at IS NOT NULL FROM evaluation_archive_batch WHERE id=?")
+            .param(batch.id()).query(Boolean.class).single()).isTrue();
+        assertThatThrownBy(() -> store.readOwned(batch)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 원본이_없는_예약은_품질이_바뀌어도_재등록_방지_키를_제거하지_않는다() {
+        // given
+        var batch = ready();
+        purge(batch);
+        changeQuality();
+
+        // when
+        boolean retired = queue.retireChanged(batch);
+
+        // then
+        assertThat(retired).isFalse();
+        assertThat(jdbc.sql("SELECT count(*) FROM evaluation_archive_member WHERE batch_id=?")
+            .param(batch.id()).query(Long.class).single()).isEqualTo(2);
+    }
+
+    private void seekCurrent() {
+        jdbc.sql("UPDATE evaluation_archive_scan SET observation_id=?,stop_order=0 WHERE id=1")
+            .param(source).update();
+    }
+
+    private com.gustler.backend.forecasting.application.evaluation.AdvanceEvaluationArchiveService automatic(boolean delete) {
+        return new com.gustler.backend.forecasting.application.evaluation.AdvanceEvaluationArchiveService(queue, store,
+            new com.gustler.backend.forecasting.application.evaluation.ArchiveCompletedEvaluationsService(store, (batch, rows) -> {
+                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                archived.put(batch.id(), rows);
+                return new com.gustler.backend.forecasting.application.evaluation.EvaluationArchiveStorage.Verification(
+                    "test-only", "a".repeat(64));
+            }), new PurgeArchivedEvaluationsService(store, external),
+            new com.gustler.backend.forecasting.api.evaluation.EvaluationArchivePolicy(delete, 100), clock);
     }
 
     private EvaluationArchiveBatch ready() {
