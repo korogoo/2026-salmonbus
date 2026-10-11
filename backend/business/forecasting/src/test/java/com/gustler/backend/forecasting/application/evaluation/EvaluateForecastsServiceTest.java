@@ -216,6 +216,56 @@ class EvaluateForecastsServiceTest {
         assertThat(captured()).hasSize(3);
     }
 
+    @Test
+    void 같은_관측의_일부_예보만_완료되면_나머지는_평가를_기다린다() {
+        // given
+        long observationId = 100L;
+        int passedStopOrder = TARGET_STOP_ORDER - 1;
+        int laterTarget = TARGET_STOP_ORDER + 1;
+        PendingForecast reached = pending(observationId, passedStopOrder);
+        PendingForecast waiting = new PendingForecast(
+            observationId, laterTarget, ROUTE_VERSION_3330, VEHICLE_ID,
+            laterTarget - passedStopOrder, OBSERVED_AT, OBSERVED_AT);
+        givenPendingOn(ROUTE_VERSION_3330, reached, waiting);
+        givenArrivals(passedAt(TARGET_STOP_ORDER, 60, 0));
+
+        // when
+        job.settleArrivalLabels();
+
+        // then
+        assertThat(captured()).singleElement().satisfies(completed -> {
+            assertThat(completed.vehicleObservationId()).isEqualTo(observationId);
+            assertThat(completed.targetStopOrder()).isEqualTo(TARGET_STOP_ORDER);
+            assertThat(completed.state().name()).isEqualTo("SETTLED");
+            assertThat(completed.result().arrivalObservationId()).isEqualTo(ARRIVAL_OBSERVATION_ID);
+            assertThat(completed.result().seatsOnArrival()).isZero();
+            assertThat(completed.scoredAt()).isEqualTo(SETTLED_AT);
+        });
+    }
+
+    @Test
+    void 새_관측이_없으면_대기는_유지되지만_회차마다_같은_정보를_다시_조회한다() {
+        // given
+        givenPendingOn(ROUTE_VERSION_3330, pending(100L, 40));
+        givenArrivals();
+        int rounds = 3;
+
+        // when
+        for (int round = 0; round < rounds; round++) {
+            job.settleArrivalLabels();
+        }
+
+        // then
+        verify(writer, times(rounds)).complete(settlements.capture());
+        assertThat(settlements.getAllValues()).allSatisfy(
+            completed -> assertThat(completed).isEmpty());
+        verify(evaluationRepository, times(rounds)).findRouteVersionIdsWithPendingForecasts();
+        verify(evaluationRepository, times(rounds))
+            .findPending(ROUTE_VERSION_3330, properties().pendingLimit());
+        verify(arrivalObservationQuery, times(rounds)).findAfter(
+            ROUTE_VERSION_3330, VEHICLE_ID, OBSERVED_AT, properties().arrivalLimit());
+    }
+
     private void givenPendingOn(
         final long routeVersionId,
         PendingForecast... forecasts
