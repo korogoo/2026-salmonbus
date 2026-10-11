@@ -3,6 +3,8 @@ package com.gustler.backend;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -275,6 +277,47 @@ class DddStorageMigrationTest {
         migrate("37");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+    }
+
+    @Test
+    void 로컬_초기화는_평가와_이관_기록을_비우고_노선은_보존한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("37");
+        execute("""
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
+            VALUES('00000000-0000-0000-0000-000000000002',1,7,
+                   '00000000-0000-0000-0000-000000000003',now(),1);
+            INSERT INTO evaluation_archive_member(vehicle_observation_id,target_stop_order,route_version_id,batch_id,original_sha256)
+            VALUES(1,2,1,'00000000-0000-0000-0000-000000000002',repeat('a',64));
+            INSERT INTO file_statistics_publication(route_version_id,input_sha256,calculation_version,revision)
+            VALUES(1,repeat('b',64),'calc1',1);
+            UPDATE evaluation_archive_scan SET observation_id=1,stop_order=2,next_attempt_at=now()
+            """);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.isRegularFile(root.resolve("dev/data/java/com/gustler/localdata/LocalData.java"))) {
+            root = root.getParent();
+        }
+        assertThat(root).as("로컬 초기화 소스가 있는 저장소 루트").isNotNull();
+        String source = Files.readString(root.resolve("dev/data/java/com/gustler/localdata/LocalData.java"));
+        int start = source.indexOf("TRUNCATE ", source.indexOf("private static void resetGenerated"));
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        int end = source.indexOf("\"\"\"", start);
+
+        // when
+        execute(source.substring(start, end));
+
+        // then
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isZero();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isZero();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_member")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_batch")).isZero();
+        assertThat(number("SELECT count(*) FROM file_statistics_publication")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_scan WHERE id=1 AND observation_id=0 AND stop_order=0 AND next_attempt_at='-infinity'::timestamptz")).isOne();
+        assertThat(number("SELECT count(*) FROM route")).isOne();
     }
 
     private void insertRoute() throws SQLException {
