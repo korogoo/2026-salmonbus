@@ -1,5 +1,7 @@
 package com.gustler.backend.forecasting.infrastructure.jdbc;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import java.time.OffsetDateTime;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -65,7 +67,7 @@ final class StatisticsForecastFixture {
         final long arrivalObservationId,
         OffsetDateTime scoredAt
     ) {
-        jdbc.sql("""
+        final int inserted = jdbc.sql("""
                 WITH arrival AS MATERIALIZED (
                     SELECT observation.*, batch.response_received_at, CAST(? AS timestamptz) AS scored_at
                     FROM forecast_observation_quality observation
@@ -73,6 +75,7 @@ final class StatisticsForecastFixture {
                     WHERE observation.id=?
                 ), removed AS (
                     DELETE FROM forecast_evaluation_pending WHERE vehicle_observation_id=? AND target_stop_order=?
+                      AND EXISTS (SELECT 1 FROM arrival)
                     RETURNING *
                 )
                 INSERT INTO forecast_evaluation_result (
@@ -87,5 +90,6 @@ final class StatisticsForecastFixture {
                 FROM removed CROSS JOIN arrival
                 """)
             .params(scoredAt, arrivalObservationId, observationId, targetStopOrder).update();
+        assertThat(inserted).as("정산 fixture는 도착 관측과 대기가 있는 결과 1건을 저장해야 한다").isEqualTo(1);
     }
 }
