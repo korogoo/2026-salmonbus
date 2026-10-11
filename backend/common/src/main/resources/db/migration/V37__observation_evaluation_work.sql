@@ -4,6 +4,27 @@
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
 
+-- 빈 DB의 자동 설치는 유지한다. 기존 운행 데이터가 있으면 명시적인 전환 준비가 필요하다.
+DO $$
+DECLARE approved boolean := false;
+BEGIN
+    IF EXISTS (SELECT 1 FROM seat_forecast LIMIT 1) THEN
+        IF to_regclass(format('%I.sal175_evaluation_transition', current_schema())) IS NOT NULL THEN
+            EXECUTE 'SELECT EXISTS (SELECT 1 FROM sal175_evaluation_transition
+                WHERE id=1 AND expires_at>clock_timestamp() AND backup_reference<>'''')' INTO approved;
+        END IF;
+        IF NOT approved THEN
+            RAISE EXCEPTION 'SAL-175: worker와 정비 작업을 중지하고 prepare로 전환을 승인해야 한다';
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_stat_activity
+            WHERE datname=current_database() AND pid<>pg_backend_pid() AND (backend_type='client backend' OR backend_type IS NULL)
+              AND (application_name IN ('salmonbus-worker','salmonbus-historical-migration')
+                   OR application_name IS NULL OR state IS NULL)) THEN
+            RAISE EXCEPTION 'SAL-175: worker 또는 정비 연결이 남아 있다';
+        END IF;
+    END IF;
+END $$;
+
 LOCK TABLE forecast_evaluation_pending, seat_forecast,
     forecast_evaluation_result, evaluation_archive_member
     IN SHARE ROW EXCLUSIVE MODE;
@@ -75,3 +96,4 @@ SELECT vehicle_observation_id, target_stop_order, route_version_id, 'PENDING'::v
 FROM forecast_evaluation_pending;
 
 DROP TABLE forecast_evaluation_pending_legacy;
+DROP TABLE IF EXISTS sal175_evaluation_transition;

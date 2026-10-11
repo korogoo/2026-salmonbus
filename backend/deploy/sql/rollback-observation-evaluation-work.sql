@@ -7,6 +7,12 @@ SET LOCAL statement_timeout = '60s';
 
 DO $$
 BEGIN
+    IF EXISTS (SELECT 1 FROM pg_stat_activity
+        WHERE datname=current_database() AND pid<>pg_backend_pid() AND (backend_type='client backend' OR backend_type IS NULL)
+          AND (application_name IN ('salmonbus-worker','salmonbus-historical-migration')
+               OR application_name IS NULL OR state IS NULL)) THEN
+        RAISE EXCEPTION 'SAL-175: worker 또는 정비 연결이 남아 있다';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM flyway_schema_history WHERE version='37' AND success)
        OR EXISTS (SELECT 1 FROM flyway_schema_history WHERE success AND version::numeric > 37) THEN
         RAISE EXCEPTION '이 롤백은 V37이 마지막으로 적용된 DB에서만 실행할 수 있다';
