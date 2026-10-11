@@ -247,6 +247,11 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
 
     private void assertPurgeReady(Snapshot snapshot) {
         var batch = snapshot.batch();
+        boolean restored = jdbc.sql("SELECT restored_at IS NOT NULL FROM evaluation_archive_batch WHERE id=?")
+            .param(batch.id()).query(Boolean.class).single();
+        if (restored) {
+            throw new IllegalStateException("복원한 원본은 다시 삭제하지 않는다");
+        }
         if (snapshot.currentQuality() != batch.qualityRevision()) {
             throw new IllegalStateException("원본 검증 이후 품질 기준이 바뀌었다");
         }

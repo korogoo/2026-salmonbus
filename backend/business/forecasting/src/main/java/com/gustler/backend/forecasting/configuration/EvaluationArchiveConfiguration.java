@@ -15,18 +15,20 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "forecast.archive", name = "enabled", havingValue = "true")
 public class EvaluationArchiveConfiguration {
     @Bean
+    @Lazy
     EvaluationArchiveObjectStore evaluationArchiveObjectStore(
-        @Value("${forecast.archive.work-directory}") Path directory,
+        @Value("${forecast.archive.work-directory:/var/lib/salmonbus/evaluation-archive}") Path directory,
         @Value("${forecast.archive.max-file-bytes:1048576}") long maxBytes) {
         return new EvaluationArchiveObjectStore(directory, maxBytes);
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "forecast.archive", name = "enabled", havingValue = "true")
     EvaluationArchivePolicy evaluationArchivePolicy(
         @Value("${forecast.archive.delete-enabled:false}") boolean deleteEnabled,
         @Value("${forecast.archive.page-size:100}") int pageSize) {
@@ -34,6 +36,7 @@ public class EvaluationArchiveConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "forecast.archive", name = "enabled", havingValue = "true")
     AdvanceEvaluationArchive advanceEvaluationArchive(EvaluationArchiveQueue queue, EvaluationArchiveStore store,
         EvaluationArchiveRetentionStore retention, EvaluationArchiveObjectStore objects,
         EvaluationArchivePolicy policy, Clock clock) {

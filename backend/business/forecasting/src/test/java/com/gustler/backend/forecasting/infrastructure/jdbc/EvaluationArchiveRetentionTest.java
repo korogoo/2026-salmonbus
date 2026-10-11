@@ -685,6 +685,42 @@ class EvaluationArchiveRetentionTest {
 
     private List<Key> keys() { return List.of(new Key(source, 9), new Key(source, 10)); }
     private int purge(EvaluationArchiveBatch batch) { return new PurgeArchivedEvaluationsService(store, external).purge(batch); }
+    @Test
+    void 복원한_정산은_이관_작업이_다시_삭제하지_않는다() {
+        // given
+        var batch = ready();
+        purge(batch);
+        restore(batch);
+
+        // when
+        assertThatThrownBy(() -> purge(batch)).hasMessageContaining("복원한 원본");
+        jdbc.sql("UPDATE evaluation_archive_batch SET lease_until=clock_timestamp()-interval '1 second' WHERE id=?")
+            .param(batch.id()).update();
+
+        // then
+        assertThat(queue.resumable(true).filter(batch.id()::equals)).isEmpty();
+        assertThat(liveCount()).isEqualTo(2);
+        assertThat(location(batch)).isEqualTo("LIVE");
+    }
+
+    @Test
+    void 복원한_정산의_품질이_바뀌어도_이관_기록을_지우고_재예약하지_않는다() {
+        // given
+        var batch = ready();
+        purge(batch);
+        restore(batch);
+        jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=(SELECT route_id FROM route_version WHERE id=?)")
+            .param(route).update();
+
+        // when
+        boolean retired = queue.retireChanged(batch);
+
+        // then
+        assertThat(retired).isFalse();
+        assertThat(store.reserve(route, keys())).isEmpty();
+        assertThat(liveCount()).isEqualTo(2);
+    }
+
     private int restore(EvaluationArchiveBatch batch) { return new RestoreArchivedEvaluationsService(store, external).restore(batch); }
 
     private void failReceipt() {

@@ -47,6 +47,7 @@ public class JdbcEvaluationArchiveQueue implements EvaluationArchiveQueue {
     public Optional<UUID> resumable(boolean deleteEnabled) {
         return inTransaction(() -> jdbc.sql("""
             SELECT id FROM evaluation_archive_batch WHERE storage_state='LIVE' AND abandoned_at IS NULL
+              AND restored_at IS NULL
               AND lease_until<=clock_timestamp() AND (:delete OR state='RESERVED')
             ORDER BY lease_until,id LIMIT 1
             """).param("delete", deleteEnabled).query(UUID.class).optional());
@@ -110,7 +111,8 @@ public class JdbcEvaluationArchiveQueue implements EvaluationArchiveQueue {
             long revision = quality.lock(owned.routeVersionId());
             boolean active = jdbc.sql("""
                 SELECT EXISTS(SELECT 1 FROM evaluation_archive_batch WHERE id=:id AND lease_token=:token
-                    AND lease_until>clock_timestamp() AND storage_state='LIVE' AND abandoned_at IS NULL)
+                    AND lease_until>clock_timestamp() AND storage_state='LIVE' AND abandoned_at IS NULL
+                    AND restored_at IS NULL)
                 """).param("id", owned.id()).param("token", owned.leaseToken()).query(Boolean.class).single();
             if (!active) return false;
             var rows = jdbc.sql("""
@@ -128,6 +130,7 @@ public class JdbcEvaluationArchiveQueue implements EvaluationArchiveQueue {
                 UPDATE evaluation_archive_batch SET abandoned_at=clock_timestamp()
                 WHERE id=? AND lease_token=? AND lease_until>clock_timestamp() AND storage_state='LIVE'
                   AND abandoned_at IS NULL
+                  AND restored_at IS NULL
                 """).params(owned.id(), owned.leaseToken()).update();
             if (changed != 1) throw new IllegalStateException("변경된 예약을 중단하기 전에 작업 소유권이 만료됐다");
             return true;
