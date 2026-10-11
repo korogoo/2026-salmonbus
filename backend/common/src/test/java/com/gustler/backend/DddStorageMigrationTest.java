@@ -3,6 +3,8 @@ package com.gustler.backend;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -214,6 +216,33 @@ class DddStorageMigrationTest {
             INSERT INTO forecast_evaluation_result(vehicle_observation_id,target_stop_order,route_version_id,scoring_state)
             VALUES(1,3,1,'PENDING')
             """)).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void 로컬_초기화_SQL은_평가_분리_후에도_실행되고_노선은_보존한다() throws Exception {
+        migrate("24");
+        insertLegacyData();
+        migrate("25");
+        copyLegacyData();
+        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('test-backup', now())");
+        migrate("31");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+
+        Path root = Path.of("").toAbsolutePath();
+        while (root != null && !Files.isRegularFile(root.resolve("dev/data/java/com/gustler/localdata/LocalData.java"))) {
+            root = root.getParent();
+        }
+        assertThat(root).as("로컬 초기화 소스가 있는 저장소 루트").isNotNull();
+        String source = Files.readString(root.resolve("dev/data/java/com/gustler/localdata/LocalData.java"));
+        int start = source.indexOf("TRUNCATE ", source.indexOf("private static void resetGenerated"));
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        int end = source.indexOf("\"\"\"", start);
+        execute(source.substring(start, end));
+
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isZero();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isZero();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation")).isZero();
+        assertThat(number("SELECT count(*) FROM route")).isOne();
     }
 
     private void insertRoute() throws SQLException {
