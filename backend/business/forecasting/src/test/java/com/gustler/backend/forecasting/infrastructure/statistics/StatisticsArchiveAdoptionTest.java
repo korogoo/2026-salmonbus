@@ -536,6 +536,62 @@ class StatisticsArchiveAdoptionTest {
         return new StatisticsFilePublisher(jdbc, transactions, quality, statistics, clock);
     }
 
+    @Test
+    void 일부_정산만_담은_파일은_기존_전체_통계를_덮어쓰지_않는다() {
+        // given
+        settle();
+        publisher().publish(export(), Map.of("bus", 20), 100);
+        var extracted = extractor.extract(route, source - 1, source, UNTIL, ZONE, 10);
+        var scope = extracted.scope();
+        var partialScope = new StatisticsInputScope(scope.schemaVersion(), scope.calculationVersion(),
+            route, scope.qualityRevision(), UNTIL, ZONE, 1);
+        var partial = StatisticsExtractWriter.write(directory,
+            new JdbcStatisticsInputExtractor.Extracted(partialScope, source - 1, source,
+                extracted.rows().subList(0, 1)), 8192);
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(partial, Map.of("bus", 20), 100))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("전체 정산");
+        assertThat(versionCount()).isEqualTo(1);
+        assertThat(publicationCount()).isEqualTo(1);
+        assertThat(statistics.readAsOf(route, TimeSlot.MORNING,
+            DemandStatisticsVersion.CURRENT_CALCULATION_VERSION, UNTIL).cells().getFirst().sampleCount()).isEqualTo(1);
+    }
+
+    @Test
+    void 추출한_뒤_정산_대상이_달라지면_이전_파일을_게시하지_않는다() {
+        // given
+        settle();
+        var bundle = export();
+        jdbc.sql("DELETE FROM forecast_evaluation_result WHERE vehicle_observation_id=? AND target_stop_order=10")
+            .param(source).update();
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(bundle, Map.of("bus", 20), 100))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("전체 정산");
+        assertThat(versionCount()).isZero();
+        assertThat(publicationCount()).isZero();
+    }
+
+    @Test
+    void S3로_옮긴_정산이_있으면_RDS에서_추출한_파일만으로_통계를_게시하지_않는다() {
+        // given
+        settle();
+        var bundle = export();
+        jdbc.sql("""
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,
+                state,row_count,manifest_sha256,verified_at,storage_state,purged_at)
+            VALUES(:id,:route,1,:token,now(),'VERIFIED',1,:digest,now(),'PURGED',now())
+            """).param("id", UUID.randomUUID()).param("route", route).param("token", UUID.randomUUID())
+            .param("digest", "0".repeat(64)).update();
+
+        // when & then
+        assertThatThrownBy(() -> publisher().publish(bundle, Map.of("bus", 20), 100))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("RDS와 S3");
+        assertThat(versionCount()).isZero();
+        assertThat(publicationCount()).isZero();
+    }
+
     private long publicationCount() {
         return jdbc.sql("SELECT count(*) FROM file_statistics_publication WHERE route_version_id=?")
             .param(route).query(Long.class).single();

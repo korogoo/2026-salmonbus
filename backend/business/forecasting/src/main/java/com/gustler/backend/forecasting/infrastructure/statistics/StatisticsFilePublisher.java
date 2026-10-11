@@ -9,7 +9,9 @@ import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -19,6 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** 파일 계산 후 최종 통계만 게시한다. 자동 스케줄 및 원본 이관/삭제와는 별개의 경계다. */
 final class StatisticsFilePublisher {
+    private static final int MAX_INPUT_ROWS = 10_000;
     private final JdbcClient jdbc;
     private final RouteDataQualityAccess quality;
     private final StopDemandStatisticsRepository statistics;
@@ -50,6 +53,7 @@ final class StatisticsFilePublisher {
         var fixedCapacities = new TreeMap<>(capacities);
         String digest = digest(new Input(bundle.manifest(), fixedCapacities));
         // DB 연결을 보유하지 않은 상태에서 무결성 검사와 계산을 끝낸다.
+        var inputKeys = readKeys(bundle);
         var measurements = StatisticsFileCalculator.calculate(bundle.directory(), bundle.manifest().files(),
             scope, fixedCapacities, maxDailyCells, 64 * 1024);
         return transaction.execute(status -> {
@@ -76,6 +80,7 @@ final class StatisticsFilePublisher {
             if (newer) {
                 throw new IllegalStateException("더 최근 자료의 통계가 이미 게시되어 있다");
             }
+            assertComplete(scope, inputKeys);
             int published = Math.incrementExact(statistics.currentRevision(scope.routeVersionId(), scope.calculationVersion()));
             statistics.append(new DemandStatisticsVersion(scope.routeVersionId(), scope.calculationVersion(),
                 published, scope.dataUntil(), clock.instant(), measurements));
@@ -87,6 +92,46 @@ final class StatisticsFilePublisher {
             return published;
         });
     }
+
+    private static Set<EvaluationKey> readKeys(StatisticsExtractWriter.Bundle bundle) {
+        if (bundle.manifest().scope().rowCount() > MAX_INPUT_ROWS) {
+            throw new IllegalArgumentException("소량 파일 게시 범위를 넘는 자료는 전체 재집계 경로를 사용해야 한다");
+        }
+        Set<EvaluationKey> keys = new HashSet<>();
+        try (var reader = new StatisticsInputReader(bundle.directory(), bundle.manifest().files(), 64 * 1024)) {
+            while (reader.hasNext()) {
+                var row = reader.next();
+                if (!keys.add(new EvaluationKey(row.predictionObservationId(), row.targetStopOrder()))
+                    || keys.size() > MAX_INPUT_ROWS) {
+                    throw new IllegalArgumentException("입력 정산 키가 중복되거나 소량 파일 게시 범위를 넘는다");
+                }
+            }
+        }
+        return keys;
+    }
+
+    private void assertComplete(StatisticsInputScope scope, Set<EvaluationKey> inputKeys) {
+        boolean archived = jdbc.sql("""
+            SELECT EXISTS(SELECT 1 FROM evaluation_archive_batch
+                WHERE route_version_id=:route AND storage_state='PURGED')
+            """).param("route", scope.routeVersionId()).query(Boolean.class).single();
+        if (archived) {
+            throw new IllegalStateException("S3 이력이 있는 노선은 RDS와 S3를 함께 읽는 전체 재집계 경로를 사용해야 한다");
+        }
+        var currentKeys = jdbc.sql("""
+            SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_result
+            WHERE route_version_id=:route AND scored_at<=:until
+            ORDER BY vehicle_observation_id,target_stop_order LIMIT :limit
+            """).param("route", scope.routeVersionId())
+            .param("until", OffsetDateTime.ofInstant(scope.dataUntil(), ZoneOffset.UTC))
+            .param("limit", MAX_INPUT_ROWS + 1)
+            .query((rs, rowNum) -> new EvaluationKey(rs.getLong(1), rs.getInt(2))).list();
+        if (!inputKeys.equals(new HashSet<>(currentKeys))) {
+            throw new IllegalStateException("파일이 기준 시각까지의 전체 정산을 포함하지 않아 통계를 게시하지 않는다");
+        }
+    }
+
+    private record EvaluationKey(long observationId, int targetStopOrder) { }
 
     private static String digest(Input input) {
         try {
