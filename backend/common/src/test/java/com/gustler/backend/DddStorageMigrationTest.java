@@ -181,22 +181,7 @@ class DddStorageMigrationTest {
 
     @Test
     void 평가_분리는_완료_이력_파일을_유지하고_대기만_옮긴다() throws SQLException {
-        migrate("24");
-        insertLegacyData();
-        migrate("25");
-        copyLegacyData();
-        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('stopped-writer-backup', now())");
-        migrate("30");
-        execute("""
-            INSERT INTO route_stop(route_version_id,stop_order,stop_id,name,direction,boarding_allowed)
-            VALUES(1,3,'stop3','다음 정류장','UP',true);
-            INSERT INTO seat_forecast(vehicle_observation_id,target_stop_order,route_version_id,stops_to_target,
-                model_deployment_id,demand_statistics_revision,seat_full_chance_raw,seat_full_chance,
-                generated_at,quality_revision,publication_id)
-            SELECT vehicle_observation_id,3,route_version_id,2,model_deployment_id,demand_statistics_revision,
-                seat_full_chance_raw,seat_full_chance,generated_at,quality_revision,publication_id FROM seat_forecast;
-            INSERT INTO forecast_evaluation(vehicle_observation_id,target_stop_order,route_version_id) VALUES(1,3,1)
-            """);
+        preparePendingTransition();
         long originalFile = number("SELECT pg_relation_filenode('forecast_evaluation')");
         long trainingRows = number("SELECT count(*) FROM training_eligible_seat_forecast");
 
@@ -214,6 +199,82 @@ class DddStorageMigrationTest {
             INSERT INTO forecast_evaluation_result(vehicle_observation_id,target_stop_order,route_version_id,scoring_state)
             VALUES(1,3,1,'PENDING')
             """)).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void 관측별_작업으로_전환해도_미완료_예보와_완료_이력은_그대로다() throws SQLException {
+        // given
+        preparePendingTransition();
+        migrate("36");
+        String before = scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending");
+        long resultFile = number("SELECT pg_relation_filenode('forecast_evaluation_result')");
+
+        // when
+        migrate("37");
+
+        // then
+        assertThat(scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending")).isEqualTo(before);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        assertThat(number("SELECT pg_relation_filenode('forecast_evaluation_result')")).isEqualTo(resultFile);
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("v");
+    }
+
+    @Test
+    void 복원할_대기가_기존과_다르면_전환을_취소하고_기존_테이블을_남긴다() throws SQLException {
+        // given
+        preparePendingTransition();
+        migrate("36");
+        execute("DELETE FROM forecast_evaluation_result");
+
+        // when
+        assertThatThrownBy(() -> migrate("37")).hasMessageContaining("기존 대기와 관측별 복원 결과가 다르다");
+
+        // then
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(scalar("SELECT to_regclass('forecast_evaluation_work')::text")).isNull();
+    }
+
+    private void preparePendingTransition() throws SQLException {
+        migrate("24");
+        insertLegacyData();
+        migrate("25");
+        copyLegacyData();
+        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('stopped-writer-backup', now())");
+        migrate("30");
+        execute("""
+            INSERT INTO route_stop(route_version_id,stop_order,stop_id,name,direction,boarding_allowed)
+            VALUES(1,3,'stop3','다음 정류장','UP',true);
+            INSERT INTO seat_forecast(vehicle_observation_id,target_stop_order,route_version_id,stops_to_target,
+                model_deployment_id,demand_statistics_revision,seat_full_chance_raw,seat_full_chance,
+                generated_at,quality_revision,publication_id)
+            SELECT vehicle_observation_id,3,route_version_id,2,model_deployment_id,demand_statistics_revision,
+                seat_full_chance_raw,seat_full_chance,generated_at,quality_revision,publication_id FROM seat_forecast;
+            INSERT INTO forecast_evaluation(vehicle_observation_id,target_stop_order,route_version_id) VALUES(1,3,1)
+            """);
+    }
+
+    @Test
+    void 이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("37");
+        java.nio.file.Path directory = java.nio.file.Path.of("").toAbsolutePath();
+        while (directory != null && !java.nio.file.Files.isRegularFile(
+            directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) directory = directory.getParent();
+        if (directory == null) throw new IllegalStateException("롤백 SQL을 찾을 수 없다");
+        String rollback = java.nio.file.Files.readString(directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"));
+
+        // when
+        execute(rollback);
+
+        // then
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+        migrate("37");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
     }
 
     private void insertRoute() throws SQLException {

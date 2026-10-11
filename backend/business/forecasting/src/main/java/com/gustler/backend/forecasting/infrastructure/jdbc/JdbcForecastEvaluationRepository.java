@@ -28,18 +28,6 @@ import org.springframework.transaction.annotation.Propagation;
 @Repository
 public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepository {
 
-    private static final String INSERT_PENDING = """
-        INSERT /* salmonbus:forecast_evaluation.insert_pending */ INTO forecast_evaluation_pending (vehicle_observation_id, target_stop_order, route_version_id)
-        SELECT :observation, :stop, :version
-        WHERE NOT EXISTS (
-            SELECT 1 FROM forecast_evaluation_result
-            WHERE vehicle_observation_id = :observation AND target_stop_order = :stop)
-          AND NOT EXISTS (
-            SELECT 1 FROM evaluation_archive_member
-            WHERE vehicle_observation_id = :observation AND target_stop_order = :stop)
-        ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
-        """;
-
     // 대상 키는 한 번만 읽고, 같은 관측을 쓰는 여러 정류장 예보의 품질 조회를 공유한다.
     // 품질을 통과하지 못한 키도 반환해야 다음 페이지 이동과 확정 제외 처리를 유지할 수 있다.
     private static final String SELECT_PENDING_PAGE = """
@@ -121,11 +109,6 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             LEFT JOIN eligible arrival ON arrival.id = input.arrivalObservationId
             LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
             WHERE CAST(input.arrivalObservationId AS bigint) IS NULL OR (arrival.id IS NOT NULL AND %s)
-        ), removed AS (
-            DELETE FROM forecast_evaluation_pending pending USING candidates candidate
-            WHERE pending.vehicle_observation_id = candidate.vehicle_observation_id
-              AND pending.target_stop_order = candidate.target_stop_order
-            RETURNING pending.vehicle_observation_id, pending.target_stop_order
         ), saved AS (
             INSERT INTO forecast_evaluation_result (
                 vehicle_observation_id, target_stop_order, route_version_id, scoring_state,
@@ -138,7 +121,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                    candidate.arrival_vehicle_id, candidate.arrival_stop_order, candidate.arrival_running_state,
                    candidate.arrival_remaining_seats, candidate.arrival_seat_unknown_reason,
                    candidate.arrival_vehicle_trip_key, candidate.arrival_quality_direction
-            FROM candidates candidate JOIN removed USING (vehicle_observation_id, target_stop_order)
+            FROM candidates candidate
+            ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
             RETURNING vehicle_observation_id, target_stop_order
         )
         SELECT candidate.* FROM candidates candidate JOIN saved USING (vehicle_observation_id, target_stop_order)
@@ -164,8 +148,10 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         """;
 
     private final JdbcClient jdbcClient;
+    private final JdbcEvaluationWorkStore work;
 
-    public JdbcForecastEvaluationRepository(JdbcClient jdbcClient) {
+    public JdbcForecastEvaluationRepository(JdbcClient jdbcClient, JdbcEvaluationWorkStore work) {
+        this.work = work;
         this.jdbcClient = jdbcClient;
     }
 
@@ -249,19 +235,19 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         // 잠금을 얻은 뒤 최신 조사/편도 상태를 다시 확인한다. PENDING 조건으로 재시도도 중복 갱신하지 않는다.
         JdbcClient.StatementSpec query = jdbcClient.sql("""
             WITH keys(observation_id, target_stop_order) AS MATERIALIZED (VALUES %s)
-            , removed AS (
-                DELETE FROM forecast_evaluation_pending evaluation
-                USING keys
+            , closing AS (
+                SELECT evaluation.vehicle_observation_id, evaluation.target_stop_order, evaluation.route_version_id
+                FROM forecast_evaluation_pending evaluation CROSS JOIN keys
                 %s
                 WHERE evaluation.vehicle_observation_id = keys.observation_id
                   AND evaluation.target_stop_order = keys.target_stop_order
                   AND evaluation.route_version_id = :version AND source.route_version_id = :version AND %s
-                RETURNING evaluation.vehicle_observation_id, evaluation.target_stop_order, evaluation.route_version_id
             )
             INSERT INTO forecast_evaluation_result (
                 vehicle_observation_id, target_stop_order, route_version_id, scoring_state, scored_at)
             SELECT vehicle_observation_id, target_stop_order, route_version_id, 'QUALITY_EXCLUDED', CURRENT_TIMESTAMP
-            FROM removed
+            FROM closing
+            ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
             """.formatted(values, EXCLUSION_SOURCE, CONFIRMED_EXCLUSION)).param("version", version);
         for (int index = 0; index < closing.size(); index++) {
             query = query.param("observation" + index, closing.get(index).vehicleObservationId())
@@ -300,11 +286,9 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void addPending(final long routeVersionId, List<ForecastEvaluation> evaluations) {
-        for (ForecastEvaluation evaluation : evaluations) {
-            jdbcClient.sql(INSERT_PENDING)
-                .param("observation", evaluation.vehicleObservationId())
-                .param("stop", evaluation.targetStopOrder()).param("version", routeVersionId)
-                .update();
+        List<Long> ids = evaluations.stream().map(ForecastEvaluation::vehicleObservationId).distinct().toList();
+        for (int from = 0; from < ids.size(); from += 100) {
+            work.register(routeVersionId, ids.subList(from, Math.min(from + 100, ids.size())));
         }
     }
 

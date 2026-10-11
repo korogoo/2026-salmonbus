@@ -5,8 +5,7 @@ import com.gustler.backend.forecasting.application.AfterCommitTelemetry;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.gustler.backend.forecasting.application.evaluation.SameDayFullOutcomesService;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
+import com.gustler.backend.forecasting.application.evaluation.EvaluationWorkStore;
 import com.gustler.backend.forecasting.domain.publication.ForecastTimeSlot;
 import com.gustler.backend.forecasting.domain.model.SeatForecastInput;
 import com.gustler.backend.forecasting.domain.model.SeatRangeException;
@@ -50,7 +49,7 @@ public class ForecastBatchWriter {
 
     private final VehicleTrajectoryQuery vehicleTrajectoryQuery;
     private final ForecastPublicationRepository publications;
-    private final ForecastEvaluationRepository evaluations;
+    private final EvaluationWorkStore evaluationWork;
     private final SameDayFullOutcomesService sameDayFullOutcomesService;
     private final StopDemandStatisticsRepository stopDemandStatisticsRepository;
     private final Clock clock;
@@ -60,7 +59,7 @@ public class ForecastBatchWriter {
     public ForecastBatchWriter(
         VehicleTrajectoryQuery vehicleTrajectoryQuery,
         ForecastPublicationRepository publications,
-        ForecastEvaluationRepository evaluations,
+        EvaluationWorkStore evaluationWork,
         SameDayFullOutcomesService sameDayFullOutcomesService,
         StopDemandStatisticsRepository stopDemandStatisticsRepository,
         Clock clock,
@@ -69,7 +68,7 @@ public class ForecastBatchWriter {
     ) {
         this.vehicleTrajectoryQuery = vehicleTrajectoryQuery;
         this.publications = publications;
-        this.evaluations = evaluations;
+        this.evaluationWork = evaluationWork;
         this.sameDayFullOutcomesService = sameDayFullOutcomesService;
         this.stopDemandStatisticsRepository = stopDemandStatisticsRepository;
         this.clock = clock;
@@ -94,9 +93,11 @@ public class ForecastBatchWriter {
         publications.save(new ForecastPublication(
             batch.observationBatchId(), batch.routeVersionId(), runtime.deploymentId(), statistics.revision(),
             qualityRevision, batch.responseReceivedAt(), generatedAt, generatedAt, predictions));
-        evaluations.addPending(batch.routeVersionId(), predictions.stream()
-            .map(prediction -> ForecastEvaluation.pending(prediction.vehicleObservationId(), prediction.targetStopOrder()))
-            .toList());
+        List<Long> observations = predictions.stream().map(SeatForecast::vehicleObservationId).distinct().toList();
+        for (int from = 0; from < observations.size(); from += 100) {
+            evaluationWork.register(batch.routeVersionId(),
+                observations.subList(from, Math.min(from + 100, observations.size())));
+        }
         collectionInputs.confirmInput(batch.observationBatchId(), generatedAt);
         AfterCommitTelemetry.record(() -> telemetry.published(batch.routeId(), batch.routeVersionId(),
             batch.responseReceivedAt(), predictions.size()));

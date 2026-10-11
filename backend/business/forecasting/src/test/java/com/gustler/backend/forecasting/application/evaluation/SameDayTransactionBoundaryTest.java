@@ -106,6 +106,8 @@ class SameDayTransactionBoundaryTest {
     JdbcForecastPublicationRepository publicationsSpy;
     @MockitoSpyBean
     JdbcForecastEvaluationRepository evaluationsSpy;
+    @MockitoSpyBean
+    com.gustler.backend.forecasting.infrastructure.jdbc.JdbcEvaluationWorkStore workSpy;
     @MockitoBean
     ArrivalObservationQuery arrivals;
     @MockitoBean
@@ -126,6 +128,8 @@ class SameDayTransactionBoundaryTest {
     void 작업_빈에_실제_트랜잭션_프록시와_독립된_관측을_준비한다() {
         jdbc.sql("TRUNCATE route, model_deployment RESTART IDENTITY CASCADE").update();
         settlement = context.getBean(EvaluateForecastsService.class);
+        // DB를 비웠으므로 이전 테스트의 캐시도 정상 회차를 통해 정리한다.
+        settlement.settleArrivalLabels();
         forecast = context.getBean(ForecastBatchWriter.class);
         workers = Executors.newFixedThreadPool(2);
         fixture();
@@ -144,6 +148,27 @@ class SameDayTransactionBoundaryTest {
         workers.shutdownNow();
         boolean stopped = workers.awaitTermination(10, TimeUnit.SECONDS);
         assertThat(stopped).as("테스트의 백그라운드 작업이 남지 않는다").isTrue();
+    }
+
+    @Test
+    void 실제_DB에서_복원한_대기는_반복_평가해도_상세를_한번만_읽는다() {
+        // given
+        savePending();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenReturn(List.of());
+        org.mockito.Mockito.clearInvocations(workSpy, arrivals);
+
+        // when
+        settlement.settleArrivalLabels();
+        settlement.settleArrivalLabels();
+        settlement.settleArrivalLabels();
+
+        // then
+        org.mockito.Mockito.verify(workSpy).restore(versionId, List.of(sourceId));
+        org.mockito.Mockito.verify(arrivals, org.mockito.Mockito.times(3))
+            .findAfter(versionId, "fixture-vehicle", GENERATED_AT, 400);
+        assertThat(count("forecast_evaluation_work")).isOne();
+        assertThat(count("forecast_evaluation_pending")).isOne();
+        assertThat(count("forecast_evaluation_result")).isZero();
     }
 
     @Test
@@ -192,13 +217,11 @@ class SameDayTransactionBoundaryTest {
     void 같은_예보를_동시에_정산해도_원본과_대기자료와_당일성적은_한번만_반영한다() throws Exception {
         savePending();
         initializeEmptyDay();
-        var bothReadPending = new CyclicBarrier(2);
-        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
-            bothReadPending.await(5, TimeUnit.SECONDS);
-            return List.of(arrival());
-        });
-        Future<?> first = workers.submit(settlement::settleArrivalLabels);
-        Future<?> second = workers.submit(settlement::settleArrivalLabels);
+        var start = new CountDownLatch(1);
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenReturn(List.of(arrival()));
+        Future<?> first = workers.submit(() -> { await(start); settlement.settleArrivalLabels(); return null; });
+        Future<?> second = workers.submit(() -> { await(start); settlement.settleArrivalLabels(); return null; });
+        start.countDown();
         first.get(10, TimeUnit.SECONDS);
         second.get(10, TimeUnit.SECONDS);
         assertSettledOnce();

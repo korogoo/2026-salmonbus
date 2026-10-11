@@ -106,7 +106,8 @@ class JdbcEvaluationArchiveStoreTest {
         addPending(9);
 
         // then
-        assertThat(pendingCount()).isZero();
+        assertThat(jdbc.sql("SELECT target_stop_order FROM forecast_evaluation_pending WHERE vehicle_observation_id=?")
+            .param(source).query(Integer.class).list()).containsExactly(11);
     }
 
     @Test

@@ -119,7 +119,7 @@ class JdbcForecastEvaluationTransactionTest {
     @AfterEach
     void 이_테스트가_저장한_자료만_정리한다() {
         inTransaction(() -> {
-            jdbc.sql("DELETE FROM forecast_evaluation_pending WHERE route_version_id = ?").param(routeVersionId).update();
+            jdbc.sql("DELETE FROM forecast_evaluation_work WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_evaluation_result WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM seat_forecast WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_publication WHERE route_version_id = ?").param(routeVersionId).update();

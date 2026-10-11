@@ -293,7 +293,7 @@ class StatisticsArchiveAdoptionTest {
         for (int i = 0; i < vehicleCount; i++) capacities.put("benchmark-" + i, 20);
         // 대량 fixture 적재 직후의 빈 통계로 실행 계획이 왜곡되지 않게 한다.
         for (String table : List.of("vehicle_observation", "observation_batch", "seat_forecast",
-            "forecast_evaluation_result", "forecast_evaluation_pending", "route_version", "route_stop",
+            "forecast_evaluation_result", "forecast_evaluation_work", "route_version", "route_stop",
             "route_data_quality", "stop_demand_pending_sample")) {
             jdbc.sql("ANALYZE " + table).update();
         }

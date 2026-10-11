@@ -6,7 +6,10 @@ import com.gustler.backend.forecasting.domain.evaluation.ArrivalObservationQuery
 import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
 import com.gustler.backend.forecasting.domain.evaluation.PendingForecast;
 import com.gustler.backend.forecasting.domain.model.ObservedVehicle;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
+import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import java.util.Optional;
 import com.gustler.backend.forecasting.api.ForecastPolicy;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +50,10 @@ class EvaluateForecastsServiceTest {
     private static final long ARRIVAL_OBSERVATION_ID = 7700L;
 
     @Mock
-    private ForecastEvaluationRepository evaluationRepository;
+    private EvaluationWorkStore work;
+
+    @Mock
+    private RouteDataQualityAccess quality;
 
     @Mock
     private ForecastEvaluationWriter writer;
@@ -62,12 +68,8 @@ class EvaluateForecastsServiceTest {
 
     @BeforeEach
     void 회수_배치를_멈춘_시계로_세운다() {
-        job = new EvaluateForecastsService(
-            evaluationRepository,
-            writer,
-            arrivalObservationQuery,
-            properties(),
-            Clock.fixed(SETTLED_AT, ZoneOffset.UTC));
+        job = new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), writer,
+            arrivalObservationQuery, quality, properties(), Clock.fixed(SETTLED_AT, ZoneOffset.UTC), 30000, 3);
     }
 
     @Test
@@ -77,7 +79,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 60, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(settledLabels()).containsExactly(new ArrivalLabel.Settled(ARRIVAL_OBSERVATION_ID, 0));
@@ -90,7 +92,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(41, 20, 9));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(settledLabels()).isEmpty();
@@ -103,7 +105,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 60, null));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(settledLabels()).containsExactly(new ArrivalLabel.SeatMissing(ARRIVAL_OBSERVATION_ID));
@@ -116,7 +118,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(42, 60, 9), passedAt(TARGET_STOP_ORDER, 120, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(settledLabels()).containsExactly(
@@ -131,7 +133,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(42, 60, 9), passedAt(TARGET_STOP_ORDER, 120, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         verify(arrivalObservationQuery, times(1)).findAfter(anyLong(), anyString(), any(), anyInt());
@@ -144,7 +146,7 @@ class EvaluateForecastsServiceTest {
             100L, TARGET_STOP_ORDER, ROUTE_VERSION_3330, null, 4, OBSERVED_AT, OBSERVED_AT));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         verify(arrivalObservationQuery, never()).findAfter(anyLong(), anyString(), any(), anyInt());
@@ -157,7 +159,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 60, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(captured().getFirst().scoredAt()).isEqualTo(SETTLED_AT);
@@ -170,7 +172,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 30, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(settledLabels()).isEmpty();
@@ -183,7 +185,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 120, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         verify(arrivalObservationQuery)
@@ -197,10 +199,10 @@ class EvaluateForecastsServiceTest {
         givenPendingOn(retiredRouteVersion);
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
-        verify(evaluationRepository).findPending(eq(retiredRouteVersion), anyInt());
+        verify(work).lastObservationId(retiredRouteVersion);
     }
 
     @Test
@@ -210,7 +212,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 60, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(captured()).hasSize(3);
@@ -230,7 +232,7 @@ class EvaluateForecastsServiceTest {
         givenArrivals(passedAt(TARGET_STOP_ORDER, 60, 0));
 
         // when
-        job.settleArrivalLabels();
+        runRound();
 
         // then
         assertThat(captured()).singleElement().satisfies(completed -> {
@@ -244,7 +246,7 @@ class EvaluateForecastsServiceTest {
     }
 
     @Test
-    void 새_관측이_없으면_대기는_유지되지만_회차마다_같은_정보를_다시_조회한다() {
+    void 새_관측이_없으면_메모리의_대기를_유지하고_상세는_다시_읽지_않는다() {
         // given
         givenPendingOn(ROUTE_VERSION_3330, pending(100L, 40));
         givenArrivals();
@@ -252,16 +254,15 @@ class EvaluateForecastsServiceTest {
 
         // when
         for (int round = 0; round < rounds; round++) {
-            job.settleArrivalLabels();
+            runRound();
         }
 
         // then
         verify(writer, times(rounds)).complete(settlements.capture());
         assertThat(settlements.getAllValues()).allSatisfy(
             completed -> assertThat(completed).isEmpty());
-        verify(evaluationRepository, times(rounds)).findRouteVersionIdsWithPendingForecasts();
-        verify(evaluationRepository, times(rounds))
-            .findPending(ROUTE_VERSION_3330, properties().pendingLimit());
+        verify(work, times(rounds)).routes();
+        verify(work).restore(eq(ROUTE_VERSION_3330), any());
         verify(arrivalObservationQuery, times(rounds)).findAfter(
             ROUTE_VERSION_3330, VEHICLE_ID, OBSERVED_AT, properties().arrivalLimit());
     }
@@ -270,8 +271,33 @@ class EvaluateForecastsServiceTest {
         final long routeVersionId,
         PendingForecast... forecasts
     ) {
-        when(evaluationRepository.findRouteVersionIdsWithPendingForecasts()).thenReturn(List.of(routeVersionId));
-        when(evaluationRepository.findPending(anyLong(), anyInt())).thenReturn(List.of(forecasts));
+        List<Long> ids = java.util.Arrays.stream(forecasts).map(PendingForecast::vehicleObservationId).distinct().sorted().toList();
+        when(work.routes()).thenReturn(List.of(routeVersionId));
+        when(work.lastObservationId(routeVersionId)).thenReturn(ids.isEmpty() ? 0L : ids.getLast());
+        if (ids.isEmpty()) return;
+        when(work.revisions(eq(routeVersionId), any())).thenReturn(ids.stream()
+            .collect(java.util.stream.Collectors.toMap(id -> id, id -> 1L)));
+        when(work.page(eq(routeVersionId), anyLong(), anyLong(), anyInt())).thenAnswer(call -> {
+            long after = call.getArgument(1);
+            return ids.stream().filter(id -> id > after).toList();
+        });
+        when(work.restore(eq(routeVersionId), any())).thenReturn(java.util.Arrays.stream(forecasts)
+            .map(f -> new EvaluationWorkStore.Restored(new EvaluationWorkStore.Key(f.vehicleObservationId(), f.targetStopOrder()),
+                Optional.of(new PendingForecast(f.vehicleObservationId(), f.targetStopOrder(), routeVersionId,
+                    f.vehicleId(), f.stopsToTarget(), f.observedAt(), f.generatedAt(), f.qualityDirection())))).toList());
+    }
+
+    private void runRound() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            job.settleArrivalLabels();
+            TransactionSynchronizationManager.getSynchronizations().forEach(
+                synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 
     private void givenArrivals(

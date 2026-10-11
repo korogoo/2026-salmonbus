@@ -299,8 +299,8 @@ class EvaluationArchiveRetentionTest {
         assertThat(downloads.get()).isOne();
         assertThat(jdbc.sql("SELECT count(*) FROM evaluation_archive_member WHERE batch_id=?")
             .param(batch.id()).query(Long.class).single()).isEqualTo(2);
-        assertThat(jdbc.sql("SELECT count(*) FROM forecast_evaluation_pending WHERE route_version_id=?")
-            .param(route).query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT target_stop_order FROM forecast_evaluation_pending WHERE route_version_id=?")
+            .param(route).query(Integer.class).list()).containsExactly(11);
     }
 
     @Test
