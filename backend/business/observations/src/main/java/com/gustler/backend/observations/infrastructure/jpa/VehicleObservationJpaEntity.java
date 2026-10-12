@@ -103,7 +103,7 @@ public class VehicleObservationJpaEntity {
     }
 
     public StoredObservations.Row storedRow() {
-        return new StoredObservations.Row(id, vehicleId, remainingSeats);
+        return new StoredObservations.Row(id, vehicleId, remainingSeats, passedStopOrder, crowdLevel);
     }
 
     /** 잔여석은 아는 값이거나 모르는 사유다. 둘 중 하나만 채운다. DB 도 CHECK 로 같은 것을 막는다. */

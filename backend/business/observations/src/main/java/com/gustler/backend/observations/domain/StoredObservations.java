@@ -9,6 +9,7 @@ public record StoredObservations(long batchId, long routeVersionId, Instant obse
         rows = List.copyOf(rows);
     }
 
-    public record Row(long observationId, String vehicleId, Integer remainingSeats) {
+    public record Row(long observationId, String vehicleId, Integer remainingSeats,
+                      Integer passedStopOrder, Integer crowdLevel) {
     }
 }
