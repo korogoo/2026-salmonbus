@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -17,6 +18,12 @@ public class RecentArrivalObservationCache {
     private final int capacity;
     private final Duration retention;
     private final Map<Key, Entry> entries = new LinkedHashMap<>();
+    private ObservationDeliveryService deliveries;
+
+    @Autowired(required = false)
+    void useCommittedObservations(ObservationDeliveryService deliveries) {
+        this.deliveries = deliveries;
+    }
 
     public RecentArrivalObservationCache(
         @Value("${forecast.evaluation.observation-cache.enabled:false}") boolean enabled,
@@ -75,14 +82,17 @@ public class RecentArrivalObservationCache {
     public final class Round {
         private final Instant now;
         private final Map<Key, Entry> staged = new LinkedHashMap<>();
+        private final ObservationDeliveryService.Round delivered;
 
         private Round(Instant now) {
             this.now = now;
+            this.delivered = enabled && deliveries != null ? deliveries.begin(now) : null;
         }
 
         public List<ArrivalCandidate> read(ArrivalObservationQuery query, long version,
             long revision, boolean investigating, String vehicle, Instant after, int limit) {
             if (!enabled || investigating) return query.findAfter(version, vehicle, after, limit);
+            if (delivered != null) return delivered.read(query, version, revision, investigating, vehicle, after, limit);
 
             List<Long> ids = query.findIdsAfter(version, vehicle, after, limit);
             Map<Long, ArrivalCandidate> found = new LinkedHashMap<>();

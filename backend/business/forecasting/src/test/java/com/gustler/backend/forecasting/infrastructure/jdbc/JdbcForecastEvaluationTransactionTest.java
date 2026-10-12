@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.gustler.backend.forecasting.api.evaluation.EvaluateForecasts;
 import com.gustler.backend.forecasting.application.evaluation.ForecastEvaluationWriter;
@@ -96,6 +99,9 @@ class JdbcForecastEvaluationTransactionTest {
     @MockitoSpyBean
     private JdbcArrivalObservationQuery arrivals;
 
+    @MockitoSpyBean
+    private JdbcRecentObservationBatches recentBatches;
+
     private long routeId;
     private long routeVersionId;
     private long modelId;
@@ -165,7 +171,7 @@ class JdbcForecastEvaluationTransactionTest {
     }
 
     @Test
-    void 정산_트랜잭션이_실패하면_관측을_다시_읽고_평가한다() {
+    void 정산이_취소되면_커밋된_관측은_재사용하고_정산_결과를_다시_저장한다() {
         // given
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             settlement.settleArrivalLabels();
@@ -179,7 +185,7 @@ class JdbcForecastEvaluationTransactionTest {
         // then
         // 이 입력은 관측 간격이 90초를 넘으므로 기존 규칙대로 추적 중단이다.
         assertThat(evaluationState()).isEqualTo("LOST");
-        verify(arrivals, times(2)).findByIds(routeVersionId, "evaluation-vehicle", List.of(arrivalObservationId));
+        verify(recentBatches, times(1)).restore(eq(routeVersionId), anyList(), anyInt());
     }
 
     @Test
@@ -200,7 +206,7 @@ class JdbcForecastEvaluationTransactionTest {
             assertThat(row.observationId()).isEqualTo(arrivalObservationId);
             assertThat(row.remainingSeats()).isZero();
         });
-        verify(arrivals, times(1)).findByIds(routeVersionId, "evaluation-vehicle", List.of(arrivalObservationId));
+        verify(recentBatches, times(1)).restore(eq(routeVersionId), anyList(), anyInt());
     }
 
     @Test
@@ -498,8 +504,8 @@ class JdbcForecastEvaluationTransactionTest {
         return jdbc.sql("""
                 INSERT INTO observation_batch(route_version_id, scheduled_at, attempt_number, attempt_key,
                     requested_at, response_received_at, completed_at, outcome,
-                    normalization_version, collection_strategy_version)
-                VALUES (?, ?, 1, ?, ?, ?, ?, 'SUCCESS_ROWS', 'normalization-v1', 'collection-v1')
+                    normalization_version, collection_strategy_version, stored_rows)
+                VALUES (?, ?, 1, ?, ?, ?, ?, 'SUCCESS_ROWS', 'normalization-v1', 'collection-v1', 1)
                 RETURNING id
                 """).params(routeVersionId, offset(observedAt), UUID.randomUUID().toString(),
                 offset(observedAt), offset(observedAt), offset(observedAt))

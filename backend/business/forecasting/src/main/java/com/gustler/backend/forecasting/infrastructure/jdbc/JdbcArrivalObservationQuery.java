@@ -82,7 +82,7 @@ public class JdbcArrivalObservationQuery implements ArrivalObservationQuery {
             .query((rs, rowNumber) -> candidate(rs)).list();
     }
 
-    private static ArrivalCandidate candidate(ResultSet rs) throws SQLException {
+    static ArrivalCandidate candidate(ResultSet rs) throws SQLException {
         return new ArrivalCandidate(rs.getLong("id"),
             new ObservedVehicle(rs.getString("vehicle_id"), rs.getLong("route_version_id"),
                 rs.getInt("passed_stop_order"),

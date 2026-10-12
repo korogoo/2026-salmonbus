@@ -2,8 +2,14 @@ package com.gustler.backend.worker.integration.observations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 
 import com.gustler.backend.forecasting.application.evaluation.ObservationDeliveryReceiver;
+import com.gustler.backend.forecasting.application.evaluation.ObservationDeliveryService;
+import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
+import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcArrivalObservationQuery;
+import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcRecentObservationBatches;
 import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcObservationDeliveryStore;
 import com.gustler.backend.gbis.api.GbisLocationResult.Success;
 import com.gustler.backend.gbis.api.dto.BusLocationResponse.BusLocation;
@@ -15,8 +21,15 @@ import com.gustler.backend.support.PostgresTestContainer;
 import com.gustler.backend.worker.WorkerApplication;
 import com.gustler.backend.worker.configuration.CollectionRuntimeConfiguration;
 import java.time.OffsetDateTime;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +38,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -35,13 +49,15 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Import({PostgresTestContainer.class, CollectionRuntimeConfiguration.class,
     ObservationDeliveryIntegrationTest.ReceiverConfiguration.class})
 class ObservationDeliveryIntegrationTest {
-    private static final OffsetDateTime AT = OffsetDateTime.parse("2026-08-19T11:14:00+09:00");
+    private static final OffsetDateTime AT = OffsetDateTime.parse("2026-08-19T11:14:00.123456789+09:00");
     private static final String SOURCE_ROUTE = "delivery-test-route";
     @Autowired ObservationBatchLedger ledger;
     @Autowired JdbcClient jdbc;
     @Autowired PlatformTransactionManager transactions;
     @Autowired RecordingReceiver receiver;
     @Autowired JdbcObservationDeliveryStore store;
+    @Autowired JdbcArrivalObservationQuery arrivals;
+    @Autowired RouteDataQualityAccess quality;
     private long version;
     private long batch;
     private CollectionPlan plan;
@@ -76,10 +92,81 @@ class ObservationDeliveryIntegrationTest {
         receiver.deliveries.clear();
         receiver.fail = false;
         receiver.accept = true;
+        receiver.onReceive = (id, batch) -> { };
         jdbc.sql("""
             TRUNCATE vehicle_observation, observation_batch, route_stop, route_version, route,
                 daily_call_quota RESTART IDENTITY CASCADE
             """).update();
+    }
+
+    @Test
+    void 커밋된_관측은_실제_전달_콜백으로_받아_본문_조회_없이_사용한다() {
+        // given
+        var source = spy(new JdbcRecentObservationBatches(jdbc));
+        var memory = memory(source);
+        receiver.onReceive = memory::receive;
+
+        // when
+        save();
+        var result = new TransactionTemplate(transactions).execute(status -> {
+            long revision = quality.lock(version);
+            return memory.begin(AT.plusSeconds(2).toInstant()).read(arrivals, version, revision, false,
+                receiver.deliveries.getFirst().batch().rows().getFirst().vehicleId(), AT.toInstant(), 100);
+        });
+
+        // then
+        assertThat(result).singleElement().satisfies(row -> {
+            assertThat(row.remainingSeats()).isEqualTo(20);
+            assertThat(row.observedAt()).isEqualTo(jdbc.sql("SELECT response_received_at FROM observation_batch WHERE id = ?")
+                .param(batch).query(OffsetDateTime.class).single().toInstant());
+        });
+        verify(source, never()).restore(anyLong(), anyList(), anyInt());
+        assertThat(pending()).isZero();
+    }
+
+    @Test
+    void 커밋_후_전달이_지연돼도_정산은_DB에서_복원한다() throws Exception {
+        // given
+        var source = spy(new JdbcRecentObservationBatches(jdbc));
+        var memory = memory(source);
+        var committed = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        receiver.onReceive = (id, batch) -> {
+            committed.countDown();
+            try {
+                if (!resume.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("전달 재개 대기 초과");
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(failure);
+            }
+            memory.receive(id, batch);
+        };
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var collecting = executor.submit(this::save);
+            try {
+                assertThat(committed.await(5, TimeUnit.SECONDS)).isTrue();
+
+                // when
+                var result = new TransactionTemplate(transactions).execute(status -> {
+                    long revision = quality.lock(version);
+                    String vehicle = jdbc.sql("SELECT vehicle_id FROM vehicle_observation").query(String.class).single();
+                    return memory.begin(AT.plusSeconds(2).toInstant()).read(arrivals, version, revision, false,
+                        vehicle, AT.toInstant(), 100);
+                });
+
+                // then
+                assertThat(result).hasSize(1);
+                verify(source).restore(eq(version), anyList(), anyInt());
+            } finally {
+                resume.countDown();
+            }
+            collecting.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private ObservationDeliveryService memory(JdbcRecentObservationBatches source) {
+        return new ObservationDeliveryService(source, Clock.fixed(AT.plusSeconds(2).toInstant(), ZoneOffset.UTC),
+            100, Duration.ofMinutes(30));
     }
 
     @Test
@@ -262,11 +349,13 @@ class ObservationDeliveryIntegrationTest {
         final List<Delivery> deliveries = new ArrayList<>();
         boolean fail;
         boolean accept = true;
+        BiConsumer<Long, ObservationDeliveryBatch> onReceive = (id, batch) -> { };
 
         @Override
         public boolean receive(long id, ObservationDeliveryBatch batch) {
             if (fail) throw new IllegalStateException("전달 실패");
             deliveries.add(new Delivery(id, batch));
+            onReceive.accept(id, batch);
             return accept;
         }
     }
@@ -274,6 +363,7 @@ class ObservationDeliveryIntegrationTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class ReceiverConfiguration {
         @Bean
+        @Primary
         RecordingReceiver observationDeliveryReceiver() {
             return new RecordingReceiver();
         }

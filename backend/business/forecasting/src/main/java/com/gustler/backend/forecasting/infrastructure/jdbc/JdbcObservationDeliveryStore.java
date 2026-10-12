@@ -18,8 +18,11 @@ public class JdbcObservationDeliveryStore implements ObservationDeliveryStore {
     @Transactional(propagation = Propagation.MANDATORY)
     public long append(long batchId, long routeVersionId, int attempt, String kind) {
         return jdbc.sql("""
-            INSERT INTO observation_delivery (observation_batch_id, route_version_id, attempt_number, kind)
-            VALUES (:batch, :version, :attempt, :kind) RETURNING id
+            INSERT INTO observation_delivery
+                (observation_batch_id, route_version_id, attempt_number, kind, quality_revision)
+            SELECT :batch, :version, :attempt, :kind, COALESCE(q.quality_revision, 1)
+            FROM route_version v LEFT JOIN route_data_quality q ON q.route_id = v.route_id
+            WHERE v.id = :version RETURNING id
             """).param("batch", batchId).param("version", routeVersionId)
             .param("attempt", attempt).param("kind", kind).query(Long.class).single();
     }

@@ -51,7 +51,7 @@ public class ObservationLoader {
             batch.state().attemptNumber(), ObservationDeliveryBatch.Kind.STORED, stored.observedAt(),
             stored.rows().stream().map(row -> new ObservationDeliveryBatch.Row(
                 row.observationId(), row.vehicleId(), row.remainingSeats(),
-                row.passedStopOrder(), row.crowdLevel())).toList());
+                row.passedStopOrder(), row.crowdLevel(), row.stopOrder(), row.runningState())).toList());
         deliveryHooks.forEach(hook -> hook.record(delivery));
     }
 

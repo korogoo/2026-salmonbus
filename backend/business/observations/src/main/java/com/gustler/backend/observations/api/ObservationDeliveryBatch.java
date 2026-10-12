@@ -20,5 +20,5 @@ public record ObservationDeliveryBatch(long batchId, long routeVersionId, int at
     public enum Kind { CLEARED, STORED }
 
     public record Row(long observationId, String vehicleId, Integer remainingSeats,
-                      Integer passedStopOrder, Integer crowdLevel) { }
+                      Integer passedStopOrder, Integer crowdLevel, Integer stopOrder, Integer runningState) { }
 }
