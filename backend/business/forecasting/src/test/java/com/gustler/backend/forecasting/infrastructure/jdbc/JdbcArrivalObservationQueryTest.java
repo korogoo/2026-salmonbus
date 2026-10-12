@@ -219,6 +219,104 @@ class JdbcArrivalObservationQueryTest {
             .containsExactly(first, second);
     }
 
+    @Test
+    void ID_조회도_기존_조회의_시간과_차량과_노선_범위와_한도를_지킨다() {
+        // given
+        insertDepartedObservation(insertBatch(FORECAST_OBSERVED_AT), VEHICLE_204000206, STOP_6);
+        final long later = insertDepartedObservation(
+            insertBatch(SECOND_POLL_AFTER_FORECAST), VEHICLE_204000206, STOP_6);
+        final long earlier = insertDepartedObservation(
+            insertBatch(FIRST_POLL_AFTER_FORECAST), VEHICLE_204000206, STOP_6);
+        insertDepartedObservation(insertBatch(THIRD_POLL_AFTER_FORECAST), VEHICLE_204003542, STOP_6);
+        final long otherVersion = insertRouteVersion(ROUTE_204000121);
+        insertDepartedObservation(otherVersion, insertBatch(otherVersion, FIRST_POLL_AFTER_FORECAST),
+            VEHICLE_204000206, STOP_6);
+
+        // when
+        List<Long> ids = jdbcArrivalObservationQuery.findIdsAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), READ_LIMIT_TWO);
+        List<Long> limited = jdbcArrivalObservationQuery.findIdsAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), 1);
+
+        // then
+        assertThat(ids).containsExactly(earlier, later);
+        assertThat(limited).containsExactly(earlier);
+        assertThat(ids).containsExactlyElementsOf(jdbcArrivalObservationQuery.findAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), READ_LIMIT_TWO)
+            .stream().map(ArrivalCandidate::observationId).toList());
+    }
+
+    @Test
+    void 같은_시각의_관측은_ID가_작은_순서로_읽는다() {
+        // given
+        final long firstBatch = insertBatch(FIRST_POLL_AFTER_FORECAST);
+        final long secondBatch = insertBatch(SECOND_POLL_AFTER_FORECAST);
+        jdbcClient.sql("UPDATE observation_batch SET response_received_at = ? WHERE id = ?")
+            .params(FIRST_POLL_AFTER_FORECAST, secondBatch).update();
+        final long first = insertDepartedObservation(firstBatch, VEHICLE_204000206, STOP_6);
+        final long second = insertDepartedObservation(secondBatch, VEHICLE_204000206, STOP_6);
+
+        // when
+        List<Long> ids = jdbcArrivalObservationQuery.findIdsAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), READ_LIMIT);
+
+        // then
+        assertThat(ids).containsExactly(first, second);
+    }
+
+    @Test
+    void 상세_조회는_요청한_노선과_차량의_관측만_반환한다() {
+        // given
+        final long batch = insertBatch(FIRST_POLL_AFTER_FORECAST);
+        final long wanted = insertDepartedObservation(batch, VEHICLE_204000206, STOP_6);
+        final long otherVehicle = insertDepartedObservation(batch, VEHICLE_204003542, STOP_6);
+        final long otherVersion = insertRouteVersion(ROUTE_204000121);
+        final long otherRoute = insertDepartedObservation(otherVersion,
+            insertBatch(otherVersion, FIRST_POLL_AFTER_FORECAST), VEHICLE_204000206, STOP_6);
+
+        // when
+        List<ArrivalCandidate> details = jdbcArrivalObservationQuery.findByIds(
+            routeVersionId, VEHICLE_204000206, List.of(wanted, otherVehicle, otherRoute));
+
+        // then
+        assertThat(details).containsExactlyElementsOf(jdbcArrivalObservationQuery.findAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), READ_LIMIT));
+        assertThat(details).extracting(ArrivalCandidate::observationId).containsExactly(wanted);
+    }
+
+    @Test
+    void 상세_조회도_좌석_미상과_품질_제외_정보를_그대로_반환한다() {
+        // given
+        final long unknown = insertSeatUnknownObservation(
+            insertBatch(FIRST_POLL_AFTER_FORECAST), VEHICLE_204000206, STOP_6);
+        final long excluded = insertDepartedObservation(
+            insertBatch(SECOND_POLL_AFTER_FORECAST), VEHICLE_204000206, STOP_6);
+        jdbcClient.sql("UPDATE vehicle_one_way_trip SET status = 'EXCLUDED' WHERE route_version_id = ?")
+            .param(routeVersionId).update();
+
+        // when
+        List<ArrivalCandidate> details = jdbcArrivalObservationQuery.findByIds(
+            routeVersionId, VEHICLE_204000206, List.of(unknown, excluded));
+
+        // then
+        assertThat(details).containsExactlyInAnyOrderElementsOf(jdbcArrivalObservationQuery.findAfter(
+            routeVersionId, VEHICLE_204000206, FORECAST_OBSERVED_AT.toInstant(), READ_LIMIT));
+        assertThat(details).allMatch(candidate -> candidate.qualityDirection() == null);
+        assertThat(details).anyMatch(candidate -> !candidate.hasKnownSeats());
+    }
+
+    @Test
+    void 요청한_ID가_없으면_상세_조회는_빈_목록을_반환한다() {
+        // given
+        List<Long> ids = List.of();
+
+        // when
+        var result = jdbcArrivalObservationQuery.findByIds(routeVersionId, VEHICLE_204000206, ids);
+
+        // then
+        assertThat(result).isEmpty();
+    }
+
     private long insertRouteVersion(
         String sourceRouteId
     ) {

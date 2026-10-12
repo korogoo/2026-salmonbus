@@ -69,7 +69,8 @@ class EvaluateForecastsServiceTest {
     @BeforeEach
     void 회수_배치를_멈춘_시계로_세운다() {
         job = new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), writer,
-            arrivalObservationQuery, quality, properties(), Clock.fixed(SETTLED_AT, ZoneOffset.UTC), 30000, 3);
+            arrivalObservationQuery, quality, properties(), Clock.fixed(SETTLED_AT, ZoneOffset.UTC), 30000, 3,
+            new RecentArrivalObservationCache(false, 30000, Duration.ofMinutes(30)));
     }
 
     @Test

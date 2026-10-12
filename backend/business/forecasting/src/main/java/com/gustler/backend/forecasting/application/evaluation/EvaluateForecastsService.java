@@ -36,6 +36,7 @@ public class EvaluateForecastsService implements EvaluateForecasts {
     private final EvaluationWorkPageReader pages;
     private final ForecastEvaluationWriter writer;
     private final ArrivalObservationQuery arrivals;
+    private final RecentArrivalObservationCache observationCache;
     private final RouteDataQualityAccess quality;
     private final ForecastPolicy policy;
     private final Clock clock;
@@ -48,12 +49,14 @@ public class EvaluateForecastsService implements EvaluateForecasts {
         ForecastEvaluationWriter writer, ArrivalObservationQuery arrivals,
         RouteDataQualityAccess quality, ForecastPolicy policy, Clock clock,
         @Value("${forecast.evaluation.memory-limit:30000}") int memoryLimit,
-        @Value("${forecast.evaluation.recovery-page-limit:3}") int pageLimit) {
+        @Value("${forecast.evaluation.recovery-page-limit:3}") int pageLimit,
+        RecentArrivalObservationCache observationCache) {
         if (pageLimit < 1) throw new IllegalArgumentException("복원 페이지 한도는 양수여야 한다");
         this.work = work;
         this.pages = pages;
         this.writer = writer;
         this.arrivals = arrivals;
+        this.observationCache = observationCache;
         this.quality = quality;
         this.policy = policy;
         this.clock = clock;
@@ -70,6 +73,7 @@ public class EvaluateForecastsService implements EvaluateForecasts {
     private void settleOnce() {
         Instant now = clock.instant();
         Snapshot snapshot = snapshot();
+        var observations = observationCache.begin(now);
         List<Long> versions = WorkerOperationLog.measure("settlement_pending_routes", "all", work::routes);
         Map<Long, Long> revisions = new LinkedHashMap<>();
         for (long version : versions) revisions.put(version, quality.lock(version));
@@ -79,12 +83,12 @@ public class EvaluateForecastsService implements EvaluateForecasts {
         for (long version : versions) {
             RouteInput input = read(version, revisions.get(version), snapshot);
             inputs.add(input);
-            results.addAll(evaluate(version, input.selected(), now));
+            results.addAll(evaluate(input, observations, now));
         }
         writer.complete(results);
         List<Change> changes = new ArrayList<>();
         for (RouteInput input : inputs) changes.add(finish(input));
-        afterCommit(snapshot, List.copyOf(versions), List.copyOf(changes));
+        afterCommit(snapshot, List.copyOf(versions), List.copyOf(changes), observations);
     }
 
     private RouteInput read(long version, long revision, Snapshot snapshot) {
@@ -117,7 +121,10 @@ public class EvaluateForecastsService implements EvaluateForecasts {
             List.copyOf(ready.values()), List.copyOf(selected));
     }
 
-    private List<ForecastEvaluation> evaluate(long version, List<PendingForecast> forecasts, Instant now) {
+    private List<ForecastEvaluation> evaluate(RouteInput input,
+        RecentArrivalObservationCache.Round observations, Instant now) {
+        long version = input.version();
+        List<PendingForecast> forecasts = input.selected();
         Map<String, List<PendingForecast>> byVehicle = new LinkedHashMap<>();
         for (var forecast : forecasts) {
             byVehicle.computeIfAbsent(forecast.vehicleId(), ignored -> new ArrayList<>()).add(forecast);
@@ -128,7 +135,8 @@ public class EvaluateForecastsService implements EvaluateForecasts {
                 .min(Instant::compareTo).orElseThrow();
             List<ArrivalCandidate> candidates = vehicle.getKey() == null ? List.of()
                 : WorkerOperationLog.measure("settlement_arrival_candidates", version,
-                    () -> arrivals.findAfter(version, vehicle.getKey(), earliest, policy.arrivalLimit()));
+                    () -> observations.read(arrivals, version, input.revision(), input.investigating(),
+                        vehicle.getKey(), earliest, policy.arrivalLimit()));
             for (PendingForecast forecast : vehicle.getValue()) {
                 ArrivalLabel label = ArrivalLabelResolver.resolve(forecast, candidates, now);
                 if (label.settles()) results.add(ForecastEvaluation.completed(
@@ -162,7 +170,8 @@ public class EvaluateForecastsService implements EvaluateForecasts {
         return new Snapshot(memoryRevision, Map.copyOf(cursors), buffer.snapshot());
     }
 
-    private void afterCommit(Snapshot snapshot, List<Long> versions, List<Change> changes) {
+    private void afterCommit(Snapshot snapshot, List<Long> versions, List<Change> changes,
+        RecentArrivalObservationCache.Round observations) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
             || !TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("정산 회차에는 실제 트랜잭션이 필요하다");
@@ -171,6 +180,14 @@ public class EvaluateForecastsService implements EvaluateForecasts {
             @Override
             public void afterCompletion(int status) {
                 if (status != STATUS_ROLLED_BACK) apply(snapshot, versions, changes, status == STATUS_COMMITTED);
+                if (status == STATUS_COMMITTED) {
+                    try {
+                        observations.committed(clock.instant());
+                    } catch (RuntimeException failure) {
+                        log.warn("event=arrival_cache_publish_failed exceptionType={}",
+                            failure.getClass().getSimpleName());
+                    }
+                }
             }
         });
     }

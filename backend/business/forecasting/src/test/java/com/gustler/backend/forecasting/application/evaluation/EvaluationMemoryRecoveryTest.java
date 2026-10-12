@@ -162,7 +162,8 @@ class EvaluationMemoryRecoveryTest {
     private EvaluateForecastsService newService() {
         return new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), writer, arrivals,
             quality, new ForecastPolicy(Duration.ofMinutes(5), 20, 1, 400),
-            Clock.fixed(NOW, ZoneOffset.UTC), 12, 1);
+            Clock.fixed(NOW, ZoneOffset.UTC), 12, 1,
+            new RecentArrivalObservationCache(false, 30000, Duration.ofMinutes(30)));
     }
 
     private void add(long id) {

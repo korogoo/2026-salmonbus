@@ -11,6 +11,12 @@ import java.util.List;
  */
 public interface ArrivalObservationQuery {
 
+    /** 기존 조회와 동일한 조건·순서·한도로 필요한 관측 ID를 확인한다. */
+    List<Long> findIdsAfter(long routeVersionId, String vehicleId, Instant observedAfter, int limit);
+
+    /** ID에 해당하는 상세 정보. 호출자는 ID 목록 순서로 결과를 다시 구성한다. */
+    List<ArrivalCandidate> findByIds(long routeVersionId, String vehicleId, List<Long> ids);
+
     /** 그 시각보다 뒤인 같은 차량의 관측을 시각 오름차순으로. */
     List<ArrivalCandidate> findAfter(
         long routeVersionId,

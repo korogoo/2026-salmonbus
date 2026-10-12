@@ -3,6 +3,8 @@ package com.gustler.backend.forecasting.infrastructure.jdbc;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalCandidate;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalObservationQuery;
 import com.gustler.backend.forecasting.domain.model.ObservedVehicle;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -11,35 +13,32 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /**
- * 예보를 낸 뒤 그 차량이 남긴 관측을 SQL 로 직접 읽는다. observations 의 JPA 엔티티를 쓰지 않는다.
+ * 예보 이후 같은 차량의 관측을 읽는다. ID 조회와 상세 조회의 차량·노선 범위는 같다.
  *
- * <p>관측 시각은 vehicle_observation 에 없다. observation_batch.response_received_at 이
- * 관측 시각의 권위라서 판을 조인해 채운다.
- *
- * <p>통과 순번은 적재가 계산해 열에 남긴 값을 그대로 읽는다. 운행 상태에서 다시 유도하면
- * 같은 규칙이 적재 쪽과 조회 쪽에 두 벌 생기고 어긋나는 순간을 아무도 못 잡는다.
- *
- * <p>어느 관측이 라벨이 되는지는 여기서 안 고른다. 판을 빠짐없이 늘어놓아 넘기고 판정은 도메인이 한다.
- * SQL 이 대상 순번의 행만 집어 오면 순번 되돌림과 관측 공백이 구분되지 않는다.
+ * <p>관측 시각은 observation_batch.response_received_at에서 가져오고,
+ * 통과 순번은 수집 시 계산한 값을 그대로 사용한다.
+ * 대상 정류장의 관측만 고르면 관측 공백과 순번 되돌림을 놓치므로 여기서는 거르지 않는다.
+ * 정산 판정은 시각과 ID 순서로 정렬한 전체 후보를 사용한다.
  */
 @Repository
 public class JdbcArrivalObservationQuery implements ArrivalObservationQuery {
+    private static final String COLUMNS = """
+        SELECT o.id, o.vehicle_id, o.route_version_id, o.passed_stop_order,
+               b.response_received_at, o.remaining_seats, o.crowd_level,
+               CASE WHEN o.forecast_eligible THEN o.quality_direction END AS quality_direction,
+               o.id AS assessed_id
+        """;
 
-    private static final String SELECT_OBSERVATIONS_AFTER = """
-        SELECT o.id,
-               o.vehicle_id,
-               o.route_version_id,
-               o.passed_stop_order,
-               b.response_received_at,
-               o.remaining_seats,
-               o.crowd_level,
-               CASE WHEN o.forecast_eligible THEN o.quality_direction END AS quality_direction, o.id AS assessed_id
+    private static final String SOURCE = """
         FROM forecast_observation_quality o
         JOIN observation_batch b
           ON b.id = o.observation_batch_id
          AND b.route_version_id = o.route_version_id
         WHERE o.route_version_id = :routeVersionId
           AND o.vehicle_id = :vehicleId
+        """;
+
+    private static final String AFTER = """
           AND b.response_received_at > :observedAfter
         ORDER BY b.response_received_at, o.id
         LIMIT :limit
@@ -47,47 +46,56 @@ public class JdbcArrivalObservationQuery implements ArrivalObservationQuery {
 
     private final JdbcClient jdbcClient;
 
-    public JdbcArrivalObservationQuery(
-        JdbcClient jdbcClient
-    ) {
+    public JdbcArrivalObservationQuery(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
     @Override
-    public List<ArrivalCandidate> findAfter(
-        final long routeVersionId,
-        String vehicleId,
-        Instant observedAfter,
-        final int limit
-    ) {
-        return jdbcClient.sql(SELECT_OBSERVATIONS_AFTER)
+    public List<ArrivalCandidate> findAfter(long routeVersionId, String vehicleId,
+        Instant observedAfter, int limit) {
+        return jdbcClient.sql(COLUMNS + SOURCE + AFTER)
             .param("routeVersionId", routeVersionId)
             .param("vehicleId", vehicleId)
             .param("observedAfter", offsetOf(observedAfter))
             .param("limit", limit)
-            .query((resultSet, rowNumber) -> new ArrivalCandidate(
-                resultSet.getLong("id"),
-                new ObservedVehicle(
-                    resultSet.getString("vehicle_id"),
-                    resultSet.getLong("route_version_id"),
-                    resultSet.getInt("passed_stop_order"),
-                    instantOf(resultSet.getObject("response_received_at", OffsetDateTime.class)),
-                    (Integer) resultSet.getObject("remaining_seats"),
-                    (Integer) resultSet.getObject("crowd_level")),
-                resultSet.getObject("quality_direction", Long.class),
-                resultSet.getObject("assessed_id", Long.class) != null))
-            .list();
+            .query((rs, rowNumber) -> candidate(rs)).list();
     }
 
-    private static OffsetDateTime offsetOf(
-        Instant instant
-    ) {
+    @Override
+    public List<Long> findIdsAfter(long routeVersionId, String vehicleId,
+        Instant observedAfter, int limit) {
+        return jdbcClient.sql("SELECT o.id\n" + SOURCE + AFTER)
+            .param("routeVersionId", routeVersionId)
+            .param("vehicleId", vehicleId)
+            .param("observedAfter", offsetOf(observedAfter))
+            .param("limit", limit)
+            .query(Long.class).list();
+    }
+
+    @Override
+    public List<ArrivalCandidate> findByIds(long routeVersionId, String vehicleId, List<Long> ids) {
+        if (ids.isEmpty()) return List.of();
+        return jdbcClient.sql(COLUMNS + SOURCE + " AND o.id IN (:ids)")
+            .param("routeVersionId", routeVersionId)
+            .param("vehicleId", vehicleId)
+            .param("ids", ids)
+            .query((rs, rowNumber) -> candidate(rs)).list();
+    }
+
+    private static ArrivalCandidate candidate(ResultSet rs) throws SQLException {
+        return new ArrivalCandidate(rs.getLong("id"),
+            new ObservedVehicle(rs.getString("vehicle_id"), rs.getLong("route_version_id"),
+                rs.getInt("passed_stop_order"),
+                instantOf(rs.getObject("response_received_at", OffsetDateTime.class)),
+                (Integer) rs.getObject("remaining_seats"), (Integer) rs.getObject("crowd_level")),
+            rs.getObject("quality_direction", Long.class), rs.getObject("assessed_id", Long.class) != null);
+    }
+
+    private static OffsetDateTime offsetOf(Instant instant) {
         return instant.atOffset(ZoneOffset.UTC);
     }
 
-    private static Instant instantOf(
-        OffsetDateTime offsetDateTime
-    ) {
-        return offsetDateTime == null ? null : offsetDateTime.toInstant();
+    private static Instant instantOf(OffsetDateTime at) {
+        return at == null ? null : at.toInstant();
     }
 }
