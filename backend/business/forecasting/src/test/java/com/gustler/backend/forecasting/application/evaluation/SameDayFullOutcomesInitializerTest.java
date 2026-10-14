@@ -79,6 +79,8 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
 
     @Test
     void 초기집계_SQL이_실패하면_집계를_남기지_않고_잠금도_해제한다() {
+        jdbc.sql("INSERT INTO route_data_quality(route_id) VALUES (?) ON CONFLICT DO NOTHING")
+            .param(routeId).update();
         doAnswer(call -> {
             jdbc.sql("SELECT pg_sleep(1)").query().singleRow();
             return call.callRealMethod();
@@ -86,7 +88,7 @@ class SameDayFullOutcomesInitializerTest extends SameDayTransactionBoundaryTest 
         assertThatThrownBy(() -> initializer.initialize(routeId, day)).isInstanceOf(QueryTimeoutException.class);
         assertThat(count("same_day_model_full_outcomes")).isZero();
         new TransactionTemplate(new DataSourceTransactionManager(dataSource)).executeWithoutResult(status ->
-            jdbc.sql("SELECT id FROM route WHERE id = ? FOR UPDATE NOWAIT").param(routeId).query(Long.class).single());
+            jdbc.sql("SELECT route_id FROM route_data_quality WHERE route_id = ? FOR UPDATE NOWAIT").param(routeId).query(Long.class).single());
     }
 
     @Test

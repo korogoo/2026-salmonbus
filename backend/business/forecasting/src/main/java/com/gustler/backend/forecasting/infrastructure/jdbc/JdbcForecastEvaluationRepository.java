@@ -1,5 +1,6 @@
 package com.gustler.backend.forecasting.infrastructure.jdbc;
 
+import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
 import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
 import com.gustler.backend.forecasting.domain.evaluation.EvaluationDiagnostics;
 import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
@@ -150,7 +151,11 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
     private final JdbcClient jdbcClient;
     private final JdbcEvaluationWorkStore work;
 
-    public JdbcForecastEvaluationRepository(JdbcClient jdbcClient, JdbcEvaluationWorkStore work) {
+    private final RouteDataQualityAccess quality;
+
+    public JdbcForecastEvaluationRepository(JdbcClient jdbcClient, JdbcEvaluationWorkStore work,
+        RouteDataQualityAccess quality) {
+        this.quality = quality;
         this.work = work;
         this.jdbcClient = jdbcClient;
     }
@@ -218,13 +223,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             .param("ids", absentIds).param("version", version).query(Long.class).list();
         if (confirmed.isEmpty()) { return 0; }
 
-        // 뒤의 Writer도 노선 ID 오름차순으로 잠근다. 앞선 정상 노선은 아직 잠그지 않았을 수 있어
-        // 이 노선까지의 낮은 ID를 먼저 잠가 후속 Writer와 잠금 순서가 뒤집히지 않게 한다.
-        jdbcClient.sql("""
-            SELECT id FROM route
-            WHERE id <= (SELECT route_id FROM route_version WHERE id = ?)
-            ORDER BY id FOR UPDATE
-            """).param(version).query(Long.class).list();
+        // 제외 확정도 같은 노선의 품질 변경과 순서를 맞춘다.
+        quality.lock(version);
         Set<Long> excludedIds = Set.copyOf(confirmed);
         List<PendingKey> closing = keys.stream().filter(key -> excludedIds.contains(key.vehicleObservationId()))
             .limit(budget).toList();
