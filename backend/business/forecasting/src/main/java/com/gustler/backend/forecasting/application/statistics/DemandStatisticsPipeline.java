@@ -71,6 +71,12 @@ public class DemandStatisticsPipeline {
     }
 
     public Step step(final long routeVersionId) {
+        Optional<Instant> idle = transaction.execute(status -> {
+            store.limitStatementTime();
+            return store.idleDataUntil(routeVersionId, clock.instant().minus(policy.refreshInterval()));
+        });
+        if (idle.isPresent()) return new Step(Status.IDLE, "DONE", idle.get());
+
         // 기존 호출자의 DB 트랜잭션에서는 외부 전송을 하지 않는다. 누락된 이력은 JDBC 경로가 거부한다.
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             Optional<Boolean> advanced = archived.advance(routeVersionId);
