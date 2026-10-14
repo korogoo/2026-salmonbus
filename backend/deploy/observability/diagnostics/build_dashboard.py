@@ -70,9 +70,14 @@ panel('가용 메모리 / swap',[aws('freeable_memory','minimum'),aws('swap_usag
 panel('DB 저장 공간 여유',aws('free_storage_space','minimum'),'bytes',kind='stat',legend='디스크 여유')
 panel('RDS CPU 사용률',aws('cpuutilization','maximum'),'percent',legend='CPU')
 panel('선택 기간 DB 시작 시각 변경 횟수',f'changes(salmonbus_pg_database_start_timestamp_seconds{pg}[$__range])',kind='stat',legend='관측된 변경')
-row('05 어떤 SQL과 업무인가? 선택한 시간 범위의 증가량')
-for title,metric,unit in [('버퍼 읽기 상위 SQL','blocks_read_total','short'),('버퍼 수정 상위 SQL','blocks_dirtied_total','short'),('실행 시간 상위 SQL','execution_seconds_total','s'),('WAL 생성 상위 SQL','wal_bytes_total','bytes'),('임시 파일 쓰기 상위 SQL','temp_blocks_written_total','short'),('실행 횟수 상위 SQL','calls_total','short')]:
-    panel(title,f'topk(10, increase(salmonbus_pg_statement_{metric}{pg}[$__range]))',unit,'bargauge',legend='{{query_origin}} | {{query_id}}')
+row('05 어떤 SQL과 업무인가? 선택한 시간 범위')
+for title,metric,unit in [('버퍼 읽기 상위 SQL','blocks_read_total','short'),('버퍼 수정 상위 SQL','blocks_dirtied_total','short'),('평균 실행 시간 상위 SQL','execution_seconds_total','s'),('WAL 생성 상위 SQL','wal_bytes_total','bytes'),('임시 파일 쓰기 상위 SQL','temp_blocks_written_total','short'),('실행 횟수 상위 SQL','calls_total','short')]:
+    value=f'increase(salmonbus_pg_statement_{metric}{pg}[$__range])'
+    description=''
+    if metric=='execution_seconds_total':
+        value+=f' / (increase(salmonbus_pg_statement_calls_total{pg}[$__range]) > 0)'
+        description='선택 기간의 실행 시간 증가량 ÷ 실행 횟수 증가량. 호출 1회당 평균이며 실행 횟수가 0인 SQL은 제외합니다. 총 실행 시간 기준으로 수집된 최대 100개 SQL 안에서 비교합니다.'
+    panel(title,f'topk(10, {value})',unit,'bargauge',legend='{{query_origin}} | {{query_id}}',description=description)
 panel('현재 실행 중인 업무와 대기',f'salmonbus_pg_running_active_sessions{pg}',legend='{{application}} {{query_origin}} {{wait_type}}')
 panel('상한 때문에 제외된 SQL 수',f'salmonbus_pg_statement_coverage_not_exported{pg}',kind='stat',legend='미수집 SQL')
 row('06 노선별 수집과 예보 / 원인 로그')
@@ -95,7 +100,7 @@ help_text='''### 읽는 순서
 - EBS 잔량은 요청 크기 제한이 아닙니다. 잔량 감소만으로 장애 원인을 확정하지 않습니다.
 - SQL 버퍼 읽기는 물리 디스크 읽기가 아닙니다. 버퍼 수정과 WAL 생성량도 실제 디스크 쓰기량과 다릅니다.
 - query_origin은 소스 코드에 붙인 업무 태그입니다. 동일 SQL이 여러 업무에서 쓰이면 pg_stat_statements가 합칠 수 있습니다. 현재 실행 중인 업무 표본과 앱 로그를 함께 봅니다.
-- SQL 상위 표는 수집된 최대 100개 SQL의 기간 증가량입니다. 제외, 통계 초기화, 재시작, 수집 누락 때 전체 순위를 보장하지 않습니다. 짧은 SQL은 60초 활동 표본에 안 잡힐 수 있습니다.
+- SQL 상위 표는 총 실행 시간 기준으로 수집된 최대 100개 SQL을 비교합니다. 평균 실행 시간은 선택 기간의 실행 시간 증가량을 실행 횟수 증가량으로 나눈 값이며, 다른 표는 기간 증가량입니다. 제외, 통계 초기화, 재시작, 수집 누락 때 전체 순위를 보장하지 않습니다. 짧은 SQL은 60초 활동 표본에 안 잡힐 수 있습니다.
 - 연결 사용 시간은 연결을 빌린 전체 시간이며 SQL 실행이나 순수 커밋 시간과 같지 않습니다. DB idle은 앱이 연결을 반납했다는 뜻이 아닙니다.
 - 노선별 관측 값은 재시작 후 메모리에서 다시 시작합니다. 미발행 나이는 한 회차 전 조회 결과일 수 있고 지원 모델이 조회한 범위만 나타냅니다.
 - 새 알림은 일시 정지 상태로 준비합니다. 배포, 지표 수집, 장애/복구 검증 후 활성화합니다. 테스트 알림은 발송하지 않았습니다.
