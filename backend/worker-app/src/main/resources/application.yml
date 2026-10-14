@@ -68,13 +68,13 @@ model:
 # 켜는 것은 배포 행이 선 뒤다. 수집(collection.enabled)과 같은 방식으로 끈다.
 forecast:
   evaluation:
-    memory-limit: ${FORECAST_EVALUATION_MEMORY_LIMIT:30000}
+    memory-limit: ${FORECAST_EVALUATION_MEMORY_LIMIT:60000}
     recovery-page-limit: ${FORECAST_EVALUATION_RECOVERY_PAGE_LIMIT:3}
     observation-cache:
       # 전후 비교를 통과하기 전까지 기존 조회를 기본값으로 유지한다.
       enabled: ${FORECAST_EVALUATION_OBSERVATION_CACHE_ENABLED:false}
-      max-observations: ${FORECAST_EVALUATION_OBSERVATION_CACHE_MAX_OBSERVATIONS:30000}
-      retention: ${FORECAST_EVALUATION_OBSERVATION_CACHE_RETENTION:30m}
+      max-observations: ${FORECAST_EVALUATION_OBSERVATION_CACHE_MAX_OBSERVATIONS:100000}
+      retention: ${FORECAST_EVALUATION_OBSERVATION_CACHE_RETENTION:50m}
   archive:
     # 배포 유닛에서만 기본 활성화한다. 로컬과 테스트는 외부 저장소를 사용하지 않는다.
     enabled: ${FORECAST_ARCHIVE_ENABLED:false}

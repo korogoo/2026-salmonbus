@@ -47,7 +47,7 @@ public class EvaluateForecastsService implements EvaluateForecasts {
     public EvaluateForecastsService(EvaluationWorkStore work, EvaluationWorkPageReader pages,
         EvaluationRouteCommitter committer, ArrivalObservationQuery arrivals,
         RouteDataQualityAccess quality, ForecastPolicy policy, Clock clock,
-        @Value("${forecast.evaluation.memory-limit:30000}") int memoryLimit,
+        @Value("${forecast.evaluation.memory-limit:60000}") int memoryLimit,
         @Value("${forecast.evaluation.recovery-page-limit:3}") int pageLimit,
         RecentArrivalObservationCache observationCache) {
         if (pageLimit < 1) throw new IllegalArgumentException("복원 페이지 한도는 양수여야 한다");

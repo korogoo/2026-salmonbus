@@ -28,8 +28,8 @@ public class ObservationDeliveryService implements ObservationDeliveryReceiver {
     private int retained;
 
     public ObservationDeliveryService(RecentObservationBatches source, Clock clock,
-        @Value("${forecast.evaluation.observation-cache.max-observations:30000}") int capacity,
-        @Value("${forecast.evaluation.observation-cache.retention:30m}") Duration retention) {
+        @Value("${forecast.evaluation.observation-cache.max-observations:100000}") int capacity,
+        @Value("${forecast.evaluation.observation-cache.retention:50m}") Duration retention) {
         if (capacity < 1 || retention.isNegative() || retention.isZero()) {
             throw new IllegalArgumentException("관측 보관 개수와 시간은 양수여야 한다");
         }
