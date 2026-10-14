@@ -129,6 +129,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public List<Long> routes() {
         return jdbc.sql("""
             SELECT /* salmonbus:evaluation_work.routes */ version.id FROM route_version version
@@ -138,6 +139,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public long lastObservationId(long version) {
         return jdbc.sql("""
             SELECT /* salmonbus:evaluation_work.last_observation */ vehicle_observation_id FROM forecast_evaluation_work WHERE route_version_id=:version
@@ -146,6 +148,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public List<Long> page(long version, long afterObservationId, long throughObservationId, int limit) {
         if (afterObservationId < 0 || limit < 1 || limit > MAX_OBSERVATIONS) {
             throw new IllegalArgumentException("작업 탐색은 음수가 아닌 시작 위치와 제한된 개수가 필요하다");
@@ -156,6 +159,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public List<Restored> restore(long version, List<Long> observationIds) {
         List<Long> ids = checked(observationIds);
         if (ids.isEmpty()) return List.of();
@@ -174,6 +178,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
     }
 
     @Override
+    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public java.util.Map<Long, Long> revisions(long version, List<Long> observationIds) {
         List<Long> ids = checked(observationIds);
         if (ids.isEmpty()) return java.util.Map.of();

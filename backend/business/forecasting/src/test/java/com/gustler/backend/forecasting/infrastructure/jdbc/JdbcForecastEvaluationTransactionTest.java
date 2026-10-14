@@ -173,10 +173,24 @@ class JdbcForecastEvaluationTransactionTest {
     @Test
     void 정산이_취소되면_커밋된_관측은_재사용하고_정산_결과를_다시_저장한다() {
         // given
-        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            settlement.settleArrivalLabels();
-            status.setRollbackOnly();
-        });
+        jdbc.sql("""
+            CREATE FUNCTION reject_settlement_preview_fixture() RETURNS trigger LANGUAGE plpgsql AS $body$
+            BEGIN
+                RAISE EXCEPTION '정산 결과 저장 실패';
+            END;
+            $body$
+            """).update();
+        jdbc.sql("""
+            CREATE TRIGGER reject_settlement_preview_fixture BEFORE INSERT ON forecast_evaluation_result
+            FOR EACH ROW EXECUTE FUNCTION reject_settlement_preview_fixture()
+            """).update();
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(settlement::settleArrivalLabels)
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        } finally {
+            jdbc.sql("DROP TRIGGER reject_settlement_preview_fixture ON forecast_evaluation_result").update();
+            jdbc.sql("DROP FUNCTION reject_settlement_preview_fixture()").update();
+        }
         assertThat(evaluationState()).isEqualTo("PENDING");
 
         // when

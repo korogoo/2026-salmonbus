@@ -6,11 +6,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
-@Transactional(propagation = Propagation.MANDATORY)
+@Transactional(readOnly = true)
 class EvaluationWorkPageReader {
     private final EvaluationWorkStore work;
 
@@ -44,7 +43,6 @@ class EvaluationWorkPageReader {
 
         List<EvaluationWorkStore.Restored> restored = List.of();
         if (!restoreIds.isEmpty()) {
-            work.closeExcluded(version, restoreIds, 500);
             restored = work.restore(version, restoreIds);
         }
         Map<Long, List<EvaluationWorkStore.Restored>> byObservation = new LinkedHashMap<>();
@@ -67,7 +65,7 @@ class EvaluationWorkPageReader {
             ready.add(new Ready(id, qualityRevision, revisions.get(id),
                 rows.stream().map(row -> row.forecast().orElseThrow()).toList()));
         }
-        return new Page(ids.getLast(), ids, List.copyOf(ready));
+        return new Page(ids.getLast(), ids, List.copyOf(ready), revisions);
     }
 
     record Ready(long observationId, long qualityRevision, long workRevision, List<PendingForecast> forecasts) {
@@ -79,8 +77,12 @@ class EvaluationWorkPageReader {
         }
     }
 
-    record Page(long nextAfter, List<Long> checkedIds, List<Ready> ready) {
+    record Page(long nextAfter, List<Long> checkedIds, List<Ready> ready, Map<Long, Long> workRevisions) {
+        Page(long nextAfter, List<Long> checkedIds, List<Ready> ready) {
+            this(nextAfter, checkedIds, ready, Map.of());
+        }
         Page {
+            workRevisions = Map.copyOf(workRevisions);
             checkedIds = List.copyOf(checkedIds);
             ready = List.copyOf(ready);
         }

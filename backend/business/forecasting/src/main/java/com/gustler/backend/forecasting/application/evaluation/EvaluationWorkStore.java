@@ -4,7 +4,7 @@ import com.gustler.backend.forecasting.domain.evaluation.PendingForecast;
 import java.util.List;
 import java.util.Optional;
 
-/** 등록·복원·종료는 호출자가 확보한 노선 잠금과 트랜잭션 안에서 수행한다. */
+/** 조회는 잠금 없이 수행할 수 있다. 등록·종료는 호출자가 확보한 노선 품질 잠금과 트랜잭션이 필요하다. */
 public interface EvaluationWorkStore {
     void register(long version, List<Long> observationIds);
     List<Long> routes();

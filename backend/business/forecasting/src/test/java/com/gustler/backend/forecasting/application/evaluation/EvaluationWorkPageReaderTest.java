@@ -103,6 +103,21 @@ class EvaluationWorkPageReaderTest {
         verify(work, never()).restore(anyLong(), anyList());
     }
 
+    @Test
+    void 대기를_읽는_단계에서는_품질_제외_종료를_저장하지_않는다() {
+        // given
+        when(work.page(1, 0, 10, 100)).thenReturn(List.of(10L));
+        when(work.restore(1, List.of(10L))).thenReturn(List.of(
+            new EvaluationWorkStore.Restored(new EvaluationWorkStore.Key(10, 2), Optional.empty())));
+
+        // when
+        var page = reader.read(1, 0, 10, 100, 1, false, Map.of());
+
+        // then
+        assertThat(page.workRevisions()).containsEntry(10L, 1L);
+        verify(work, never()).closeExcluded(anyLong(), anyList(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
     private static PendingEvaluationBuffer cached() {
         var buffer = new PendingEvaluationBuffer(12);
         buffer.restore(1, List.of(forecast()));

@@ -306,6 +306,169 @@ class SameDayTransactionBoundaryTest {
         assertThat(count("stop_demand_pending_sample")).isEqualTo(2);
     }
 
+    @Test
+    void 도착_관측을_읽는_동안_같은_노선의_품질_잠금을_다른_트랜잭션이_사용할_수_있다() {
+        // given
+        savePending();
+        ArrivalCandidate candidate = arrival();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager
+                .isActualTransactionActive()).isFalse();
+            new TransactionTemplate(context.getBean(PlatformTransactionManager.class))
+                .executeWithoutResult(status -> context.getBean(RouteDataQualityAccess.class).lock(versionId));
+            return List.of(candidate);
+        });
+
+        // when
+        settlement.settleArrivalLabels();
+
+        // then
+        assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("forecast_evaluation_work")).isZero();
+    }
+
+    @Test
+    void 관측을_읽은_뒤_품질이_바뀌면_정산을_저장하지_않고_다음_회차에_다시_계산한다() {
+        // given
+        savePending();
+        ArrivalCandidate candidate = arrival();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
+            new TransactionTemplate(context.getBean(PlatformTransactionManager.class)).executeWithoutResult(status -> {
+                context.getBean(RouteDataQualityAccess.class).lock(versionId);
+                jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
+                    .param(routeId).update();
+            });
+            return List.of(candidate);
+        });
+
+        // when
+        settlement.settleArrivalLabels();
+
+        // then
+        assertThat(count("forecast_evaluation_result")).isZero();
+        assertThat(count("stop_demand_pending_sample")).isZero();
+        assertThat(count("forecast_evaluation_work")).isOne();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenReturn(List.of(candidate));
+        settlement.settleArrivalLabels();
+        assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("forecast_evaluation_work")).isZero();
+    }
+
+    @Test
+    void 계산_중_정산_작업이_갱신되면_새_작업을_지우지_않고_다음_회차에_다시_읽는다() {
+        // given
+        savePending();
+        ArrivalCandidate candidate = arrival();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
+            new TransactionTemplate(context.getBean(PlatformTransactionManager.class)).executeWithoutResult(status -> {
+                context.getBean(RouteDataQualityAccess.class).lock(versionId);
+                workSpy.register(versionId, List.of(sourceId));
+            });
+            return List.of(candidate);
+        });
+
+        // when
+        settlement.settleArrivalLabels();
+
+        // then
+        assertThat(count("forecast_evaluation_result")).isZero();
+        assertThat(count("forecast_evaluation_work")).isOne();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenReturn(List.of(candidate));
+        settlement.settleArrivalLabels();
+        assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("forecast_evaluation_work")).isZero();
+    }
+
+    @Test
+    void 다음_노선의_저장이_실패해도_앞서_커밋한_노선의_정산은_유지된다() {
+        // given
+        savePending();
+        ArrivalCandidate firstArrival = arrival();
+        OtherRoute other = otherRoute();
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call ->
+            List.of((long) call.getArgument(0) == versionId ? firstArrival : other.arrival()));
+        doAnswer(call -> {
+            if ((long) call.getArgument(0) == other.version()) {
+                throw new IllegalStateException("두 번째 노선 작업 종료 실패");
+            }
+            return call.callRealMethod();
+        }).when(workStore()).releaseCompleted(anyLong(), any());
+
+        // when
+        assertThatThrownBy(settlement::settleArrivalLabels)
+            .hasRootCauseInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("두 번째 노선 작업 종료 실패");
+
+        // then
+        assertThat(jdbc.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id=?")
+            .param(sourceId).query(String.class).single()).isEqualTo("SETTLED");
+        assertThat(jdbc.sql("SELECT scoring_state FROM forecast_evaluation WHERE vehicle_observation_id=?")
+            .param(other.source()).query(String.class).single()).isEqualTo("PENDING");
+        assertThat(count("stop_demand_pending_sample")).isOne();
+        assertThat(count("forecast_evaluation_work")).isOne();
+        doAnswer(call -> call.callRealMethod()).when(workStore()).releaseCompleted(anyLong(), any());
+        settlement.settleArrivalLabels();
+        assertThat(count("forecast_evaluation_result")).isEqualTo(2);
+        assertThat(count("stop_demand_pending_sample")).isEqualTo(2);
+        assertThat(count("forecast_evaluation_work")).isZero();
+    }
+
+    @Test
+    void 외부_트랜잭션으로_여러_노선의_정산을_묶으려_하면_실행하지_않는다() {
+        // given
+        savePending();
+        var transaction = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
+
+        // when
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> settlement.settleArrivalLabels()))
+            .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+
+        // then
+        assertThat(count("forecast_evaluation_result")).isZero();
+        assertThat(count("forecast_evaluation_work")).isOne();
+    }
+
+    private com.gustler.backend.forecasting.infrastructure.jdbc.JdbcEvaluationWorkStore workStore() {
+        return AopTestUtils.getUltimateTargetObject(workSpy);
+    }
+
+    private OtherRoute otherRoute() {
+        long firstRoute = routeId;
+        long firstVersion = versionId;
+        long firstBatch = batchId;
+        long firstSource = sourceId;
+        long firstArrival = arrivalId;
+        try {
+            routeId = jdbc.sql("""
+                INSERT INTO route(public_route_id,source_id,source_route_id,display_name,start_stop_name,end_stop_name)
+                VALUES ('other','fixture','other','other','start','end') RETURNING id
+                """).query(Long.class).single();
+            jdbc.sql("INSERT INTO route_data_quality(route_id) VALUES (?)").param(routeId).update();
+            versionId = jdbc.sql("""
+                INSERT INTO route_version(route_id,content_digest,valid_from,turn_sequence)
+                VALUES (?,?,?,20) RETURNING id
+                """).params(routeId, "1".repeat(64), OffsetDateTime.ofInstant(OBSERVED_AT, ZoneOffset.UTC))
+                .query(Long.class).single();
+            for (int stop : List.of(1, 2)) {
+                jdbc.sql("INSERT INTO route_stop VALUES (?, ?, ?, ?, 'UP', true)")
+                    .params(versionId, stop, "stop-" + stop, "stop-" + stop).update();
+            }
+            batchId = insertBatch(OBSERVED_AT);
+            sourceId = insertObservation(batchId, 1, 12);
+            arrivalId = insertObservation(insertBatch(ARRIVED_AT), 2, 0);
+            savePending();
+            return new OtherRoute(versionId, sourceId, arrival());
+        } finally {
+            routeId = firstRoute;
+            versionId = firstVersion;
+            batchId = firstBatch;
+            sourceId = firstSource;
+            arrivalId = firstArrival;
+        }
+    }
+
+    private record OtherRoute(long version, long source, ArrivalCandidate arrival) { }
+
     SameDayFullOutcomesInitializer initializer() {
         return context.getBean(SameDayFullOutcomesInitializer.class);
     }

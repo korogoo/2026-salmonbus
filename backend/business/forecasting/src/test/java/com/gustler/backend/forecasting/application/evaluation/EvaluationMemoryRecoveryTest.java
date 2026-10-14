@@ -43,6 +43,7 @@ class EvaluationMemoryRecoveryTest {
     void 대기가_계속_남는_정산_회차를_준비한다() {
         when(work.routes()).thenReturn(List.of(1L));
         when(quality.lock(1)).thenReturn(1L);
+        when(quality.current(1)).thenReturn(1L);
         when(work.lastObservationId(1)).thenAnswer(call -> inputs.isEmpty() ? 0L : inputs.lastKey());
         when(work.page(anyLong(), anyLong(), anyLong(), anyInt())).thenAnswer(call -> {
             long after = call.getArgument(1);
@@ -159,8 +160,41 @@ class EvaluationMemoryRecoveryTest {
         verify(work, times(2)).restore(1, List.of(10L));
     }
 
+    @Test
+    void 품질이_바뀌어_저장을_건너뛰면_다음_대기로_넘어가지_않는다() {
+        // given
+        add(10);
+        add(20);
+        when(quality.lock(1)).thenReturn(2L);
+
+        // when
+        commitRound();
+        when(quality.current(1)).thenReturn(2L);
+        commitRound();
+
+        // then
+        assertThat(evaluatedVehicles).containsExactly("bus-10", "bus-10");
+        verify(work).releaseCompleted(1, List.of(10L, 20L));
+    }
+
+    @Test
+    void 커밋_성공_여부를_알_수_없으면_메모리를_비우고_DB에서_다시_복원한다() {
+        // given
+        add(10);
+        add(20);
+        commitRound();
+
+        // when
+        finish(prepareRound(), TransactionSynchronization.STATUS_UNKNOWN);
+        commitRound();
+
+        // then
+        assertThat(evaluatedVehicles).containsExactly("bus-10", "bus-20", "bus-10");
+        verify(work, times(2)).restore(1, List.of(10L, 20L));
+    }
+
     private EvaluateForecastsService newService() {
-        return new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), writer, arrivals,
+        return new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), new EvaluationRouteCommitter(work, quality, writer), arrivals,
             quality, new ForecastPolicy(Duration.ofMinutes(5), 20, 1, 400),
             Clock.fixed(NOW, ZoneOffset.UTC), 12, 1,
             new RecentArrivalObservationCache(false, 30000, Duration.ofMinutes(30)));
