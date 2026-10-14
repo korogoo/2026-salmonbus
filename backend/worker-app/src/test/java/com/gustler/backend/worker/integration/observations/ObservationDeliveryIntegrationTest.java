@@ -1,7 +1,6 @@
 package com.gustler.backend.worker.integration.observations;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
@@ -10,7 +9,6 @@ import com.gustler.backend.forecasting.application.evaluation.ObservationDeliver
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
 import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcArrivalObservationQuery;
 import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcRecentObservationBatches;
-import com.gustler.backend.forecasting.infrastructure.jdbc.JdbcObservationDeliveryStore;
 import com.gustler.backend.gbis.api.GbisLocationResult.Success;
 import com.gustler.backend.gbis.api.dto.BusLocationResponse.BusLocation;
 import com.gustler.backend.observations.api.ObservationDeliveryBatch;
@@ -39,7 +37,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -55,7 +52,6 @@ class ObservationDeliveryIntegrationTest {
     @Autowired JdbcClient jdbc;
     @Autowired PlatformTransactionManager transactions;
     @Autowired RecordingReceiver receiver;
-    @Autowired JdbcObservationDeliveryStore store;
     @Autowired JdbcArrivalObservationQuery arrivals;
     @Autowired RouteDataQualityAccess quality;
     private long version;
@@ -100,7 +96,7 @@ class ObservationDeliveryIntegrationTest {
     }
 
     @Test
-    void 커밋된_관측은_실제_전달_콜백으로_받아_본문_조회_없이_사용한다() {
+    void 관측_저장_트랜잭션이_커밋되면_수집한_차량_관측을_캐시에_넣는다() {
         // given
         var source = spy(new JdbcRecentObservationBatches(jdbc));
         var memory = memory(source);
@@ -121,7 +117,7 @@ class ObservationDeliveryIntegrationTest {
                 .param(batch).query(OffsetDateTime.class).single().toInstant());
         });
         verify(source, never()).restore(anyLong(), anyList(), anyInt());
-        assertThat(pending()).isZero();
+        assertThat(count("observation_delivery")).isZero();
     }
 
     @Test
@@ -170,14 +166,14 @@ class ObservationDeliveryIntegrationTest {
     }
 
     @Test
-    void 관측_저장이_취소되면_전달_기록도_남지_않는다() {
+    void 관측_저장이_롤백되면_해당_배치의_차량_관측은_캐시에_남지_않는다() {
         // given
         var transaction = new TransactionTemplate(transactions);
 
         // when
         transaction.executeWithoutResult(status -> {
             save();
-            assertThat(count("observation_delivery")).isEqualTo(1);
+            assertThat(count("observation_delivery")).isZero();
             status.setRollbackOnly();
         });
 
@@ -188,7 +184,7 @@ class ObservationDeliveryIntegrationTest {
     }
 
     @Test
-    void 관측_저장이_커밋되기_전에는_메모리에_전달하지_않는다() {
+    void 관측_저장_트랜잭션이_커밋되기_전에는_수집한_차량_관측을_캐시에_넣지_않는다() {
         // given
         var transaction = new TransactionTemplate(transactions);
 
@@ -209,11 +205,11 @@ class ObservationDeliveryIntegrationTest {
         assertThat(delivered.rows().getFirst().passedStopOrder()).isEqualTo(
             jdbc.sql("SELECT passed_stop_order FROM vehicle_observation").query(Integer.class).single());
         assertThat(delivered.rows().getFirst().remainingSeats()).isEqualTo(20);
-        assertThat(pending()).isEqualTo(1);
+        assertThat(count("observation_delivery")).isZero();
     }
 
     @Test
-    void 전달에_실패해도_저장한_관측과_미전달_기록은_남는다() {
+    void 캐시_반영에_실패해도_커밋된_관측과_수집_성공_기록은_유지된다() {
         // given
         receiver.fail = true;
 
@@ -222,8 +218,10 @@ class ObservationDeliveryIntegrationTest {
 
         // then
         assertThat(count("vehicle_observation")).isEqualTo(1);
-        assertThat(pending()).isEqualTo(1);
+        assertThat(count("observation_delivery")).isZero();
         assertThat(receiver.deliveries).isEmpty();
+        assertThat(jdbc.sql("SELECT outcome FROM observation_batch WHERE id = ?")
+            .param(batch).query(String.class).single()).isEqualTo("SUCCESS_ROWS");
     }
 
     @Test
@@ -239,7 +237,6 @@ class ObservationDeliveryIntegrationTest {
         // then
         assertThat(reused).isEqualTo(batch);
         assertThat(receiver.deliveries).hasSize(3);
-        assertThat(receiver.deliveries.stream().map(Delivery::id).distinct().count()).isEqualTo(3);
         assertThat(receiver.deliveries.stream().map(item -> item.batch().attempt()).toList())
             .containsExactly(1, 2, 2);
         assertThat(receiver.deliveries.stream().map(item -> item.batch().kind()).toList())
@@ -250,80 +247,37 @@ class ObservationDeliveryIntegrationTest {
     }
 
     @Test
-    void 이전_전달을_완료해도_새_전달은_미완료로_남는다() {
+    void 관측을_수집하고_캐시에_반영할_때_관측_전달_기록을_DB에_쓰지_않는다() {
         // given
-        receiver.accept = false;
-        save();
-        long previous = receiver.deliveries.getFirst().id();
-        ledger.reserve(plan, AT.plusSeconds(1));
-        ledger.markDispatching(batch, AT, AT.plusSeconds(1), "a");
-        save();
-
-        // when
-        store.acknowledge(previous);
-
-        // then
-        assertThat(pending()).isEqualTo(2);
-        assertThat(jdbc.sql("""
-            SELECT id FROM observation_delivery WHERE acknowledged_at IS NOT NULL
-            """).query(Long.class).list()).containsExactly(previous);
-    }
-
-    @Test
-    void 완료_기록_반영에_실패해도_관측과_미전달_기록은_남는다() {
-        // given
-        failDeliverySql("UPDATE");
-        save();
-
-        // when
-        assertThatThrownBy(() -> store.acknowledge(receiver.deliveries.getFirst().id()))
-            .isInstanceOf(DataAccessException.class);
-
-        // then
-        assertThat(count("vehicle_observation")).isEqualTo(1);
-        assertThat(receiver.deliveries).hasSize(1);
-        assertThat(pending()).isEqualTo(1);
-    }
-
-    @Test
-    void 메모리에_전달한_기록은_수집이_끝난_뒤_별도로_완료한다() {
-        // given
-        save();
-        assertThat(pending()).isEqualTo(1);
-
-        // when
-        store.acknowledge(receiver.deliveries.getFirst().id());
-
-        // then
-        assertThat(pending()).isZero();
-        assertThat(count("vehicle_observation")).isEqualTo(1);
-    }
-
-    @Test
-    void 전달_기록을_저장하지_못하면_관측도_저장하지_않는다() {
-        // given
-        failDeliverySql("INSERT");
-
-        // when
-        assertThatThrownBy(this::save).isInstanceOf(DataAccessException.class);
-
-        // then
-        assertThat(count("vehicle_observation")).isZero();
-        assertThat(count("observation_delivery")).isZero();
-        assertThat(receiver.deliveries).isEmpty();
-    }
-
-    private void failDeliverySql(String operation) {
+        var source = spy(new JdbcRecentObservationBatches(jdbc));
+        var memory = memory(source);
+        receiver.onReceive = memory::receive;
+        long before = count("observation_delivery");
         jdbc.sql("""
             CREATE FUNCTION delivery_test_failure() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
-                RAISE EXCEPTION '전달 기록 실패 검증';
+                RAISE EXCEPTION '관측 전달 테이블에 쓰기가 발생했다';
             END;
             $$
             """).update();
-        jdbc.sql("CREATE TRIGGER delivery_test_failure BEFORE " + operation
-            + " ON observation_delivery FOR EACH ROW EXECUTE FUNCTION delivery_test_failure()")
-            .update();
+        jdbc.sql("""
+            CREATE TRIGGER delivery_test_failure BEFORE INSERT OR UPDATE OR DELETE
+            ON observation_delivery FOR EACH ROW EXECUTE FUNCTION delivery_test_failure()
+            """).update();
+
+        // when
+        save();
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            long revision = quality.lock(version);
+            String vehicle = receiver.deliveries.getFirst().batch().rows().getFirst().vehicleId();
+            memory.begin(AT.plusSeconds(2).toInstant())
+                .read(arrivals, version, revision, false, vehicle, AT.toInstant(), 100);
+        });
+
+        // then
+        assertThat(count("observation_delivery")).isEqualTo(before);
+        assertThat(count("vehicle_observation")).isEqualTo(1);
+        verify(source, never()).restore(anyLong(), anyList(), anyInt());
     }
 
     private void save() {
@@ -336,11 +290,6 @@ class ObservationDeliveryIntegrationTest {
 
     private int count(String table) {
         return jdbc.sql("SELECT count(*) FROM " + table).query(Integer.class).single();
-    }
-
-    private int pending() {
-        return jdbc.sql("SELECT count(*) FROM observation_delivery WHERE acknowledged_at IS NULL")
-            .query(Integer.class).single();
     }
 
     record Delivery(long id, ObservationDeliveryBatch batch) { }

@@ -27,7 +27,7 @@ class ObservationDeliveryServiceTest {
     void 커밋된_수집_원본이_있으면_관측_본문을_다시_조회하지_않는다() {
         // given
         memory.receive(1, batch(1, 1, 10));
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
 
         // when
         var round = memory.begin(NOW);
@@ -41,10 +41,10 @@ class ObservationDeliveryServiceTest {
     }
 
     @Test
-    void 이전_수집의_늦은_전달은_새_수집_결과를_덮어쓰지_않는다() {
+    void 같은_수집_배치를_재시도해_관측이_교체되면_이전_시도의_캐시_관측을_정산에_사용하지_않는다() {
         // given
-        memory.receive(2, batch(1, 2, 20));
-        headers(header(1, 2, 2));
+        memory.receive(1, batch(1, 2, 20));
+        headers(header(1, 2));
 
         // when
         memory.receive(1, batch(1, 1, 10));
@@ -55,9 +55,9 @@ class ObservationDeliveryServiceTest {
     }
 
     @Test
-    void 메모리_전달보다_정산이_먼저_시작하면_DB에서_복원한다() {
+    void 정산에_필요한_관측이_캐시에_빠져_있으면_DB에서_조회한다() {
         // given
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
         restoring(1, candidate(1, 10));
 
         // when
@@ -70,9 +70,9 @@ class ObservationDeliveryServiceTest {
     }
 
     @Test
-    void 전달_완료_기록이_있어도_재시작으로_빈_메모리는_복원한다() {
+    void 재시작으로_캐시가_비면_DB에_저장된_관측을_읽는다() {
         // given
-        headers(new RecentObservationBatches.Header(1, 1, NOW, 1, 1, 1, 5, false));
+        headers(new RecentObservationBatches.Header(1, 1, NOW, 1, 5));
         restoring(1, candidate(1, 10));
 
         // when
@@ -80,14 +80,13 @@ class ObservationDeliveryServiceTest {
 
         // then
         verify(source).restore(1, List.of(1L), 11);
-        verify(source).acknowledge(List.of());
     }
 
     @Test
-    void 품질검사_후에는_이전_원본_대신_DB의_판정으로_복원한다() {
+    void 노선의_품질_버전이_바뀌면_이전_품질_버전으로_보관한_관측을_그대로_정산에_사용하지_않는다() {
         // given
         memory.receive(1, batch(1, 1, 10));
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
         ArrivalCandidate excluded = new ArrivalCandidate(1, candidate(1, 10).vehicle(), null, true);
         restoring(1, excluded);
 
@@ -100,9 +99,28 @@ class ObservationDeliveryServiceTest {
     }
 
     @Test
+    void 품질_변경을_반영한_캐시를_이전_품질_버전의_수집_콜백이_덮어쓰지_않는다() {
+        // given
+        headers(header(1, 1));
+        ArrivalCandidate excluded = new ArrivalCandidate(1, candidate(1, 10).vehicle(), null, true);
+        restoring(1, excluded);
+        assertThat(read(memory.begin(NOW), 2)).containsExactly(excluded);
+
+        // when
+        boolean accepted = memory.receive(1, batch(1, 1, 10));
+        var result = read(memory.begin(NOW), 2);
+
+        // then
+        assertThat(accepted).isFalse();
+        assertThat(result).containsExactly(excluded);
+        verify(source, times(1)).restore(anyLong(), anyList(), anyInt());
+        verifyNoInteractions(fallback);
+    }
+
+    @Test
     void 같은_전달을_반복해도_관측이_늘어나지_않는다() {
         // given
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
         memory.receive(1, batch(1, 1, 10));
 
         // when
@@ -116,7 +134,7 @@ class ObservationDeliveryServiceTest {
     void 배치가_비워지면_늦은_콜백이_와도_옛_관측을_사용하지_않는다() {
         // given
         memory.receive(1, batch(1, 1, 10));
-        memory.receive(2, new ObservationDeliveryBatch(1, 1, 2,
+        memory.receive(1, new ObservationDeliveryBatch(1, 1, 2,
             ObservationDeliveryBatch.Kind.CLEARED, null, List.of()));
         headers();
 
@@ -131,7 +149,7 @@ class ObservationDeliveryServiceTest {
     void 보관_한도를_넘는_범위는_일부만_반환하지_않고_DB에서_읽는다() {
         // given
         var small = memory(1);
-        headers(header(1, 1, 1), header(2, 1, 2));
+        headers(header(1, 1), header(2, 1));
         when(fallback.findAfter(1, "bus", NOW.minusSeconds(60), 100)).thenReturn(List.of(candidate(2, 20)));
 
         // when
@@ -145,7 +163,7 @@ class ObservationDeliveryServiceTest {
     @Test
     void 복원_도중_배치가_바뀌면_불완전한_결과를_사용하지_않는다() {
         // given
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
         when(source.restore(anyLong(), anyList(), anyInt())).thenReturn(List.of());
 
         // when
@@ -153,19 +171,18 @@ class ObservationDeliveryServiceTest {
 
         // then
         verify(fallback).findAfter(1, "bus", NOW.minusSeconds(60), 100);
-        verify(source).acknowledge(List.of());
     }
 
     @Test
     void 먼저_발급되고_늦게_커밋된_배치도_다음_회차에_포함한다() {
         // given
-        memory.receive(2, batch(2, 1, 20));
-        headers(header(2, 1, 2));
+        memory.receive(1, batch(2, 1, 20));
+        headers(header(2, 1));
         read(memory.begin(NOW), 1);
 
         // when
         memory.receive(1, batch(1, 1, 10));
-        headers(header(2, 1, 2), header(1, 1, 1));
+        headers(header(2, 1), header(1, 1));
 
         // then
         assertThat(read(memory.begin(NOW), 1)).extracting(ArrivalCandidate::observationId).containsExactly(1L, 2L);
@@ -175,12 +192,12 @@ class ObservationDeliveryServiceTest {
     void 회차_도중_새_관측이_전달돼도_확인한_목록만_사용한다() {
         // given
         memory.receive(1, batch(1, 1, 10));
-        headers(header(1, 1, 1));
+        headers(header(1, 1));
         var round = memory.begin(NOW);
         read(round, 1);
 
         // when
-        memory.receive(2, batch(2, 1, 20));
+        memory.receive(1, batch(2, 1, 20));
 
         // then
         assertThat(read(round, 1)).extracting(ArrivalCandidate::observationId).containsExactly(1L);
@@ -213,8 +230,8 @@ class ObservationDeliveryServiceTest {
         when(source.headers(anyLong(), any(), anyInt())).thenReturn(List.of(headers));
     }
 
-    private RecentObservationBatches.Header header(long batch, int attempt, long delivery) {
-        return new RecentObservationBatches.Header(batch, attempt, NOW, 1, delivery, 1, 5, true);
+    private RecentObservationBatches.Header header(long batch, int attempt) {
+        return new RecentObservationBatches.Header(batch, attempt, NOW, 1, 5);
     }
 
     private ObservationDeliveryBatch batch(long id, int attempt, int seats) {

@@ -41,17 +41,20 @@ public class ObservationDeliveryService implements ObservationDeliveryReceiver {
 
     /** afterCommit에서 DB 연결을 사용하지 않는다. 초과분은 다음 조회에서 DB로 복원한다. */
     @Override
-    public synchronized boolean receive(long deliveryId, ObservationDeliveryBatch batch) {
+    public synchronized boolean receive(long qualityRevision, ObservationDeliveryBatch batch) {
         prune(clock.instant().minus(retention));
         Key key = new Key(batch.routeVersionId(), batch.batchId());
         Entry previous = batches.get(key);
-        if (previous != null && previous.deliveryId() >= deliveryId) return true;
+        if (previous != null && previous.attempt() > batch.attempt()) return false;
+        if (previous != null && previous.attempt() == batch.attempt()
+            && previous.revision() > qualityRevision
+            && batch.kind() == ObservationDeliveryBatch.Kind.STORED) return false;
         if (batch.kind() == ObservationDeliveryBatch.Kind.CLEARED) {
             remove(key);
             return true;
         }
         if (!batch.observedAt().isAfter(clock.instant().minus(retention))) return false;
-        return put(key, new Entry(deliveryId, batch.attempt(), batch.observedAt(), -1, batch, List.of()));
+        return put(key, new Entry(batch.attempt(), batch.observedAt(), qualityRevision, batch, List.of()));
     }
 
     public synchronized Round begin(Instant now) {
@@ -93,14 +96,13 @@ public class ObservationDeliveryService implements ObservationDeliveryReceiver {
         List<RecentObservationBatches.Header> missing = new ArrayList<>();
         for (var header : headers) {
             Entry entry = batches.get(new Key(version, header.batchId()));
-            if (entry == null || entry.deliveryId() != header.deliveryId()
-                || entry.attempt() != header.attempt()
+            if (entry == null || entry.attempt() != header.attempt()
                 || (entry.raw() == null && !entry.observedAt().equals(header.observedAt()))
                 || entry.size() != header.rows()) {
                 missing.add(header);
             } else if (entry.raw() == null && entry.revision() == revision) {
                 ready.put(header.batchId(), entry.candidates());
-            } else if (entry.raw() != null && header.deliveryQualityRevision() == revision) {
+            } else if (entry.raw() != null && entry.revision() == revision) {
                 // Java 나노초와 PostgreSQL 마이크로초의 차이는 저장된 배치 시각으로 통일한다.
                 ready.put(header.batchId(), CollectedArrivalCandidates.from(entry.raw(), header.turnSequence(), header.observedAt()));
             } else {
@@ -127,16 +129,12 @@ public class ObservationDeliveryService implements ObservationDeliveryReceiver {
             }
         }
 
-        List<Long> acknowledged = new ArrayList<>();
         for (var header : headers) {
             List<ArrivalCandidate> candidates = ready.get(header.batchId());
             if (candidates == null) continue;
-            put(new Key(version, header.batchId()), new Entry(header.deliveryId(), header.attempt(),
+            put(new Key(version, header.batchId()), new Entry(header.attempt(),
                 header.observedAt(), revision, null, candidates));
-            if (header.pending()) acknowledged.add(header.deliveryId());
         }
-        // 정산 트랜잭션 안에서 처리한다. 롤백되면 재전달해도 같은 배치를 중복 보관하지 않는다.
-        source.acknowledge(acknowledged);
         if (ready.size() != headers.size()) return null;
         List<ArrivalCandidate> result = ready.values().stream().flatMap(List::stream)
             .sorted(Comparator.comparing(ArrivalCandidate::observedAt).thenComparingLong(ArrivalCandidate::observationId))
@@ -146,7 +144,7 @@ public class ObservationDeliveryService implements ObservationDeliveryReceiver {
     }
 
     private record Key(long version, long batch) { }
-    private record Entry(long deliveryId, int attempt, Instant observedAt, long revision,
+    private record Entry(int attempt, Instant observedAt, long revision,
                          ObservationDeliveryBatch raw, List<ArrivalCandidate> candidates) {
         int size() { return raw == null ? candidates.size() : raw.rows().size(); }
         int weight() { return Math.max(1, size()); }

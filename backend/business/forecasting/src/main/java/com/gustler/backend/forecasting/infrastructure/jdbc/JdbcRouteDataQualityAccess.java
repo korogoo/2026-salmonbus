@@ -10,6 +10,16 @@ public class JdbcRouteDataQualityAccess implements RouteDataQualityAccess {
     public JdbcRouteDataQualityAccess(final JdbcClient jdbc) { this.jdbc = jdbc; }
 
     @Override
+    public long current(final long version) {
+        return jdbc.sql("""
+            SELECT COALESCE(q.quality_revision, 1)
+            FROM route_version v
+            LEFT JOIN route_data_quality q ON q.route_id = v.route_id
+            WHERE v.id = ?
+            """).param(version).query(Long.class).single();
+    }
+
+    @Override
     public long lock(final long version) {
         final long routeId = jdbc.sql("SELECT route_id FROM route_version WHERE id = ?")
             .param(version).query(Long.class).single();

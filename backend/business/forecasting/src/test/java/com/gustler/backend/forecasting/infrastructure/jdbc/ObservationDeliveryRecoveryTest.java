@@ -29,7 +29,6 @@ class ObservationDeliveryRecoveryTest {
     @Autowired JdbcClient jdbc;
     @Autowired JdbcArrivalObservationQuery query;
     @Autowired JdbcRecentObservationBatches batches;
-    @Autowired JdbcObservationDeliveryStore deliveries;
     @Autowired RouteDataQualityAccess quality;
     private long version;
     private long batch;
@@ -69,10 +68,9 @@ class ObservationDeliveryRecoveryTest {
         add(1, 2, 10);
         add(6, 2, 71);
         add(7, 2, null);
-        long id = delivered();
         JdbcRecentObservationBatches reads = spy(new JdbcRecentObservationBatches(jdbc));
         var memory = memory(reads);
-        memory.receive(id, payload());
+        memory.receive(1, payload());
 
         // when
         var round = memory.begin(NOW);
@@ -83,15 +81,13 @@ class ObservationDeliveryRecoveryTest {
 
         // then
         verify(reads, never()).restore(anyLong(), anyList(), anyInt());
-        assertThat(jdbc.sql("SELECT acknowledged_at IS NOT NULL FROM observation_delivery WHERE id = ?")
-            .param(id).query(Boolean.class).single()).isTrue();
+        assertThat(jdbc.sql("SELECT count(*) FROM observation_delivery").query(Long.class).single()).isZero();
     }
 
     @Test
-    void 전달에_실패한_관측은_DB에서_한번_복원한_뒤_재사용한다() {
+    void 캐시에서_찾지_못한_관측을_DB에서_읽어도_캐시를_사용하지_않았을_때와_정산_결과가_같다() {
         // given
         add(2, 2, 10);
-        delivered();
         JdbcRecentObservationBatches reads = spy(new JdbcRecentObservationBatches(jdbc));
         var memory = memory(reads);
 
@@ -104,10 +100,9 @@ class ObservationDeliveryRecoveryTest {
     }
 
     @Test
-    void 재시작으로_메모리가_비면_완료된_전달도_복원한다() {
+    void 재시작으로_메모리가_비면_전달_기록_없이_DB의_관측을_읽는다() {
         // given
         add(2, 2, 10);
-        deliveries.acknowledge(delivered());
 
         // when
         var actual = read(memory(batches), 1);
@@ -120,9 +115,8 @@ class ObservationDeliveryRecoveryTest {
     void 품질검사로_제외된_편도는_늦은_원본_전달로_다시_정산하지_않는다() {
         // given
         add(2, 2, 10);
-        long id = delivered();
         var memory = memory(batches);
-        memory.receive(id, payload());
+        memory.receive(1, payload());
         assertThat(read(memory, 1).getFirst().qualityDirection()).isNotNull();
         long observation = rows.getFirst().observationId();
         ConfirmedTripFixture.include(jdbc, observation);
@@ -130,7 +124,7 @@ class ObservationDeliveryRecoveryTest {
         jdbc.sql("UPDATE route_data_quality SET quality_revision = quality_revision + 1").update();
 
         // when
-        memory.receive(id, payload());
+        memory.receive(1, payload());
         var actual = read(memory, 2);
 
         // then
@@ -142,9 +136,8 @@ class ObservationDeliveryRecoveryTest {
     void 기존_배치를_비우면_메모리의_관측도_조회하지_않는다() {
         // given
         add(2, 2, 10);
-        long id = delivered();
         var memory = memory(batches);
-        memory.receive(id, payload());
+        memory.receive(1, payload());
         read(memory, 1);
 
         // when
@@ -154,21 +147,6 @@ class ObservationDeliveryRecoveryTest {
 
         // then
         assertThat(read(memory, 1)).isEqualTo(expected()).isEmpty();
-    }
-
-    @Test
-    void 예전_전달을_완료해도_새_수집_시도의_전달은_남는다() {
-        // given
-        add(2, 2, 10);
-        long previous = delivered();
-        long next = deliveries.append(batch, version, 2, "STORED");
-
-        // when
-        batches.acknowledge(List.of(previous));
-
-        // then
-        assertThat(jdbc.sql("SELECT acknowledged_at IS NULL FROM observation_delivery WHERE id = ?")
-            .param(next).query(Boolean.class).single()).isTrue();
     }
 
     private void add(int stop, int state, Integer seats) {
@@ -186,8 +164,6 @@ class ObservationDeliveryRecoveryTest {
         jdbc.sql("UPDATE observation_batch SET stored_rows = :rows WHERE id = :id")
             .param("rows", rows.size()).param("id", batch).update();
     }
-
-    private long delivered() { return deliveries.append(batch, version, 1, "STORED"); }
 
     private ObservationDeliveryBatch payload() {
         return new ObservationDeliveryBatch(batch, version, 1, ObservationDeliveryBatch.Kind.STORED, NOW, rows);
