@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -32,18 +33,16 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 수집 배치의 예보 발행과 저장 결과를 함께 검증한다.
  *
  * <p>테스트용 {@link SeatForecastModel}이 일정한 값을 반환하게 해 발행 결과를 확인한다.
  *
- * <p>업무 모듈의 테스트 구성으로 실행한다. {@link ForecastBatchWriter}는 테스트 트랜잭션에
- * 참여하므로 테스트가 끝나면 저장 결과도 함께 롤백한다.
+ * <p>예보 계산은 트랜잭션 밖에서, 저장은 실제 저장 빈의 트랜잭션에서 실행한다.
+ * 테스트가 끝나면 일회용 PostgreSQL의 노선·모델 및 연결된 테스트 자료를 정리한다.
  */
 @ForecastingIntegrationTest
-@Transactional
 @Import(PublishPendingForecastsIntegrationTest.FixedSeatForecastModel.class)
 class PublishPendingForecastsIntegrationTest {
 
@@ -118,6 +117,7 @@ class PublishPendingForecastsIntegrationTest {
     @BeforeEach
     void 노선_판본과_정류장과_도는_배포와_관측을_먼저_저장한다() {
         seatForecastModel.forgetReceivedInputs();
+        when(routeDataQuality.current(anyLong())).thenReturn(1L);
         when(routeDataQuality.lock(anyLong())).thenReturn(1L);
         final long routeId = insertRoute();
         jdbcClient.sql("INSERT INTO route_data_quality(route_id, quality_revision) VALUES (?, 1)")
@@ -130,6 +130,11 @@ class PublishPendingForecastsIntegrationTest {
         observationBatchId = insertObservationBatch("11:14", RESPONSE_RECEIVED_AT, OUTCOME_WITH_ROWS);
         vehicleObservationId = insertObservationWithKnownSeats(
             VEHICLE_204000206, FIRST_SOURCE_ROW_NUMBER, PASSED_STOP_ORDER);
+    }
+
+    @AfterEach
+    void 일회용_DB에_커밋한_예보와_입력_자료를_정리한다() {
+        jdbcClient.sql("TRUNCATE route, model_deployment CASCADE").update();
     }
 
     @Test

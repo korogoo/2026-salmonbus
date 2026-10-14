@@ -90,12 +90,14 @@ class ForecastBatchWriterTest {
         mock(RouteDataQualityAccess.class);
     private final SameDayFullOutcomesService outcomes = mock(SameDayFullOutcomesService.class);
     private final CollectionInputs inputs = mock(CollectionInputs.class);
-    private final ForecastBatchWriter writer = new ForecastBatchWriter(trajectories, forecasts, evaluations, outcomes,
-        statistics, CLOCK, quality, inputs);
+    private final ForecastBatchWriter writer = new ForecastBatchWriter(trajectories,
+        new ForecastBatchCommitter(forecasts, evaluations, quality, inputs), outcomes,
+        statistics, CLOCK, quality);
     private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
     @BeforeEach
     void setUp() {
+        when(quality.current(anyLong())).thenReturn(1L);
         when(quality.lock(anyLong())).thenReturn(1L);
         when(statistics.readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW)).thenReturn(STATISTICS);
         when(outcomes.outcomesFor(1, 7L, NOW)).thenReturn(Map.of());
@@ -110,7 +112,7 @@ class ForecastBatchWriterTest {
     }
 
     @Test
-    void 예보_생성은_편도_조사_없이_노선_잠금_후_통계를_조회한다() {
+    void 예보_계산에_쓸_품질_버전과_통계를_읽은_뒤_저장_직전에_품질_행을_잠근다() {
         // given
         var snapshot = runtime(input -> RESULT);
 
@@ -119,8 +121,10 @@ class ForecastBatchWriterTest {
 
         // then
         var order = inOrder(quality, statistics, forecasts);
-        order.verify(quality).lock(BATCH.routeVersionId());
+        order.verify(quality).current(BATCH.routeVersionId());
         order.verify(statistics).readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW);
+        order.verify(quality).lock(BATCH.routeVersionId());
+        order.verify(forecasts).save(any());
     }
 
     @Test
