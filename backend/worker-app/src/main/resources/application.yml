@@ -67,6 +67,11 @@ model:
 # 예보 배치와 라벨 회수 배치. 계수 번들이 없어 도는 배포가 하나도 없으므로 꺼둔 채로 낸다.
 # 켜는 것은 배포 행이 선 뒤다. 수집(collection.enabled)과 같은 방식으로 끈다.
 forecast:
+  quality-memory:
+    # 단일 worker 전용. 수동 DB 품질 변경 또는 다중 worker 실행 시 끈다.
+    enabled: ${FORECAST_QUALITY_MEMORY_ENABLED:false}
+    # 관측 수가 아니라 보관할 노선 버전 수다. 초과분은 필요할 때 다시 읽는다.
+    max-routes: ${FORECAST_QUALITY_MEMORY_MAX_ROUTES:100}
   evaluation:
     memory-limit: ${FORECAST_EVALUATION_MEMORY_LIMIT:60000}
     recovery-page-limit: ${FORECAST_EVALUATION_RECOVERY_PAGE_LIMIT:3}

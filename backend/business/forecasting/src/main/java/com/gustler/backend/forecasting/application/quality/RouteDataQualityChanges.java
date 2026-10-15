@@ -7,6 +7,10 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class RouteDataQualityChanges {
+    private WorkerQualityTransactions memory;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void useQualityMemory(WorkerQualityTransactions memory) { this.memory = memory; }
     private final RouteDataQualityRepository qualities;
     private final DemandStatisticsRebuildTrigger statistics;
 
@@ -28,6 +32,7 @@ public class RouteDataQualityChanges {
     }
 
     private void changeEligibility(final long version) {
+        if (memory != null) memory.changing();
         final RouteDataQuality quality = qualities.findForUpdate(version);
         quality.changeEligibility();
         qualities.save(quality);

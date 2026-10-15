@@ -17,6 +17,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TripQualityMaintenanceService implements PreviewTripQuality, ProcessTripQualityChunk, GetTripQualityStatus {
+    private WorkerQualityTransactions memory;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void useQualityMemory(WorkerQualityTransactions memory) { this.memory = memory; }
     private final TripQualityMaintenanceStore maintenance;
     private final TripQualityInvestigationService investigations;
     private final RouteDataQualityAccess quality;
@@ -44,6 +48,7 @@ public class TripQualityMaintenanceService implements PreviewTripQuality, Proces
     @Transactional
     public TripQualityChunkResult applyChunk(final long version, final Instant until, final int limit) {
         if (limit < 1 || limit > 100) { throw new IllegalArgumentException("한 번에 1~100개 관측 묶음만 처리할 수 있다"); }
+        if (memory != null) memory.changing();
         store.applyTimeBudget();
         quality.lock(version);
         final long seconds = store.readRoute(version).maximumGap().toSeconds();
