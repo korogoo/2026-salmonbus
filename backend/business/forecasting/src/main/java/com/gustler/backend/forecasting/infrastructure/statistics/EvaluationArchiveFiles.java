@@ -62,7 +62,8 @@ final class EvaluationArchiveFiles {
                 || node.get("vehicle_observation_id").asLong() != row.key().observationId()
                 || node.get("target_stop_order").asInt() != row.key().stopOrder()
                 || node.get("route_version_id").asLong() != batch.routeVersionId()
-                || !Set.of("SETTLED", "SKIPPED", "LOST", "SEAT_MISSING").contains(node.get("scoring_state").asString())
+                || !Set.of("SETTLED", "SKIPPED", "LOST", "SEAT_MISSING", "QUALITY_EXCLUDED")
+                    .contains(node.get("scoring_state").asString())
                 || !node.get("scored_at").isString()) {
                 throw new IllegalArgumentException("원본 열·키·노선·완료 상태가 예약과 다르다");
             }

@@ -203,6 +203,34 @@ class EvaluationArchiveObjectStoreTest {
             .isEqualTo(settled + "\n");
     }
 
+    @Test
+    void 품질_검사로_제외된_정산도_파일에_보관하고_같은_내용으로_다시_읽는다() throws Exception {
+        // given
+        String excluded = ORIGINAL.replace("\"LOST\"", "\"QUALITY_EXCLUDED\"");
+        var storage = store(1024 * 1024);
+
+        // when
+        var saved = storage.storeAndVerify(batch, List.of(row(excluded)));
+        var verified = new EvaluationArchiveBatch(batch.id(), batch.routeVersionId(), batch.qualityRevision(),
+            batch.leaseToken(), batch.leaseUntil(), State.VERIFIED, batch.rowCount(), saved.manifestSha256());
+        var restored = storage.readOriginal(verified);
+
+        // then
+        assertThat(restored).containsExactly(row(excluded));
+        assertDirectoryEmpty();
+    }
+
+    @Test
+    void 아직_정산하지_않은_대기는_완료_이력으로_보관하지_않는다() {
+        // given
+        String pending = ORIGINAL.replace("\"LOST\"", "\"PENDING\"");
+
+        // when & then
+        assertThatThrownBy(() -> store(1024 * 1024).storeAndVerify(batch, List.of(row(pending))))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThat(objects.actions).isEmpty();
+    }
+
     private EvaluationArchiveObjectStore store(long maxBytes) {
         return new EvaluationArchiveObjectStore(directory, maxBytes, objects::run);
     }

@@ -139,6 +139,33 @@ class ArchivedDemandStatisticsRebuildTest {
     }
 
     @Test
+    void 품질_검사로_제외된_정산은_이관_후_재집계해도_통계에_포함하지_않는다() {
+        // given
+        settle(source, 5);
+        jdbc.sql("""
+            UPDATE forecast_evaluation_result SET scoring_state='QUALITY_EXCLUDED',
+                arrival_observation_id=NULL,seats_on_arrival=NULL,arrived_at=NULL,
+                arrival_route_version_id=NULL,arrival_vehicle_id=NULL,arrival_stop_order=NULL,
+                arrival_running_state=NULL,arrival_remaining_seats=NULL,arrival_seat_unknown_reason=NULL,
+                arrival_vehicle_trip_key=NULL,arrival_quality_direction=NULL
+            WHERE vehicle_observation_id=?
+            """)
+            .param(source).update();
+        finish();
+        assertThat(cells()).isEmpty();
+        var reads = answer(archiveAndDelete(source));
+        request();
+
+        // when
+        finish();
+
+        // then
+        assertThat(reads.get()).isOne();
+        assertThat(cells()).isEmpty();
+        assertThat(liveCount(source)).isZero();
+    }
+
+    @Test
     void DB에_남은_정산과_이관된_정산을_각각_한번씩_집계한다() {
         // given
         settle(source, 5);
