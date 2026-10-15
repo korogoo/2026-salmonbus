@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SAL-175 최초 전환 전, 자동 배포와 정비 작업을 중지한 운영자가 실행한다.
 # 1. 복구 가능한 백업을 확인한다. 이 도구는 백업을 생성하거나 검증하지 않는다.
-# 2. 새 revision에서 sudo bash scripts/evaluation-work-transition.sh prepare <백업 식별자> <V36 패키지 폴더>
+# 2. 새 revision에서 sudo bash scripts/evaluation-work-transition.sh prepare <백업 식별자> <V38 패키지 폴더>
 #    패키지 폴더에는 검증한 api/ 및 worker/ revision을 둔다. 기존 운영 V31 JAR로는 복귀하지 않는다.
 # 3. API를 먼저 배포하고 성공을 확인한 다음 worker를 배포한다.
 # prepare 실패 시에도 worker를 자동 재시작하지 않는다. 원인을 확인하고 prepare를 다시 실행한다.
-# V37 적용 후 실패: writer를 중지하고 sql/rollback-observation-evaluation-work.sql 실행,
-# 확인한 V36 revision 설치 후 sudo bash /etc/salmonbus/evaluation-work-transition.sh resume-legacy
+# V39 적용 후 실패: writer를 중지하고 sql/rollback-observation-evaluation-work.sql 실행,
+# 확인한 V38 revision 설치 후 sudo bash /etc/salmonbus/evaluation-work-transition.sh resume-legacy
 # resume-legacy는 차단만 해제한다. 서비스 시작은 운영자가 명시적으로 실행한다.
 # 다른 호스트의 worker와 정비 작업도 전환 동안 중지 상태를 유지해야 한다.
 set -euo pipefail
@@ -86,10 +86,10 @@ transition_check() {
   schema="$(transition_schema "$component")" || { transition_error 'DB 상태를 확인할 수 없어 배포·기동을 중단합니다'; return 1; }
   case "$schema" in
     work)
-      [ "$version" -ge 37 ] || { transition_error '새 DB 구조에서 구 JAR를 시작할 수 없습니다. DB 복원이 먼저입니다'; return 1; }
+      [ "$version" -ge 39 ] || { transition_error '새 DB 구조에서 구 JAR를 시작할 수 없습니다. DB 복원이 먼저입니다'; return 1; }
       ;;
     pending)
-      if [ "$version" -ge 37 ]; then
+      if [ "$version" -ge 39 ]; then
         transition_approved "$component" && transition_worker_stopped && transition_no_writers "$component" \
           || { transition_error 'worker·정비 작업 중지와 prepare 완료를 확인할 수 없습니다'; return 1; }
         if [ "$phase" = runtime ] && [ "$component" = worker ]; then
@@ -112,8 +112,8 @@ transition_check() {
 transition_check_deployment() {
   local version
   version="$(transition_version "$2")" || return 1
-  # V37 전환과 무관한 기존 배포의 진단·실패 정책은 유지한다.
-  if [ "$version" -lt 37 ] && [ ! -f /etc/salmonbus/evaluation-work-transition.sh ]; then return 0; fi
+  # V39 전환과 무관한 기존 배포의 진단·실패 정책은 유지한다.
+  if [ "$version" -lt 39 ] && [ ! -f /etc/salmonbus/evaluation-work-transition.sh ]; then return 0; fi
   transition_check "$1" "$2" deploy
 }
 
@@ -121,7 +121,7 @@ transition_recovery_package() {
   local directory="$1" component manifest expected actual
   for component in api worker; do
     manifest="$directory/$component/release-manifest.txt"
-    [ "$(transition_version "$manifest")" = 36 ] || return 1
+    [ "$(transition_version "$manifest")" = 38 ] || return 1
     [ "$(awk -F= '$1=="component" {print $2}' "$manifest")" = "$component" ] || return 1
     expected="$(awk -F= '$1=="artifactSha256" {print $2}' "$manifest")"
     [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -135,7 +135,7 @@ transition_prepare() {
   [ "$(id -u)" = 0 ] || { transition_error 'root로 실행하세요'; return 1; }
   [[ "$backup" =~ ^[a-zA-Z0-9:/_.-]{1,200}$ ]] || { transition_error '백업 식별자가 필요합니다'; return 1; }
   [ -n "$recovery" ] && transition_recovery_package "$recovery" \
-    || { transition_error '해시가 일치하는 V36 API·worker 복구 패키지가 필요합니다'; return 1; }
+    || { transition_error '해시가 일치하는 V38 API·worker 복구 패키지가 필요합니다'; return 1; }
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # api와 worker의 DB가 다르면 단일 DB 전환 절차를 실행하지 않는다.
   for component in api worker; do transition_secure_file "/etc/salmonbus/$component.env" || return 1; done
@@ -172,7 +172,7 @@ transition_resume_legacy() {
   database_version="$(transition_sql api 'SELECT max(version::integer) FROM public.flyway_schema_history WHERE success')" || return 1
   for component in api worker; do
     version="$(transition_version "/opt/salmonbus/$component/current/release-manifest.txt")" || return 1
-    [ "$version" -lt 37 ] || { transition_error '두 앱 모두 이전 배포판을 먼저 설치하세요'; return 1; }
+    [ "$version" -lt 39 ] || { transition_error '두 앱 모두 이전 배포판을 먼저 설치하세요'; return 1; }
     [ "$version" = "$database_version" ] || { transition_error '이전 JAR와 DB 스키마 번호가 다릅니다'; return 1; }
   done
   transition_sql api 'DROP TABLE IF EXISTS public.sal175_evaluation_transition' || return 1
@@ -187,6 +187,6 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       case "${2:-}" in api|worker) ;; *) exit 64 ;; esac
       transition_check "$2" "/opt/salmonbus/$2/current/release-manifest.txt" runtime ;;
     resume-legacy) transition_resume_legacy ;;
-    *) echo 'usage: evaluation-work-transition.sh prepare <backup-reference> <v36-revisions> | runtime api|worker | resume-legacy' >&2; exit 64 ;;
+    *) echo 'usage: evaluation-work-transition.sh prepare <backup-reference> <v38-revisions> | runtime api|worker | resume-legacy' >&2; exit 64 ;;
   esac
 fi

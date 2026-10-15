@@ -1,32 +1,40 @@
 import { test as base, expect } from "@playwright/test";
+import { createApiMockRouter, type ApiMockRouter } from "./api-mock-router";
 import { apiPaths, createApiData, observedAt, pollIntervalMs } from "./mock-data";
 
 type Endpoint = keyof typeof apiPaths;
 type ResponseMode = "success" | "network-error";
 
 interface MockApi {
+  route: ApiMockRouter["route"];
   data: ReturnType<typeof createApiData>;
   mode: Record<Endpoint, ResponseMode>;
   requests: Record<Endpoint, number>;
+  cacheMaxAgeSeconds: number;
 }
 
 export const test = base.extend<{ api: MockApi }>({
   serviceWorkers: "block",
   api: [
-    async ({ page }, use) => {
+    async ({ page }, useApi) => {
       // 페이지를 열기 전에 시계를 설치한다. 폴링 테스트만 명시적으로 시간을 진행시킨다.
       const start = new Date(observedAt).getTime();
       await page.clock.install({ time: start });
       await page.clock.pauseAt(start + 1_000);
+      // 실제 SDK는 별도 검증한다. 로컬 키가 있어도 자동 테스트가 외부 지도에 의존하지 않는다.
+      await page.route("https://oapi.map.naver.com/**", (route) => route.abort());
 
+      const router = createApiMockRouter(page);
       const api: MockApi = {
+        route: router.route,
         data: createApiData(),
         mode: { routes: "success", board: "success", vehicles: "success" },
         requests: { routes: 0, board: 0, vehicles: 0 },
+        cacheMaxAgeSeconds: pollIntervalMs / 1_000,
       };
       const unexpectedRequests: string[] = [];
 
-      await page.route("**/api/**", async (route) => {
+      await api.route(async (route) => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
         if (request.method() === "GET" && /^\/api\/chat\/rooms\/[^/]+$/.test(path)) {
@@ -53,15 +61,18 @@ export const test = base.extend<{ api: MockApi }>({
           headers: {
             Date: new Date(now).toUTCString(),
             Age: "0",
-            "Cache-Control": `public, max-age=${pollIntervalMs / 1_000}`,
+            "Cache-Control": `public, max-age=${api.cacheMaxAgeSeconds}`,
           },
           json: api.data[endpoint],
         });
       });
 
-      await use(api);
-      await page.unrouteAll({ behavior: "wait" });
-      expect(unexpectedRequests, "준비하지 않은 API 요청이 실제 서버로 전달되면 안 된다").toEqual([]);
+      try {
+        await useApi(api);
+      } finally {
+        await router.dispose();
+        expect(unexpectedRequests, "준비하지 않은 API 요청이 실제 서버로 전달되면 안 된다").toEqual([]);
+      }
     },
     { auto: true },
   ],

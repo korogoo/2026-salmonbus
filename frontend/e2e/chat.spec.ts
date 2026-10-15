@@ -71,7 +71,7 @@ function composer(page: Page) {
 }
 
 function boardCard(page: Page) {
-  return page.locator("main > section");
+  return page.getByRole("region", { name: "판정보드 정류장 목록", exact: true });
 }
 
 async function edges(locator: Locator) {
@@ -744,6 +744,58 @@ test.describe("1024px 화면", () => {
   });
 });
 
+test.describe("판정보드 시트 애니메이션", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: "no-preference" });
+
+  test("판정보드 시트를 조절해도 채팅 패널이 목록을 따라가고 ResizeObserver 에러가 없다", async ({ page, chat }) => {
+    chat.enabled = true;
+    await page.addInitScript(() => {
+      const errors: string[] = [];
+      Object.assign(window, { __resizeObserverErrors: errors });
+      window.addEventListener("error", (event) => {
+        if (event.message.startsWith("ResizeObserver loop")) errors.push(event.message);
+      });
+    });
+    await openReadyChat(page, chat.sockets, 0);
+    await page.clock.resume();
+
+    const boardSheet = page.getByRole("region", { name: "판정보드", exact: true });
+    const handle = page.getByRole("slider", { name: "판정보드 높이" });
+    const steps = [
+      { key: "Home", snap: "minimum" },
+      { key: "ArrowUp", snap: "half" },
+      { key: "ArrowUp", snap: "expanded" },
+      { key: "End", snap: "full" },
+      { key: "ArrowDown", snap: "expanded" },
+      { key: "ArrowDown", snap: "half" },
+      { key: "Home", snap: "minimum" },
+      { key: "End", snap: "full" },
+    ];
+    let resizedAtExpanded = false;
+    for (const { key, snap } of steps) {
+      await handle.press(key);
+      await expect(boardSheet).toHaveAttribute("data-snap", snap);
+      await boardSheet.evaluate(async (element) => {
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
+      });
+      if (snap === "expanded") {
+        const viewport = page.viewportSize();
+        if (viewport === null) throw new Error("화면 크기를 확인할 수 없습니다");
+        expect((await edges(boardSheet)).height).toBeCloseTo(viewport.height * 0.7, 0);
+        if (!resizedAtExpanded) {
+          resizedAtExpanded = true;
+          await page.setViewportSize({ width: 1440, height: 1000 });
+          await expect.poll(async () => Math.abs((await edges(boardSheet)).height - 700)).toBeLessThanOrEqual(1);
+        }
+      }
+      expect(
+        await page.evaluate(() => (window as unknown as { __resizeObserverErrors: string[] }).__resizeObserverErrors),
+      ).toEqual([]);
+      if (snap !== "minimum") await expect.poll(() => panelOffsetFromCard(page)).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 test("이름을 받기 전에 연결에 실패하면 불러오는 중 표시와 이름 준비 문구를 거둔다", async ({ page, chat }) => {
   // given
   chat.enabled = true;
@@ -840,7 +892,7 @@ for (const [routeId, displayName] of [
   ["234000051", "3500"],
 ]) {
   test(`${displayName} 노선도 서버 응답으로 채팅을 열고 메시지를 보낸다`, async ({ page, api, chat }) => {
-    await page.route("**/api/**", async (route) => {
+    await api.route(async (route) => {
       const path = new URL(route.request().url()).pathname;
       const prefix = `/api/v1/routes/${routeId}`;
       if (path === `/api/chat/rooms/${routeId}`) {

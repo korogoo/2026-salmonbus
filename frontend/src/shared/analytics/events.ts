@@ -14,12 +14,25 @@ export type FailureProperties =
       error_kind: "timeout" | "network";
     };
 
+type StopExpandedBase = {
+  route_id: string;
+  direction: Direction;
+  stop_id: string;
+  stop_sequence: number;
+  row_position: number;
+  expand_index: number;
+};
+
 export interface EventMap {
   route_selected: {
     route_id: string;
     route_status: RouteStatus;
-    list_position: number;
-    route_count: number;
+    result_position: number;
+    result_count: number;
+  };
+
+  route_search_unmatched: {
+    query: string;
   };
 
   board_viewed: {
@@ -40,4 +53,25 @@ export interface EventMap {
   board_unavailable:
     | ({ route_id: string; reason: "error" } & FailureProperties)
     | { route_id: string; reason: "outOfService"; vehicles_in_service: number };
+
+  direction_switched: {
+    route_id: string;
+    to_direction: Direction;
+  };
+
+  stop_expanded:
+    | (StopExpandedBase & {
+        stop_kind: "boarding";
+        forecast_status: "AVAILABLE";
+        level: "high" | "low" | "veryLow";
+        stops_away: number;
+        arrival_count: number;
+      })
+    | (StopExpandedBase & {
+        stop_kind: "boarding";
+        forecast_status: "UNAVAILABLE";
+        stops_away: number;
+        arrival_count: number;
+      })
+    | (StopExpandedBase & { stop_kind: "noVehicle"; arrival_count: 0 });
 }

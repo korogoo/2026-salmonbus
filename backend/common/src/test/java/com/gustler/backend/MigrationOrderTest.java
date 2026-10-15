@@ -41,7 +41,7 @@ class MigrationOrderTest {
      * 번호가 거꾸로 배정돼도 그 가정에 맞춰 다른 파일을 빼게 되고, 결국 늘 순서가 맞아서 통과한다.
      * 이름으로 고르고, 그 파일들이 정말 마지막 번호인지는 아래에서 따로 단언한다.
      *
-     * <p>이 브랜치는 선행 평가 테이블 분리 이후 파일 통계의 게시 기록을 저장한다.
+     * <p>이 브랜치는 dev의 정류장 도착정보·노선 형상 이후 저장구조 변경을 적용한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
         List.of("file_statistics_publication", "evaluation_archive_tracking", "evaluation_archive_route_lookup",

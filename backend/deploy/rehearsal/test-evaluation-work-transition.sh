@@ -5,13 +5,13 @@ set -euo pipefail
 source /deploy/scripts/evaluation-work-transition.sh
 TEST_DIRECTORY="$(mktemp -d)"
 PASS=0
-printf 'flywayMaxVersion=37\n' > "$TEST_DIRECTORY/new-manifest"
-printf 'flywayMaxVersion=36\n' > "$TEST_DIRECTORY/old-manifest"
+printf 'flywayMaxVersion=39\n' > "$TEST_DIRECTORY/new-manifest"
+printf 'flywayMaxVersion=38\n' > "$TEST_DIRECTORY/old-manifest"
 printf 'component=worker\n' > "$TEST_DIRECTORY/broken-manifest"
 for component in api worker; do
   mkdir -p "$TEST_DIRECTORY/recovery/$component/jars"
-  printf 'mock-v36-%s' "$component" > "$TEST_DIRECTORY/recovery/$component/jars/$component-app.jar"
-  printf 'component=%s\nflywayMaxVersion=36\nartifactSha256=%s\n' "$component" \
+  printf 'mock-v38-%s' "$component" > "$TEST_DIRECTORY/recovery/$component/jars/$component-app.jar"
+  printf 'component=%s\nflywayMaxVersion=38\nartifactSha256=%s\n' "$component" \
     "$(sha256sum "$TEST_DIRECTORY/recovery/$component/jars/$component-app.jar" | cut -d' ' -f1)" \
     > "$TEST_DIRECTORY/recovery/$component/release-manifest.txt"
 done
@@ -166,12 +166,12 @@ run_case 'DB를 되돌리지 않고 구 worker 기동 차단을 해제할 수 �
 '
 run_case '이전 DB와 두 JAR가 일치해야 구 worker 차단을 해제한다' '
   mkdir -p /opt/salmonbus/api/current /opt/salmonbus/worker/current
-  printf "flywayMaxVersion=36\n" > /opt/salmonbus/api/current/release-manifest.txt
-  printf "flywayMaxVersion=36\n" > /opt/salmonbus/worker/current/release-manifest.txt
+  printf "flywayMaxVersion=38\n" > /opt/salmonbus/api/current/release-manifest.txt
+  printf "flywayMaxVersion=38\n" > /opt/salmonbus/worker/current/release-manifest.txt
   transition_sql() { case "$2" in SELECT*) echo 35 ;; DROP*) : ;; *) return 1 ;; esac; }
   expect_blocked transition_resume_legacy
   test -f /etc/salmonbus/evaluation-work-hold
-  transition_sql() { case "$2" in SELECT*) echo 36 ;; DROP*) : ;; *) return 1 ;; esac; }
+  transition_sql() { case "$2" in SELECT*) echo 38 ;; DROP*) : ;; *) return 1 ;; esac; }
   transition_resume_legacy
   test ! -e /etc/salmonbus/evaluation-work-hold
   test "$RUNNING" = inactive

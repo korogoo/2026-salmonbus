@@ -207,13 +207,13 @@ class DddStorageMigrationTest {
     void 관측별_작업으로_전환해도_미완료_예보와_완료_이력은_그대로다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         String before = scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending");
         long resultFile = number("SELECT pg_relation_filenode('forecast_evaluation_result')");
         approveEvaluationTransition();
 
         // when
-        migrate("37");
+        migrate("39");
 
         // then
         assertThat(scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending")).isEqualTo(before);
@@ -227,12 +227,12 @@ class DddStorageMigrationTest {
     void 복원할_대기가_기존과_다르면_전환을_취소하고_기존_테이블을_남긴다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         execute("DELETE FROM forecast_evaluation_result");
         approveEvaluationTransition();
 
         // when
-        assertThatThrownBy(() -> migrate("37")).hasMessageContaining("기존 대기와 관측별 복원 결과가 다르다");
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("기존 대기와 관측별 복원 결과가 다르다");
 
         // then
         assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
@@ -263,9 +263,9 @@ class DddStorageMigrationTest {
     void 이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         approveEvaluationTransition();
-        migrate("37");
+        migrate("39");
         java.nio.file.Path directory = java.nio.file.Path.of("").toAbsolutePath();
         while (directory != null && !java.nio.file.Files.isRegularFile(
             directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) directory = directory.getParent();
@@ -280,7 +280,7 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
         approveEvaluationTransition();
-        migrate("37");
+        migrate("39");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
     }
@@ -289,9 +289,9 @@ class DddStorageMigrationTest {
     void 로컬_초기화는_평가와_이관_기록을_비우고_노선은_보존한다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         approveEvaluationTransition();
-        migrate("37");
+        migrate("39");
         execute("""
             INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
             VALUES('00000000-0000-0000-0000-000000000002',1,7,
@@ -332,10 +332,10 @@ class DddStorageMigrationTest {
     void 전환_승인이_없으면_기존_대기_테이블을_바꾸지_않는다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
 
         // when
-        assertThatThrownBy(() -> migrate("37")).hasMessageContaining("prepare로 전환을 승인");
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("prepare로 전환을 승인");
 
         // then
         assertPendingTablePreserved();
@@ -345,12 +345,12 @@ class DddStorageMigrationTest {
     void 전환_승인이_만료되면_기존_대기_테이블을_바꾸지_않는다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         approveEvaluationTransition();
         execute("UPDATE sal175_evaluation_transition SET expires_at=clock_timestamp()-interval '1 second'");
 
         // when
-        assertThatThrownBy(() -> migrate("37")).hasMessageContaining("prepare로 전환을 승인");
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("prepare로 전환을 승인");
 
         // then
         assertPendingTablePreserved();
@@ -360,7 +360,7 @@ class DddStorageMigrationTest {
     void 승인_후_정비_연결이_생기면_전환을_중단한다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         approveEvaluationTransition();
         try (Connection maintenance = DriverManager.getConnection(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
@@ -368,12 +368,12 @@ class DddStorageMigrationTest {
             statement.execute("SET application_name='salmonbus-historical-migration'");
 
             // when
-            assertThatThrownBy(() -> migrate("37")).hasMessageContaining("worker 또는 정비 연결이 남아 있다");
+            assertThatThrownBy(() -> migrate("39")).hasMessageContaining("worker 또는 정비 연결이 남아 있다");
 
             // then
             assertPendingTablePreserved();
         }
-        migrate("37");
+        migrate("39");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
     }
 
@@ -381,7 +381,7 @@ class DddStorageMigrationTest {
     void worker_연결이_남아_있으면_전환을_승인하지_않는다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         try (Connection worker = DriverManager.getConnection(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
              var statement = worker.createStatement()) {
@@ -408,9 +408,9 @@ class DddStorageMigrationTest {
     void worker_연결이_남아_있으면_이전_DB_구조로_되돌리지_않는다() throws Exception {
         // given
         preparePendingTransition();
-        migrate("36");
+        migrate("38");
         approveEvaluationTransition();
-        migrate("37");
+        migrate("39");
         Path directory = Path.of("").toAbsolutePath();
         while (directory != null && !Files.isRegularFile(directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) {
             directory = directory.getParent();
@@ -429,7 +429,7 @@ class DddStorageMigrationTest {
             // then
             assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
             assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("v");
-            assertThat(number("SELECT count(*) FROM flyway_schema_history WHERE version='37' AND success")).isOne();
+            assertThat(number("SELECT count(*) FROM flyway_schema_history WHERE version='39' AND success")).isOne();
         }
     }
 
