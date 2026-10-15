@@ -2,6 +2,8 @@ import { style } from "@vanilla-extract/css";
 import { vars } from "@/shared/styles/tokens.css";
 
 const moveUp = "transform 400ms cubic-bezier(0.27, 1.05, 0.47, 0.97)";
+const SAFE_AREA_TOP = "env(safe-area-inset-top, 0px)";
+const SAFE_AREA_BOTTOM = "env(safe-area-inset-bottom, 0px)";
 
 export const page = style({
   position: "relative",
@@ -9,6 +11,7 @@ export const page = style({
   maxWidth: "425px",
   minHeight: "844px",
   margin: "0 auto",
+  paddingBottom: SAFE_AREA_BOTTOM,
   overflow: "hidden",
   borderRadius: "26px",
   backgroundColor: vars.color.brand,
@@ -22,7 +25,7 @@ export const page = style({
 });
 
 export const header = style({
-  padding: "20px 20px 0",
+  padding: `calc(20px + ${SAFE_AREA_TOP}) 20px 0`,
 });
 
 export const brandLockup = style({
@@ -44,18 +47,21 @@ export const wordmark = style({
   filter: "brightness(0) invert(1)",
 });
 
-// 검색창 위 끝을 y 108(시안 B안)에 고정하고, 입력 전에는 검색창 중심이 화면 세로 가운데에 오도록 내려 둔다.
+// 검색 중에는 safe area 아래 108px에 두고, 입력 전에는 safe area 안의 세로 가운데에 둔다.
 export const searchArea = style({
   position: "absolute",
-  top: "108px",
+  top: `calc(108px + ${SAFE_AREA_TOP})`,
   right: "20px",
   left: "20px",
-  transform: "translateY(284px)",
+  transform: `translateY(calc(284px - (${SAFE_AREA_TOP} + ${SAFE_AREA_BOTTOM}) / 2))`,
   transition: moveUp,
 
   "@media": {
     "screen and (max-width: 424px)": {
-      transform: ["translateY(calc(50vh - 138px))", "translateY(calc(50dvh - 138px))"],
+      transform: [
+        `translateY(calc(50vh - 138px - (${SAFE_AREA_TOP} + ${SAFE_AREA_BOTTOM}) / 2))`,
+        `translateY(calc(50dvh - 138px - (${SAFE_AREA_TOP} + ${SAFE_AREA_BOTTOM}) / 2))`,
+      ],
     },
     "(prefers-reduced-motion: reduce)": {
       transition: "none",

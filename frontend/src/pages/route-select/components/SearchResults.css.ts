@@ -1,6 +1,9 @@
 import { keyframes, style } from "@vanilla-extract/css";
 import { vars } from "@/shared/styles/tokens.css";
 
+const SAFE_AREA_TOP = "env(safe-area-inset-top, 0px)";
+const SAFE_AREA_BOTTOM = "env(safe-area-inset-bottom, 0px)";
+
 const revealAfterDelay = keyframes({
   from: { visibility: "hidden" },
 });
@@ -35,7 +38,7 @@ export const retryButton = style({
 });
 
 export const sheet = style({
-  maxHeight: "634px",
+  maxHeight: `calc(634px - ${SAFE_AREA_TOP} - ${SAFE_AREA_BOTTOM})`,
   overflowY: "auto",
   marginTop: "8px",
   padding: "10px 0",
@@ -44,7 +47,10 @@ export const sheet = style({
 
   "@media": {
     "screen and (max-width: 424px)": {
-      maxHeight: ["calc(100vh - 210px)", "calc(100dvh - 210px)"],
+      maxHeight: [
+        `calc(100vh - 210px - ${SAFE_AREA_TOP} - ${SAFE_AREA_BOTTOM})`,
+        `calc(100dvh - 210px - ${SAFE_AREA_TOP} - ${SAFE_AREA_BOTTOM})`,
+      ],
     },
   },
 });
