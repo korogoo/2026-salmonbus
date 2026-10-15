@@ -45,20 +45,25 @@ class CommandRunnerServerTest {
     }
 
     @Test
-    void outputDrainSharesTheSameDeadlineAsTheParent() throws Exception {
+    void 부모가_종료되면_자식의_출력을_기다리느라_제한_시간을_넘기지_않는다() throws Exception {
+        // given
         final long started = System.nanoTime();
-        assertThrows(
-                IllegalArgumentException.class,
-                () ->
-                        new CommandRunner()
-                                .run(
-                                        base,
-                                        null,
-                                        Duration.ofMillis(300),
-                                        List.of(
-                                                "/bin/sh",
-                                                "-c",
-                                                "(trap '' TERM; sleep 12) & exit 0")));
+
+        // when
+        try {
+            var result = new CommandRunner().run(
+                    base, null, Duration.ofMillis(300),
+                    List.of("/bin/sh", "-c", "(trap '' TERM; sleep 12) & exit 0"));
+            // Java가 부모 종료 시 출력 스트림을 먼저 닫으면 정상 반환할 수 있다.
+            assertEquals(0, result.exit());
+            assertEquals("", result.stdout());
+            assertEquals("", result.stderr());
+        } catch (IllegalArgumentException error) {
+            // 출력 읽기가 먼저 시작됐다면 같은 제한 시간으로 중단해야 한다.
+            assertEquals("DEV_COMMAND_TIMEOUT", error.getMessage());
+        }
+
+        // then
         assertTrue(
                 Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(3)) < 0);
     }
