@@ -92,10 +92,7 @@ public class EvaluateForecastsService implements EvaluateForecasts {
                 .orElseGet(() -> qualityMemory != null || quality.anyInvestigationPending(version));
             RouteInput input = read(version, revision, snapshot, investigating);
             List<ForecastEvaluation> results = evaluate(input, observations, now);
-            if (remembered.isPresent() && !qualityMemory.stillCurrent(remembered.get())) {
-                log.info("event=settlement_skipped reason=QUALITY_MEMORY_CHANGED routeVersionId={}", version);
-                continue;
-            }
+            boolean memoryChanged = remembered.isPresent() && !qualityMemory.stillCurrent(remembered.get());
             committer.commit(input, results, (status, change) -> {
                 apply(snapshot, status, change);
                 if (status == TransactionSynchronization.STATUS_COMMITTED) {
@@ -106,7 +103,7 @@ public class EvaluateForecastsService implements EvaluateForecasts {
                             failure.getClass().getSimpleName());
                     }
                 }
-            });
+            }, memoryChanged);
         }
     }
 

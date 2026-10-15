@@ -328,16 +328,19 @@ class SameDayTransactionBoundaryTest {
     }
 
     @Test
-    void 관측을_읽은_뒤_품질이_바뀌면_정산을_저장하지_않고_다음_회차에_다시_계산한다() {
+    void 품질_버전이_바뀌어도_다시_계산한_결과가_같으면_정산과_표본을_한번만_저장한다() {
         // given
         savePending();
         ArrivalCandidate candidate = arrival();
+        var changed = new java.util.concurrent.atomic.AtomicBoolean();
         when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
-            new TransactionTemplate(context.getBean(PlatformTransactionManager.class)).executeWithoutResult(status -> {
-                context.getBean(RouteDataQualityAccess.class).lock(versionId);
-                jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
-                    .param(routeId).update();
-            });
+            if (changed.compareAndSet(false, true)) {
+                new TransactionTemplate(context.getBean(PlatformTransactionManager.class)).executeWithoutResult(status -> {
+                    context.getBean(RouteDataQualityAccess.class).lock(versionId);
+                    jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
+                        .param(routeId).update();
+                });
+            }
             return List.of(candidate);
         });
 
@@ -345,12 +348,13 @@ class SameDayTransactionBoundaryTest {
         settlement.settleArrivalLabels();
 
         // then
-        assertThat(count("forecast_evaluation_result")).isZero();
-        assertThat(count("stop_demand_pending_sample")).isZero();
-        assertThat(count("forecast_evaluation_work")).isOne();
+        assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("stop_demand_pending_sample")).isOne();
+        assertThat(count("forecast_evaluation_work")).isZero();
         when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenReturn(List.of(candidate));
         settlement.settleArrivalLabels();
         assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("stop_demand_pending_sample")).isOne();
         assertThat(count("forecast_evaluation_work")).isZero();
     }
 

@@ -80,7 +80,7 @@ class EvaluationMemoryRecoveryTest {
     }
 
     @Test
-    void 정산_계산_중_품질이_바뀌면_결과를_DB에_저장하지_않는다() {
+    void 정산_계산_중_품질이_바뀌어도_노선_전체의_완료_확인을_건너뛰지_않는다() {
         // given
         add(10);
         var state = new WorkerQualityState(version -> new WorkerQualityState.Snapshot(1, java.util.Set.of()), 20);
@@ -94,8 +94,8 @@ class EvaluationMemoryRecoveryTest {
         commitRound();
 
         // then
-        verify(writer, org.mockito.Mockito.never()).complete(any());
-        verify(work, org.mockito.Mockito.never()).releaseCompleted(anyLong(), any());
+        verify(writer).complete(List.of());
+        verify(work).releaseCompleted(1, List.of(10L));
     }
 
     @BeforeEach
@@ -220,7 +220,7 @@ class EvaluationMemoryRecoveryTest {
     }
 
     @Test
-    void 품질이_바뀌어_저장을_건너뛰면_다음_대기로_넘어가지_않는다() {
+    void 품질이_바뀌어도_다른_대기를_처리하고_남은_작업은_다음_순회에서_다시_확인한다() {
         // given
         add(10);
         add(20);
@@ -230,10 +230,12 @@ class EvaluationMemoryRecoveryTest {
         commitRound();
         when(quality.current(1)).thenReturn(2L);
         commitRound();
+        commitRound();
 
         // then
-        assertThat(evaluatedVehicles).containsExactly("bus-10", "bus-10");
-        verify(work).releaseCompleted(1, List.of(10L, 20L));
+        assertThat(evaluatedVehicles).containsExactly("bus-10", "bus-20", "bus-10");
+        verify(work, times(2)).releaseCompleted(1, List.of(10L, 20L));
+        verify(work).releaseCompleted(1, List.of(20L));
     }
 
     @Test
@@ -253,7 +255,8 @@ class EvaluationMemoryRecoveryTest {
     }
 
     private EvaluateForecastsService newService() {
-        return new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), new EvaluationRouteCommitter(work, quality, writer), arrivals,
+        return new EvaluateForecastsService(work, new EvaluationWorkPageReader(work), new EvaluationRouteCommitter(work, quality, writer,
+            new EvaluationQualityRecheck(work, arrivals, 400)), arrivals,
             quality, new ForecastPolicy(Duration.ofMinutes(5), 20, 1, 400),
             Clock.fixed(NOW, ZoneOffset.UTC), 12, 1,
             new RecentArrivalObservationCache(false, 30000, Duration.ofMinutes(30)));
