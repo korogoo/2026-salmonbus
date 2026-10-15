@@ -42,6 +42,13 @@ public final class WorkerQualityState {
         return changing == 0 && generation == read.generation();
     }
 
+    /** DB 조회가 없는 관측 캐시 전달에만 사용한다. 검사와 전달 사이의 품질 변경을 막는다. */
+    public synchronized boolean publishIfCurrent(Read read, Runnable publish) {
+        if (!stillCurrent(read)) return false;
+        publish.run();
+        return true;
+    }
+
     public synchronized Change beginChange() {
         generation++;
         changing++;
@@ -67,7 +74,7 @@ public final class WorkerQualityState {
 
     public record Read(long generation, Snapshot snapshot) { }
 
-    // 다음 커밋에서 트랜잭션 종료에 연결한다. 커밋·롤백 모두 재조회한다.
+    // 트랜잭션 종료 시 이 변경만 해제한다. 커밋·롤백 모두 다음 사용 때 재조회한다.
     public final class Change implements AutoCloseable {
         private boolean closed;
 

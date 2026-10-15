@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.gustler.backend.forecasting.api.ForecastPolicy;
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
+import com.gustler.backend.forecasting.application.quality.WorkerQualityState;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalObservationQuery;
 import com.gustler.backend.forecasting.domain.evaluation.PendingForecast;
 import java.time.Clock;
@@ -38,6 +39,64 @@ class EvaluationMemoryRecoveryTest {
     private final TreeMap<Long, PendingForecast> inputs = new TreeMap<>();
     private final List<String> evaluatedVehicles = new ArrayList<>();
     private EvaluateForecastsService service;
+
+    @Test
+    void 품질이_바뀌지_않으면_다음_정산에서_입력_준비용_품질_SELECT를_실행하지_않는다() {
+        // given
+        add(10);
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        service.useQualityMemory(new WorkerQualityState(version -> {
+            reads.incrementAndGet();
+            return new WorkerQualityState.Snapshot(1, java.util.Set.of());
+        }, 20));
+
+        // when
+        commitRound();
+        commitRound();
+
+        // then
+        assertThat(reads.get()).isEqualTo(1);
+        verify(quality, org.mockito.Mockito.never()).current(anyLong());
+        verify(quality, org.mockito.Mockito.never()).anyInvestigationPending(anyLong());
+        verify(quality, times(2)).lock(1);
+        assertThat(evaluatedVehicles).containsExactly("bus-10", "bus-10");
+    }
+
+    @Test
+    void 품질_상태를_읽지_못하면_DB에서_확인하고_대기_상세도_다시_읽는다() {
+        // given
+        add(10);
+        commitRound();
+        service.useQualityMemory(new WorkerQualityState(version -> {
+            throw new IllegalStateException("품질 조회 실패");
+        }, 20));
+
+        // when
+        commitRound();
+
+        // then
+        verify(quality, times(2)).current(1);
+        verify(work, times(2)).restore(1, List.of(10L));
+    }
+
+    @Test
+    void 정산_계산_중_품질이_바뀌면_결과를_DB에_저장하지_않는다() {
+        // given
+        add(10);
+        var state = new WorkerQualityState(version -> new WorkerQualityState.Snapshot(1, java.util.Set.of()), 20);
+        service.useQualityMemory(state);
+        when(arrivals.findAfter(anyLong(), anyString(), any(), anyInt())).thenAnswer(call -> {
+            state.beginChange().close();
+            return List.of();
+        });
+
+        // when
+        commitRound();
+
+        // then
+        verify(writer, org.mockito.Mockito.never()).complete(any());
+        verify(work, org.mockito.Mockito.never()).releaseCompleted(anyLong(), any());
+    }
 
     @BeforeEach
     void 대기가_계속_남는_정산_회차를_준비한다() {

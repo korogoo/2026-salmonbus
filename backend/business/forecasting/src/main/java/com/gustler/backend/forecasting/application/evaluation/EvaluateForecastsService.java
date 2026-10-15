@@ -4,6 +4,7 @@ import com.gustler.backend.diagnostics.WorkerOperationLog;
 import com.gustler.backend.forecasting.api.ForecastPolicy;
 import com.gustler.backend.forecasting.api.evaluation.EvaluateForecasts;
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
+import com.gustler.backend.forecasting.application.quality.WorkerQualityState;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalCandidate;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalLabel;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalLabelResolver;
@@ -18,6 +19,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +46,10 @@ public class EvaluateForecastsService implements EvaluateForecasts {
     private final int pageLimit;
     private final Map<Long, EvaluationSelection.Cursor> cursors = new LinkedHashMap<>();
     private long memoryRevision;
+    private WorkerQualityState qualityMemory;
+
+    @Autowired(required = false)
+    public void useQualityMemory(WorkerQualityState qualityMemory) { this.qualityMemory = qualityMemory; }
 
     public EvaluateForecastsService(EvaluationWorkStore work, EvaluationWorkPageReader pages,
         EvaluationRouteCommitter committer, ArrivalObservationQuery arrivals,
@@ -77,8 +84,18 @@ public class EvaluateForecastsService implements EvaluateForecasts {
         for (long version : versions) {
             Snapshot snapshot = snapshot();
             var observations = observationCache.begin(now);
-            RouteInput input = read(version, quality.current(version), snapshot);
+            Optional<WorkerQualityState.Read> remembered = rememberedQuality(version);
+            long revision = remembered.map(value -> value.snapshot().revision())
+                .orElseGet(() -> quality.current(version));
+            // 상태가 불확실하면 기존 DB 조회를 사용하고 관측·대기 캐시 재사용도 차단한다.
+            boolean investigating = remembered.map(value -> value.snapshot().anyInvestigationPending())
+                .orElseGet(() -> qualityMemory != null || quality.anyInvestigationPending(version));
+            RouteInput input = read(version, revision, snapshot, investigating);
             List<ForecastEvaluation> results = evaluate(input, observations, now);
+            if (remembered.isPresent() && !qualityMemory.stillCurrent(remembered.get())) {
+                log.info("event=settlement_skipped reason=QUALITY_MEMORY_CHANGED routeVersionId={}", version);
+                continue;
+            }
             committer.commit(input, results, (status, change) -> {
                 apply(snapshot, status, change);
                 if (status == TransactionSynchronization.STATUS_COMMITTED) {
@@ -93,8 +110,18 @@ public class EvaluateForecastsService implements EvaluateForecasts {
         }
     }
 
-    private RouteInput read(long version, long revision, Snapshot snapshot) {
-        boolean investigating = quality.anyInvestigationPending(version);
+    private Optional<WorkerQualityState.Read> rememberedQuality(long version) {
+        if (qualityMemory == null) return Optional.empty();
+        try {
+            return qualityMemory.read(version);
+        } catch (RuntimeException failure) {
+            log.warn("event=quality_memory_read_failed routeVersionId={} exceptionType={}",
+                version, failure.getClass().getSimpleName());
+            return Optional.empty();
+        }
+    }
+
+    private RouteInput read(long version, long revision, Snapshot snapshot, boolean investigating) {
         EvaluationSelection.Cursor cursor = snapshot.cursors().getOrDefault(
             version, EvaluationSelection.Cursor.START);
         if (cursor.through() == 0) {

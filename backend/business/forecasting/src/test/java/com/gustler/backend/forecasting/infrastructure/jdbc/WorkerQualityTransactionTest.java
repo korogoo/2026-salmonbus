@@ -133,6 +133,7 @@ class WorkerQualityTransactionTest {
         // given
 
         // when
+
         // then
         assertThatThrownBy(changes::changing).isInstanceOf(IllegalStateException.class);
         assertThat(state.read(version)).isPresent();

@@ -60,6 +60,7 @@ class WorkerQualityStateTest {
         state.beginChange().close();
 
         // when
+
         // then
         assertThatThrownBy(() -> state.read(1)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> state.read(1)).isInstanceOf(IllegalStateException.class);
