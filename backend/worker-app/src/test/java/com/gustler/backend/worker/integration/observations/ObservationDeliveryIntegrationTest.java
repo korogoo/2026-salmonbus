@@ -83,8 +83,6 @@ class ObservationDeliveryIntegrationTest {
 
     @AfterEach
     void 저장한_자료와_수신_상태를_정리한다() {
-        jdbc.sql("DROP TRIGGER IF EXISTS delivery_test_failure ON observation_delivery").update();
-        jdbc.sql("DROP FUNCTION IF EXISTS delivery_test_failure()").update();
         receiver.deliveries.clear();
         receiver.fail = false;
         receiver.accept = true;
@@ -117,7 +115,7 @@ class ObservationDeliveryIntegrationTest {
                 .param(batch).query(OffsetDateTime.class).single().toInstant());
         });
         verify(source, never()).restore(anyLong(), anyList(), anyInt());
-        assertThat(count("observation_delivery")).isZero();
+        assertDeliveryTableAbsent();
     }
 
     @Test
@@ -173,13 +171,13 @@ class ObservationDeliveryIntegrationTest {
         // when
         transaction.executeWithoutResult(status -> {
             save();
-            assertThat(count("observation_delivery")).isZero();
+            assertDeliveryTableAbsent();
             status.setRollbackOnly();
         });
 
         // then
         assertThat(count("vehicle_observation")).isZero();
-        assertThat(count("observation_delivery")).isZero();
+        assertDeliveryTableAbsent();
         assertThat(receiver.deliveries).isEmpty();
     }
 
@@ -205,7 +203,7 @@ class ObservationDeliveryIntegrationTest {
         assertThat(delivered.rows().getFirst().passedStopOrder()).isEqualTo(
             jdbc.sql("SELECT passed_stop_order FROM vehicle_observation").query(Integer.class).single());
         assertThat(delivered.rows().getFirst().remainingSeats()).isEqualTo(20);
-        assertThat(count("observation_delivery")).isZero();
+        assertDeliveryTableAbsent();
     }
 
     @Test
@@ -218,7 +216,7 @@ class ObservationDeliveryIntegrationTest {
 
         // then
         assertThat(count("vehicle_observation")).isEqualTo(1);
-        assertThat(count("observation_delivery")).isZero();
+        assertDeliveryTableAbsent();
         assertThat(receiver.deliveries).isEmpty();
         assertThat(jdbc.sql("SELECT outcome FROM observation_batch WHERE id = ?")
             .param(batch).query(String.class).single()).isEqualTo("SUCCESS_ROWS");
@@ -247,23 +245,12 @@ class ObservationDeliveryIntegrationTest {
     }
 
     @Test
-    void 관측을_수집하고_캐시에_반영할_때_관측_전달_기록을_DB에_쓰지_않는다() {
+    void 관측_전달_테이블_없이_수집한_관측을_캐시에_반영한다() {
         // given
         var source = spy(new JdbcRecentObservationBatches(jdbc));
         var memory = memory(source);
         receiver.onReceive = memory::receive;
-        long before = count("observation_delivery");
-        jdbc.sql("""
-            CREATE FUNCTION delivery_test_failure() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN
-                RAISE EXCEPTION '관측 전달 테이블에 쓰기가 발생했다';
-            END;
-            $$
-            """).update();
-        jdbc.sql("""
-            CREATE TRIGGER delivery_test_failure BEFORE INSERT OR UPDATE OR DELETE
-            ON observation_delivery FOR EACH ROW EXECUTE FUNCTION delivery_test_failure()
-            """).update();
+        assertDeliveryTableAbsent();
 
         // when
         save();
@@ -275,9 +262,14 @@ class ObservationDeliveryIntegrationTest {
         });
 
         // then
-        assertThat(count("observation_delivery")).isEqualTo(before);
+        assertDeliveryTableAbsent();
         assertThat(count("vehicle_observation")).isEqualTo(1);
         verify(source, never()).restore(anyLong(), anyList(), anyInt());
+    }
+
+    private void assertDeliveryTableAbsent() {
+        assertThat(jdbc.sql("SELECT to_regclass('observation_delivery') IS NULL")
+            .query(Boolean.class).single()).isTrue();
     }
 
     private void save() {

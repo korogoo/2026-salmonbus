@@ -81,7 +81,7 @@ class ObservationDeliveryRecoveryTest {
 
         // then
         verify(reads, never()).restore(anyLong(), anyList(), anyInt());
-        assertThat(jdbc.sql("SELECT count(*) FROM observation_delivery").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT to_regclass('observation_delivery') IS NULL").query(Boolean.class).single()).isTrue();
     }
 
     @Test

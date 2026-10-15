@@ -260,12 +260,12 @@ class DddStorageMigrationTest {
     }
 
     @Test
-    void 이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
+    void 최신_스키마를_이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
         // given
         preparePendingTransition();
         migrate("38");
         approveEvaluationTransition();
-        migrate("39");
+        migrate("latest");
         java.nio.file.Path directory = java.nio.file.Path.of("").toAbsolutePath();
         while (directory != null && !java.nio.file.Files.isRegularFile(
             directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) directory = directory.getParent();
@@ -280,18 +280,18 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
         approveEvaluationTransition();
-        migrate("39");
+        migrate("latest");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
     }
 
     @Test
-    void 로컬_초기화는_평가와_이관_기록을_비우고_노선은_보존한다() throws Exception {
+    void 최신_스키마에서도_로컬_초기화는_평가와_이관_기록을_비우고_노선은_보존한다() throws Exception {
         // given
         preparePendingTransition();
         migrate("38");
         approveEvaluationTransition();
-        migrate("39");
+        migrate("latest");
         execute("""
             INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
             VALUES('00000000-0000-0000-0000-000000000002',1,7,
