@@ -8,13 +8,6 @@ PASS=0
 printf 'flywayMaxVersion=39\n' > "$TEST_DIRECTORY/new-manifest"
 printf 'flywayMaxVersion=38\n' > "$TEST_DIRECTORY/old-manifest"
 printf 'component=worker\n' > "$TEST_DIRECTORY/broken-manifest"
-for component in api worker; do
-  mkdir -p "$TEST_DIRECTORY/recovery/$component/jars"
-  printf 'mock-v38-%s' "$component" > "$TEST_DIRECTORY/recovery/$component/jars/$component-app.jar"
-  printf 'component=%s\nflywayMaxVersion=38\nartifactSha256=%s\n' "$component" \
-    "$(sha256sum "$TEST_DIRECTORY/recovery/$component/jars/$component-app.jar" | cut -d' ' -f1)" \
-    > "$TEST_DIRECTORY/recovery/$component/release-manifest.txt"
-done
 
 expect_blocked() {
   if "$@" > "$TEST_DIRECTORY/output" 2>&1; then echo '차단해야 하는 요청을 허용했다' >&2; exit 1; fi
@@ -118,23 +111,20 @@ run_case '설정 파일 권한이 열려 있으면 DB 연결 전에 막는다' '
   expect_blocked transition_schema api
   chmod 600 /etc/salmonbus/api.env
 '
-run_case '복구 패키지가 없으면 worker를 중지하기 전에 거절한다' '
+run_case '백업 식별자가 없으면 worker를 중지하기 전에 거절한다' '
   RUNNING=active
-  expect_blocked transition_prepare test-backup
+  expect_blocked transition_prepare
   test "$RUNNING" = active
 '
-run_case '복구 JAR의 해시가 다르면 worker를 중지하기 전에 거절한다' '
+run_case '예전 패키지 인자를 넘기면 잘못된 사용법을 알리고 중지 전에 거절한다' '
   RUNNING=active
-  cp "$TEST_DIRECTORY/recovery/worker/jars/worker-app.jar" "$TEST_DIRECTORY/original-jar"
-  printf changed > "$TEST_DIRECTORY/recovery/worker/jars/worker-app.jar"
   expect_blocked transition_prepare test-backup "$TEST_DIRECTORY/recovery"
   test "$RUNNING" = active
-  cp "$TEST_DIRECTORY/original-jar" "$TEST_DIRECTORY/recovery/worker/jars/worker-app.jar"
 '
 run_case 'prepare는 worker를 중지하고 배포판 밖에 기동 검사를 남긴다' '
   RUNNING=active
   transition_sql() { echo approved >> "$TEST_DIRECTORY/actions"; }
-  transition_prepare test-backup "$TEST_DIRECTORY/recovery"
+  transition_prepare test-backup
   test "$RUNNING" = inactive
   test -f /etc/salmonbus/evaluation-work-transition.sh
   transition_secure_file /etc/salmonbus/evaluation-work-hold
@@ -148,14 +138,14 @@ run_case 'prepare는 worker를 중지하고 배포판 밖에 기동 검사를 �
 '
 run_case '전환 준비가 실패해도 구 worker를 자동 재개하지 않는다' '
   RUNNING=active; WRITERS=1
-  expect_blocked transition_prepare test-backup "$TEST_DIRECTORY/recovery"
+  expect_blocked transition_prepare test-backup
   test "$RUNNING" = inactive
   test -f /etc/salmonbus/evaluation-work-hold
   expect_blocked transition_check worker "$TEST_DIRECTORY/old-manifest" runtime
 '
 run_case 'DB 승인 저장이 실패하면 기동 차단을 유지한다' '
   transition_sql() { return 1; }
-  expect_blocked transition_prepare test-backup "$TEST_DIRECTORY/recovery"
+  expect_blocked transition_prepare test-backup
   test -f /etc/salmonbus/evaluation-work-hold
   expect_blocked transition_check worker "$TEST_DIRECTORY/old-manifest" runtime
 '
