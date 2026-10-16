@@ -43,6 +43,12 @@ class GeometryPackagingTest {
         Files.writeString(repo.resolve("dev/data/route-shapes.json"), "new road snapshot");
         assertNotEquals(basis, packager.basisContract());
         assertEquals(preparation, packager.preparationContract());
+        String geometryBasis = packager.basisContract();
+        Files.writeString(repo.resolve("dev/server/worker.yml"), "collection: twenty routes");
+        Files.writeString(repo.resolve("dev/wiremock-extension/src/main/Replay.java"), "twenty route replay");
+        assertNotEquals(geometryBasis, packager.basisContract());
+        assertEquals(preparation, packager.preparationContract());
+        // 수집과 재생 확장은 basis 교체 대상이며 DB 초기화 계약은 바꾸지 않는다.
         Path replacement = root.resolve("replacement");
         packager.imageContext(replacement);
         assertEquals("new road snapshot", Files.readString(replacement.resolve("data/route-shapes.json")));

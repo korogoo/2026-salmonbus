@@ -19,7 +19,9 @@ final class ReplayEngine {
         "up-only", "down-only", "arriving", "departed", "in-transit", "few-seats", "full",
         "unknown-seat", "missing-seat", "anonymous", "empty", "unreadable", "invalid-response",
         "upstream-error", "timeout");
-    private static final List<String> ROUTES = List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500");
+    private static final List<String> REFERENCE_ROUTES = List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500");
+    static final List<String> REPLAY_ROUTES = java.util.stream.Stream.concat(REFERENCE_ROUTES.stream(),
+        List.of("1151", "9000", "1500-2", "8100", "1150", "G8110", "6801", "6003", "3100", "1101", "7007-1", "4000").stream()).toList();
     private static final DateTimeFormatter QUERY_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
         .withZone(ZoneId.of("Asia/Seoul"));
     private final Map<String, Route> routes;
@@ -48,7 +50,7 @@ final class ReplayEngine {
     private ReplayEngine(Dataset dataset, Configuration configuration, Clock clock, LongSupplier nanoTime,
                          String runId, Map<String, List<RouteShapes.Point>> routeLines) {
         require("local-routes-v1".equals(dataset.version()), "노선 자료 버전이 다릅니다.");
-        require(dataset.routes().stream().limit(ROUTES.size()).map(Route::displayName).toList().equals(ROUTES),
+        require(dataset.routes().stream().limit(REFERENCE_ROUTES.size()).map(Route::displayName).toList().equals(REFERENCE_ROUTES),
             "재생할 8개 노선의 순서를 확인해 주세요.");
         require(dataset.routes().stream().map(Route::displayName).distinct().count() == dataset.routes().size(),
             "노선 이름이 중복됩니다.");
@@ -56,7 +58,7 @@ final class ReplayEngine {
             && configuration.stepSeconds() <= 300 && configuration.idleSeconds() >= 1
             && configuration.idleSeconds() <= 600 && configuration.vehiclesPerDirection() >= 1
             && configuration.vehiclesPerDirection() <= 6, "재생 간격과 차량 수를 확인해 주세요.");
-        require(ROUTES.containsAll(configuration.routeVehicles().keySet()),
+        require(REPLAY_ROUTES.containsAll(configuration.routeVehicles().keySet()),
             "차량 규모를 지정할 재생 노선을 확인해 주세요.");
         this.configuration = configuration;
         this.clock = clock;
@@ -86,7 +88,7 @@ final class ReplayEngine {
         Dataset replay = readRoutes(file);
         Dataset catalog = readRoutes(file.resolveSibling("catalog-routes.json"));
         require("local-catalog-v1".equals(catalog.version())
-            && catalog.routes().stream().noneMatch(route -> ROUTES.contains(route.displayName())),
+            && catalog.routes().stream().noneMatch(route -> REFERENCE_ROUTES.contains(route.displayName())),
             "카탈로그 노선과 재생 노선을 분리해 주세요.");
         return new Dataset(replay.version(), java.util.stream.Stream.concat(
             replay.routes().stream(), catalog.routes().stream()).toList());
@@ -108,7 +110,7 @@ final class ReplayEngine {
             case "route-info" -> new Reply(200, envelope(0, Map.of("busRouteInfoItem", info(route))));
             case "route-stations" -> new Reply(200, envelope(0, Map.of("busRouteStationList", stations(route))));
             case "route-line" -> line(route);
-            case "location" -> ROUTES.contains(route.displayName())
+            case "location" -> REPLAY_ROUTES.contains(route.displayName())
                 ? locations(route, mode)
                 : new Reply(404, Map.of("error", "local-route-observation-disabled"));
             default -> new Reply(400, Map.of("error", "unsupported-local-operation"));
@@ -234,7 +236,7 @@ final class ReplayEngine {
             if (routeMode.equals("upstream-error")) return new Reply(503, envelope(1, null));
             if (routeMode.equals("invalid-response")) return new Reply(200, envelope(0, null));
             if (routeMode.equals("timeout")) delay = 7_000;
-            List<Observation> fleet = ROUTES.contains(route.displayName()) && !routeMode.equals("empty")
+            List<Observation> fleet = REPLAY_ROUTES.contains(route.displayName()) && !routeMode.equals("empty")
                 ? observations(route, routeMode) : List.of();
             for (Stop stop : visits) {
                 String direction = stop.sequence() <= route.turnSequence() ? "U" : "D";

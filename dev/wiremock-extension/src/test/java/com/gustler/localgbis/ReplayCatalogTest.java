@@ -11,14 +11,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ReplayCatalogTest {
     @Test
-    void catalogMetadataDoesNotEnableVehiclePlayback() throws Exception {
+    void 재생_대상이_아닌_카탈로그_노선은_차량을_재생하지_않는다() throws Exception {
         var data = ReplayEngine.readAllRoutes(Path.of(System.getProperty("routes.file")));
         var time = new AtomicLong();
         var engine = new ReplayEngine(data, new ReplayEngine.Configuration("local-replay-v1", 30, 60),
             Clock.systemUTC(), time::get, "testrun1");
 
         assertEquals(41, data.routes().size());
-        for (var route : data.routes().subList(8, data.routes().size())) {
+        for (var route : data.routes().stream().filter(route -> !ReplayEngine.REPLAY_ROUTES.contains(route.displayName())).toList()) {
             var info = engine.response("route-info", "normal", route.routeId());
             assertEquals(200, info.status());
             var item = (Map<?, ?>) body(info).get("busRouteInfoItem");

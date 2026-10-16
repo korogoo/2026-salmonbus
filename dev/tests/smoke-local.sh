@@ -116,6 +116,21 @@ curl --fail --silent --show-error "$api/api/docs/openapi/swagger-config" \
   | python3 -c 'import json, sys; assert json.load(sys.stdin)["supportedSubmitMethods"] == []'
 curl --fail --silent --show-error "$frontend/" >/dev/null
 
+# 20개 관측, 기존 8개 예보와 정산이 같은 실행환경에서 이어지는지 확인한다.
+# 새 12개는 학습 번들이 준비되기 전까지 예보를 요구하지 않는다.
+progress=''
+for attempt in $(seq 1 90); do
+  progress=$(compose exec -T postgres psql -X -q -A -t -v ON_ERROR_STOP=1 -U salmonbus_local -d salmonbus_local -c "
+    SELECT (SELECT count(DISTINCT route_version_id) FROM vehicle_observation),
+           (SELECT count(DISTINCT route_version_id) FROM forecast_publication WHERE prediction_count > 0),
+           (SELECT count(DISTINCT route_version_id) FROM forecast_evaluation_result WHERE scoring_state='SETTLED'),
+           (SELECT count(*) FROM route);")
+  [[ $progress == '20|8|8|41' ]] && break
+  sleep 2
+done
+[[ $progress == '20|8|8|41' ]] || { echo "Collection/forecast/settlement/route counts: $progress" >&2; exit 1; }
+python3 "$ROOT/dev/tests/assert-collection-routes.py" "$api" "$ROOT/dev/data"
+
 containers=$(compose ps --quiet)
 for container in $containers; do
   [[ $(docker inspect --format '{{.State.OOMKilled}}' "$container") == false ]]
