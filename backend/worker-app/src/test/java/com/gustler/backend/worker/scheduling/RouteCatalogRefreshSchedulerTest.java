@@ -20,6 +20,24 @@ import org.slf4j.LoggerFactory;
 
 class RouteCatalogRefreshSchedulerTest {
     @Test
+    void 형상_대상을_생략하면_설정된_수집_노선의_형상을_갱신한다() {
+        var catalog = mock(RefreshRouteCatalog.class);
+        var geometry = mock(RefreshRouteGeometry.class);
+        when(catalog.refresh(anyString(), any())).thenReturn(Optional.of(new RouteReference(7)));
+        var routes = List.of("204000057", "204000081", "234000002");
+        var scheduler = new RouteCatalogRefreshScheduler(new CollectionProperties(false, routes),
+            catalog, Clock.systemUTC(), geometry, Runnable::run, new RouteGeometryProperties(true, List.of()));
+
+        scheduler.refreshAllRoutes();
+
+        for (var route : routes) {
+            verify(catalog).refresh(eq(route), any());
+            verify(geometry).refresh(eq(route), any());
+        }
+        verifyNoMoreInteractions(catalog, geometry);
+    }
+
+    @Test
     void 지도전용노선은_별도실행기에서_갱신하고_공통노선은_한번만_조회한다() {
         var catalog = mock(RefreshRouteCatalog.class);
         var geometry = mock(RefreshRouteGeometry.class);
