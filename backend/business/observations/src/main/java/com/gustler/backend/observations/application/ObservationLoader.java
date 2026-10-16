@@ -1,6 +1,8 @@
 package com.gustler.backend.observations.application;
 
 import com.gustler.backend.observations.api.CollectionQualityHook;
+import com.gustler.backend.observations.api.ObservationDeliveryBatch;
+import com.gustler.backend.observations.api.ObservationDeliveryHook;
 import com.gustler.backend.observations.api.VehicleObservationsStored;
 import com.gustler.backend.observations.domain.CollectedObservations;
 import com.gustler.backend.observations.domain.CollectionBatch;
@@ -21,10 +23,13 @@ public class ObservationLoader {
     private static final Logger log = LoggerFactory.getLogger(ObservationLoader.class);
     private final CollectionBatchRepository batches;
     private final List<CollectionQualityHook> qualityHooks;
+    private final List<ObservationDeliveryHook> deliveryHooks;
 
-    public ObservationLoader(CollectionBatchRepository batches, List<CollectionQualityHook> qualityHooks) {
+    public ObservationLoader(CollectionBatchRepository batches, List<CollectionQualityHook> qualityHooks,
+                             List<ObservationDeliveryHook> deliveryHooks) {
         this.batches = batches;
         this.qualityHooks = List.copyOf(qualityHooks);
+        this.deliveryHooks = List.copyOf(deliveryHooks);
     }
 
     @Transactional
@@ -42,6 +47,12 @@ public class ObservationLoader {
         // 동기 이벤트는 관측 저장 transaction 안에서 처리된다. 정상 관측은 추가 SQL이 없다.
         qualityHooks.forEach(hook -> hook.observationsStored(event));
         batches.save(batch);
+        var delivery = new ObservationDeliveryBatch(batchId, batch.routeVersionId(),
+            batch.state().attemptNumber(), ObservationDeliveryBatch.Kind.STORED, stored.observedAt(),
+            stored.rows().stream().map(row -> new ObservationDeliveryBatch.Row(
+                row.observationId(), row.vehicleId(), row.remainingSeats(),
+                row.passedStopOrder(), row.crowdLevel(), row.stopOrder(), row.runningState())).toList());
+        deliveryHooks.forEach(hook -> hook.record(delivery));
     }
 
     /**

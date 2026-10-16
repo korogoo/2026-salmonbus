@@ -39,6 +39,27 @@ public class JdbcDemandStatisticsStore implements DemandStatisticsStore {
     }
 
     @Override
+    public Optional<Instant> idleDataUntil(final long routeVersionId, final Instant completedAfter) {
+        return jdbc.sql("""
+            SELECT /* salmonbus:demand_statistics.idle_check */ run.data_until
+            FROM stop_demand_run run
+            JOIN route_version version ON version.id = run.route_version_id
+            JOIN route_data_quality quality ON quality.route_id = version.route_id
+            JOIN stop_demand_baseline baseline ON baseline.route_version_id = run.route_version_id
+            WHERE run.route_version_id = :version
+              AND baseline.initialized
+              AND run.phase = 'DONE'
+              AND run.quality_revision = quality.quality_revision
+              AND run.completed_at > :completedAfter
+              AND NOT EXISTS (
+                  SELECT 1 FROM stop_demand_rebuild_request request
+                  WHERE request.route_version_id = run.route_version_id
+              )
+            """).param("version", routeVersionId).param("completedAfter", offsetOf(completedAfter))
+            .query((rs, row) -> rs.getObject("data_until", OffsetDateTime.class).toInstant()).optional();
+    }
+
+    @Override
     public DemandStatisticsBaseline baseline(final long routeVersionId) {
         jdbc.sql("INSERT INTO stop_demand_baseline(route_version_id) VALUES (?) ON CONFLICT DO NOTHING")
             .param(routeVersionId).update();

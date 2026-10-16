@@ -1,5 +1,7 @@
 package com.gustler.backend.observations.application;
 
+import com.gustler.backend.observations.api.ObservationDeliveryBatch;
+import com.gustler.backend.observations.api.ObservationDeliveryHook;
 import com.gustler.backend.observations.domain.CollectionBatch;
 import com.gustler.backend.observations.domain.CollectionBatchRepository;
 import com.gustler.backend.observations.domain.CollectionPlan;
@@ -9,6 +11,7 @@ import com.gustler.backend.observations.domain.ObservationBatchReservation;
 import com.gustler.backend.quota.api.ApiCallQuota;
 import java.time.OffsetDateTime;
 import java.util.Optional;
+import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,12 +22,14 @@ public class ObservationBatchLedger {
     private final ApiCallQuota callQuota;
     private final CollectionBatchRepository batches;
     private final ObservationLoader loader;
+    private final List<ObservationDeliveryHook> deliveryHooks;
 
     public ObservationBatchLedger(ApiCallQuota callQuota, CollectionBatchRepository batches,
-                                  ObservationLoader loader) {
+                                  ObservationLoader loader, List<ObservationDeliveryHook> deliveryHooks) {
         this.callQuota = callQuota;
         this.batches = batches;
         this.loader = loader;
+        this.deliveryHooks = List.copyOf(deliveryHooks);
     }
 
     /** 수집 계획과 호출 횟수를 함께 예약한다. 실패하면 두 변경 모두 롤백한다. */
@@ -82,7 +87,11 @@ public class ObservationBatchLedger {
         CollectionBatch batch = existing.orElseThrow();
         batch.startAttempt(reserved);
         batches.deleteObservationsOf(batch.id());
-        return batches.save(batch);
+        long batchId = batches.save(batch);
+        var reset = new ObservationDeliveryBatch(batchId, batch.routeVersionId(),
+            batch.state().attemptNumber(), ObservationDeliveryBatch.Kind.CLEARED, null, List.of());
+        deliveryHooks.forEach(hook -> hook.record(reset));
+        return batchId;
     }
 
     private void abandon(final long batchId) {

@@ -183,22 +183,7 @@ class DddStorageMigrationTest {
 
     @Test
     void 평가_분리는_완료_이력_파일을_유지하고_대기만_옮긴다() throws SQLException {
-        migrate("24");
-        insertLegacyData();
-        migrate("25");
-        copyLegacyData();
-        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('stopped-writer-backup', now())");
-        migrate("30");
-        execute("""
-            INSERT INTO route_stop(route_version_id,stop_order,stop_id,name,direction,boarding_allowed)
-            VALUES(1,3,'stop3','다음 정류장','UP',true);
-            INSERT INTO seat_forecast(vehicle_observation_id,target_stop_order,route_version_id,stops_to_target,
-                model_deployment_id,demand_statistics_revision,seat_full_chance_raw,seat_full_chance,
-                generated_at,quality_revision,publication_id)
-            SELECT vehicle_observation_id,3,route_version_id,2,model_deployment_id,demand_statistics_revision,
-                seat_full_chance_raw,seat_full_chance,generated_at,quality_revision,publication_id FROM seat_forecast;
-            INSERT INTO forecast_evaluation(vehicle_observation_id,target_stop_order,route_version_id) VALUES(1,3,1)
-            """);
+        preparePendingTransition();
         long originalFile = number("SELECT pg_relation_filenode('forecast_evaluation')");
         long trainingRows = number("SELECT count(*) FROM training_eligible_seat_forecast");
 
@@ -219,15 +204,106 @@ class DddStorageMigrationTest {
     }
 
     @Test
-    void 로컬_초기화_SQL은_평가_분리_후에도_실행되고_노선은_보존한다() throws Exception {
+    void 관측별_작업으로_전환해도_미완료_예보와_완료_이력은_그대로다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        String before = scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending");
+        long resultFile = number("SELECT pg_relation_filenode('forecast_evaluation_result')");
+        approveEvaluationTransition();
+
+        // when
+        migrate("39");
+
+        // then
+        assertThat(scalar("SELECT string_agg(vehicle_observation_id || ':' || target_stop_order, ',' ORDER BY vehicle_observation_id,target_stop_order) FROM forecast_evaluation_pending")).isEqualTo(before);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        assertThat(number("SELECT pg_relation_filenode('forecast_evaluation_result')")).isEqualTo(resultFile);
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("v");
+        assertThat(scalar("SELECT to_regclass('sal175_evaluation_transition')::text")).isNull();
+    }
+
+    @Test
+    void 복원할_대기가_기존과_다르면_전환을_취소하고_기존_테이블을_남긴다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        execute("DELETE FROM forecast_evaluation_result");
+        approveEvaluationTransition();
+
+        // when
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("기존 대기와 관측별 복원 결과가 다르다");
+
+        // then
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(scalar("SELECT to_regclass('forecast_evaluation_work')::text")).isNull();
+    }
+
+    private void preparePendingTransition() throws SQLException {
         migrate("24");
         insertLegacyData();
         migrate("25");
         copyLegacyData();
-        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('test-backup', now())");
-        migrate("31");
-        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+        execute("INSERT INTO sal134_transition(backup_id, verified_at) VALUES ('stopped-writer-backup', now())");
+        migrate("30");
+        execute("""
+            INSERT INTO route_stop(route_version_id,stop_order,stop_id,name,direction,boarding_allowed)
+            VALUES(1,3,'stop3','다음 정류장','UP',true);
+            INSERT INTO seat_forecast(vehicle_observation_id,target_stop_order,route_version_id,stops_to_target,
+                model_deployment_id,demand_statistics_revision,seat_full_chance_raw,seat_full_chance,
+                generated_at,quality_revision,publication_id)
+            SELECT vehicle_observation_id,3,route_version_id,2,model_deployment_id,demand_statistics_revision,
+                seat_full_chance_raw,seat_full_chance,generated_at,quality_revision,publication_id FROM seat_forecast;
+            INSERT INTO forecast_evaluation(vehicle_observation_id,target_stop_order,route_version_id) VALUES(1,3,1)
+            """);
+    }
 
+    @Test
+    void 최신_스키마를_이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("latest");
+        java.nio.file.Path directory = java.nio.file.Path.of("").toAbsolutePath();
+        while (directory != null && !java.nio.file.Files.isRegularFile(
+            directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) directory = directory.getParent();
+        if (directory == null) throw new IllegalStateException("롤백 SQL을 찾을 수 없다");
+        String rollback = java.nio.file.Files.readString(directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"));
+
+        // when
+        execute(rollback);
+
+        // then
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+        approveEvaluationTransition();
+        migrate("latest");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+    }
+
+    @Test
+    void 최신_스키마에서도_로컬_초기화는_평가와_이관_기록을_비우고_노선은_보존한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("latest");
+        execute("""
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
+            VALUES('00000000-0000-0000-0000-000000000002',1,7,
+                   '00000000-0000-0000-0000-000000000003',now(),1);
+            INSERT INTO evaluation_archive_member(vehicle_observation_id,target_stop_order,route_version_id,batch_id,original_sha256)
+            VALUES(1,2,1,'00000000-0000-0000-0000-000000000002',repeat('a',64));
+            INSERT INTO file_statistics_publication(route_version_id,input_sha256,calculation_version,revision)
+            VALUES(1,repeat('b',64),'calc1',1);
+            UPDATE evaluation_archive_scan SET observation_id=1,stop_order=2,next_attempt_at=now()
+            """);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         Path root = Path.of("").toAbsolutePath();
         while (root != null && !Files.isRegularFile(root.resolve("dev/data/java/com/gustler/localdata/LocalData.java"))) {
             root = root.getParent();
@@ -237,12 +313,134 @@ class DddStorageMigrationTest {
         int start = source.indexOf("TRUNCATE ", source.indexOf("private static void resetGenerated"));
         assertThat(start).isGreaterThanOrEqualTo(0);
         int end = source.indexOf("\"\"\"", start);
+
+        // when
         execute(source.substring(start, end));
 
+        // then
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isZero();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isZero();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isZero();
-        assertThat(number("SELECT count(*) FROM forecast_evaluation")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_member")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_batch")).isZero();
+        assertThat(number("SELECT count(*) FROM file_statistics_publication")).isZero();
+        assertThat(number("SELECT count(*) FROM evaluation_archive_scan WHERE id=1 AND observation_id=0 AND stop_order=0 AND next_attempt_at='-infinity'::timestamptz")).isOne();
         assertThat(number("SELECT count(*) FROM route")).isOne();
+    }
+
+    @Test
+    void 전환_승인이_없으면_기존_대기_테이블을_바꾸지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+
+        // when
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("prepare로 전환을 승인");
+
+        // then
+        assertPendingTablePreserved();
+    }
+
+    @Test
+    void 전환_승인이_만료되면_기존_대기_테이블을_바꾸지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        execute("UPDATE sal175_evaluation_transition SET expires_at=clock_timestamp()-interval '1 second'");
+
+        // when
+        assertThatThrownBy(() -> migrate("39")).hasMessageContaining("prepare로 전환을 승인");
+
+        // then
+        assertPendingTablePreserved();
+    }
+
+    @Test
+    void 승인_후_정비_연결이_생기면_전환을_중단한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        try (Connection maintenance = DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = maintenance.createStatement()) {
+            statement.execute("SET application_name='salmonbus-historical-migration'");
+
+            // when
+            assertThatThrownBy(() -> migrate("39")).hasMessageContaining("worker 또는 정비 연결이 남아 있다");
+
+            // then
+            assertPendingTablePreserved();
+        }
+        migrate("39");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+    }
+
+    @Test
+    void worker_연결이_남아_있으면_전환을_승인하지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        try (Connection worker = DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = worker.createStatement()) {
+            statement.execute("SET application_name='salmonbus-worker'");
+
+            // when
+            assertThatThrownBy(this::approveEvaluationTransition)
+                .hasMessageContaining("worker 또는 정비 연결이 남아 있다");
+            execute("ROLLBACK");
+
+            // then
+            assertThat(scalar("SELECT to_regclass('sal175_evaluation_transition')::text")).isNull();
+            assertPendingTablePreserved();
+        }
+    }
+
+    private void assertPendingTablePreserved() throws SQLException {
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("r");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(scalar("SELECT to_regclass('forecast_evaluation_work')::text")).isNull();
+    }
+
+    @Test
+    void worker_연결이_남아_있으면_이전_DB_구조로_되돌리지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("39");
+        Path directory = Path.of("").toAbsolutePath();
+        while (directory != null && !Files.isRegularFile(directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) {
+            directory = directory.getParent();
+        }
+        assertThat(directory).isNotNull();
+        String rollback = Files.readString(directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"));
+        try (Connection worker = DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+             var statement = worker.createStatement()) {
+            statement.execute("SET application_name='salmonbus-worker'");
+
+            // when
+            assertThatThrownBy(() -> execute(rollback)).hasMessageContaining("worker 또는 정비 연결이 남아 있다");
+            execute("ROLLBACK");
+
+            // then
+            assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+            assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass")).isEqualTo("v");
+            assertThat(number("SELECT count(*) FROM flyway_schema_history WHERE version='39' AND success")).isOne();
+        }
+    }
+
+    private void approveEvaluationTransition() throws Exception {
+        Path directory = Path.of("").toAbsolutePath();
+        while (directory != null && !Files.isRegularFile(directory.resolve("deploy/sql/prepare-evaluation-work-transition.sql"))) {
+            directory = directory.getParent();
+        }
+        assertThat(directory).isNotNull();
+        execute("SET salmonbus.backup_reference='isolated-test-backup'");
+        execute(Files.readString(directory.resolve("deploy/sql/prepare-evaluation-work-transition.sql")));
     }
 
     private void insertRoute() throws SQLException {

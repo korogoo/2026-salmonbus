@@ -53,9 +53,10 @@ final class StatisticsForecastFixture {
             .params(observationId, targetStopOrder, stopsToTarget, rawChance, chance, expectedSeats, publicationId)
             .update();
         jdbc.sql("""
-                INSERT INTO forecast_evaluation_pending (vehicle_observation_id, target_stop_order, route_version_id)
-                SELECT vehicle_observation_id, target_stop_order, route_version_id
+                INSERT INTO forecast_evaluation_work (vehicle_observation_id, route_version_id)
+                SELECT vehicle_observation_id, route_version_id
                 FROM seat_forecast WHERE vehicle_observation_id = ? AND target_stop_order = ?
+                ON CONFLICT DO NOTHING
                 """)
             .params(observationId, targetStopOrder).update();
     }
@@ -74,9 +75,7 @@ final class StatisticsForecastFixture {
                     JOIN observation_batch batch ON batch.id=observation.observation_batch_id
                     WHERE observation.id=?
                 ), removed AS (
-                    DELETE FROM forecast_evaluation_pending WHERE vehicle_observation_id=? AND target_stop_order=?
-                      AND EXISTS (SELECT 1 FROM arrival)
-                    RETURNING *
+                    SELECT * FROM forecast_evaluation_pending WHERE vehicle_observation_id=? AND target_stop_order=?
                 )
                 INSERT INTO forecast_evaluation_result (
                     vehicle_observation_id,target_stop_order,route_version_id,scoring_state,

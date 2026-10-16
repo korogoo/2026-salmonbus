@@ -1,148 +1,234 @@
 package com.gustler.backend.forecasting.application.evaluation;
 
 import com.gustler.backend.diagnostics.WorkerOperationLog;
+import com.gustler.backend.forecasting.api.ForecastPolicy;
 import com.gustler.backend.forecasting.api.evaluation.EvaluateForecasts;
-
+import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
+import com.gustler.backend.forecasting.application.quality.WorkerQualityState;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalCandidate;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalLabel;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalLabelResolver;
 import com.gustler.backend.forecasting.domain.evaluation.ArrivalObservationQuery;
 import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
 import com.gustler.backend.forecasting.domain.evaluation.PendingForecast;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
-import com.gustler.backend.forecasting.api.ForecastPolicy;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.annotation.Propagation;
 
-/** 예측 이후의 관측으로 평가하고, 확정 결과와 당일 보정을 같은 트랜잭션에 반영한다. */
 @Component
 @ConditionalOnProperty(prefix = "forecast", name = "enabled", havingValue = "true")
 public class EvaluateForecastsService implements EvaluateForecasts {
-
-    private final ForecastEvaluationRepository evaluationRepository;
-    private final ForecastEvaluationWriter writer;
-    private final ArrivalObservationQuery arrivalObservationQuery;
+    private static final Logger log = LoggerFactory.getLogger(EvaluateForecastsService.class);
+    private final EvaluationWorkStore work;
+    private final EvaluationWorkPageReader pages;
+    private final EvaluationRouteCommitter committer;
+    private final ArrivalObservationQuery arrivals;
+    private final RecentArrivalObservationCache observationCache;
+    private final RouteDataQualityAccess quality;
     private final ForecastPolicy policy;
     private final Clock clock;
+    private final PendingEvaluationBuffer buffer;
+    private final int pageLimit;
+    private final Map<Long, EvaluationSelection.Cursor> cursors = new LinkedHashMap<>();
+    private long memoryRevision;
+    private WorkerQualityState qualityMemory;
 
-    public EvaluateForecastsService(
-        ForecastEvaluationRepository evaluationRepository,
-        ForecastEvaluationWriter writer,
-        ArrivalObservationQuery arrivalObservationQuery,
-        ForecastPolicy policy,
-        Clock clock
-    ) {
-        this.evaluationRepository = evaluationRepository;
-        this.writer = writer;
-        this.arrivalObservationQuery = arrivalObservationQuery;
+    @Autowired(required = false)
+    public void useQualityMemory(WorkerQualityState qualityMemory) { this.qualityMemory = qualityMemory; }
+
+    public EvaluateForecastsService(EvaluationWorkStore work, EvaluationWorkPageReader pages,
+        EvaluationRouteCommitter committer, ArrivalObservationQuery arrivals,
+        RouteDataQualityAccess quality, ForecastPolicy policy, Clock clock,
+        @Value("${forecast.evaluation.memory-limit:60000}") int memoryLimit,
+        @Value("${forecast.evaluation.recovery-page-limit:3}") int pageLimit,
+        RecentArrivalObservationCache observationCache) {
+        if (pageLimit < 1) throw new IllegalArgumentException("복원 페이지 한도는 양수여야 한다");
+        this.work = work;
+        this.pages = pages;
+        this.committer = committer;
+        this.arrivals = arrivals;
+        this.observationCache = observationCache;
+        this.quality = quality;
         this.policy = policy;
         this.clock = clock;
+        this.buffer = new PendingEvaluationBuffer(memoryLimit);
+        this.pageLimit = pageLimit;
     }
 
-    /**
-     * 한 회차의 평가 결과와 당일 보정을 같은 트랜잭션에서 저장한다.
-     *
-     * <p>회차 안에서는 시각을 한 번만 읽는다. 회차 도중에 시각이 흐르면 앞뒤 예보가 서로 다른
-     * 기준으로 기다림을 재게 된다.
-     */
-    @Transactional
+    @Override
+    @Transactional(propagation = Propagation.NEVER)
     public void settleArrivalLabels() {
         WorkerOperationLog.run("settlement_tick", "all", this::settleOnce);
     }
 
     private void settleOnce() {
         Instant now = clock.instant();
-        List<ForecastEvaluation> evaluations = new ArrayList<>();
-        for (Long routeVersionId : WorkerOperationLog.measure("settlement_pending_routes", "all",
-            evaluationRepository::findRouteVersionIdsWithPendingForecasts)) {
-            evaluations.addAll(evaluationsOf(routeVersionId, now));
+        Snapshot beforeRoutes = snapshot();
+        List<Long> versions = WorkerOperationLog.measure("settlement_pending_routes", "all", work::routes);
+        discardInactive(beforeRoutes, versions);
+        for (long version : versions) {
+            Snapshot snapshot = snapshot();
+            var observations = observationCache.begin(now);
+            Optional<WorkerQualityState.Read> remembered = rememberedQuality(version);
+            long revision = remembered.map(value -> value.snapshot().revision())
+                .orElseGet(() -> quality.current(version));
+            // 상태가 불확실하면 기존 DB 조회를 사용하고 관측·대기 캐시 재사용도 차단한다.
+            boolean investigating = remembered.map(value -> value.snapshot().anyInvestigationPending())
+                .orElseGet(() -> qualityMemory != null || quality.anyInvestigationPending(version));
+            RouteInput input = read(version, revision, snapshot, investigating);
+            List<ForecastEvaluation> results = evaluate(input, observations, now);
+            boolean memoryChanged = remembered.isPresent() && !qualityMemory.stillCurrent(remembered.get());
+            committer.commit(input, results, (status, change) -> {
+                apply(snapshot, status, change);
+                if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                    try {
+                        observations.committed(clock.instant());
+                    } catch (RuntimeException failure) {
+                        log.warn("event=arrival_cache_publish_failed exceptionType={}",
+                            failure.getClass().getSimpleName());
+                    }
+                }
+            }, memoryChanged);
         }
-        writer.complete(evaluations);
     }
 
-    private List<ForecastEvaluation> evaluationsOf(
-        final long routeVersionId,
-        Instant now
-    ) {
-        List<PendingForecast> pending = WorkerOperationLog.measure("settlement_pending_forecasts", routeVersionId,
-            () -> evaluationRepository.findPending(routeVersionId, policy.pendingLimit()));
-        List<ForecastEvaluation> evaluations = new ArrayList<>();
-        for (Map.Entry<String, List<PendingForecast>> byVehicle : groupByVehicle(pending).entrySet()) {
-            evaluations.addAll(evaluationsOf(routeVersionId, byVehicle.getKey(), byVehicle.getValue(), now));
+    private Optional<WorkerQualityState.Read> rememberedQuality(long version) {
+        if (qualityMemory == null) return Optional.empty();
+        try {
+            return qualityMemory.read(version);
+        } catch (RuntimeException failure) {
+            log.warn("event=quality_memory_read_failed routeVersionId={} exceptionType={}",
+                version, failure.getClass().getSimpleName());
+            return Optional.empty();
         }
-        return evaluations;
     }
 
-    /**
-     * 차량 아이디가 없는 예보는 도착을 찾을 길이 없다. 그래도 판정은 도메인에 맡긴다.
-     * 여기서 미리 걸러 내면 판정 규칙이 중복된다.
-     */
-    private Map<String, List<PendingForecast>> groupByVehicle(
-        List<PendingForecast> pending
-    ) {
+    private RouteInput read(long version, long revision, Snapshot snapshot, boolean investigating) {
+        EvaluationSelection.Cursor cursor = snapshot.cursors().getOrDefault(
+            version, EvaluationSelection.Cursor.START);
+        if (cursor.through() == 0) {
+            cursor = new EvaluationSelection.Cursor(work.lastObservationId(version), 0, 0, 0);
+        }
+        Map<Long, PendingEvaluationBuffer.Entry> cached = new LinkedHashMap<>();
+        for (var entry : snapshot.entries()) {
+            if (entry.key().routeVersionId() == version) cached.put(entry.key().observationId(), entry);
+        }
+        Set<Long> checked = new LinkedHashSet<>();
+        Map<Long, Long> workRevisions = new LinkedHashMap<>();
+        Map<Long, EvaluationWorkPageReader.Ready> ready = new LinkedHashMap<>();
+        List<PendingForecast> selected = new ArrayList<>();
+        for (int pageNumber = 0; pageNumber < pageLimit && cursor.through() != 0
+             && selected.size() < policy.pendingLimit(); pageNumber++) {
+            long after = cursor.after();
+            long through = cursor.through();
+            var page = WorkerOperationLog.measure("settlement_pending_forecasts", version,
+                () -> pages.read(version, after, through, 100, revision, investigating, cached));
+            checked.addAll(page.checkedIds());
+            workRevisions.putAll(page.workRevisions());
+            for (var item : page.ready()) ready.put(item.observationId(), item);
+            var selection = EvaluationSelection.take(cursor, page, policy.pendingLimit() - selected.size());
+            selected.addAll(selection.forecasts());
+            cursor = selection.next();
+        }
+        return new RouteInput(version, revision, investigating, cursor, List.copyOf(checked),
+            Map.copyOf(workRevisions), List.copyOf(ready.values()), List.copyOf(selected));
+    }
+
+    private List<ForecastEvaluation> evaluate(RouteInput input,
+        RecentArrivalObservationCache.Round observations, Instant now) {
+        long version = input.version();
+        List<PendingForecast> forecasts = input.selected();
         Map<String, List<PendingForecast>> byVehicle = new LinkedHashMap<>();
-        for (PendingForecast forecast : pending) {
-            byVehicle.computeIfAbsent(forecast.vehicleId(), vehicleId -> new ArrayList<>()).add(forecast);
+        for (var forecast : forecasts) {
+            byVehicle.computeIfAbsent(forecast.vehicleId(), ignored -> new ArrayList<>()).add(forecast);
         }
-        return byVehicle;
-    }
-
-    private List<ForecastEvaluation> evaluationsOf(
-        final long routeVersionId,
-        String vehicleId,
-        List<PendingForecast> forecasts,
-        Instant now
-    ) {
-        List<ArrivalCandidate> candidates = readCandidates(routeVersionId, vehicleId, forecasts);
-        List<ForecastEvaluation> evaluations = new ArrayList<>();
-        for (PendingForecast forecast : forecasts) {
-            ArrivalLabel label =
-                ArrivalLabelResolver.resolve(forecast, candidates, now);
-            if (label.settles()) {
-                evaluations.add(ForecastEvaluation.completed(
+        List<ForecastEvaluation> results = new ArrayList<>();
+        for (var vehicle : byVehicle.entrySet()) {
+            Instant earliest = vehicle.getValue().stream().map(PendingForecast::generatedAt)
+                .min(Instant::compareTo).orElseThrow();
+            List<ArrivalCandidate> candidates = vehicle.getKey() == null ? List.of()
+                : WorkerOperationLog.measure("settlement_arrival_candidates", version,
+                    () -> observations.read(arrivals, version, input.revision(), input.investigating(),
+                        vehicle.getKey(), earliest, policy.arrivalLimit()));
+            for (PendingForecast forecast : vehicle.getValue()) {
+                ArrivalLabel label = ArrivalLabelResolver.resolve(forecast, candidates, now);
+                if (label.settles()) results.add(ForecastEvaluation.completed(
                     forecast.vehicleObservationId(), forecast.targetStopOrder(), label, now));
             }
         }
-        return evaluations;
+        return results;
     }
 
-    private List<ArrivalCandidate> readCandidates(
-        final long routeVersionId,
-        String vehicleId,
-        List<PendingForecast> forecasts
-    ) {
-        if (vehicleId == null) {
-            return List.of();
-        }
-        return WorkerOperationLog.measure("settlement_arrival_candidates", routeVersionId,
-            () -> arrivalObservationQuery.findAfter(
-                routeVersionId, vehicleId, earliestGeneratedAt(forecasts), policy.arrivalLimit()));
+    private synchronized Snapshot snapshot() {
+        return new Snapshot(memoryRevision, Map.copyOf(cursors), buffer.snapshot());
     }
 
-    /**
-     * 도착 후보를 볼 하한은 관측 시각이 아니라 <b>예보를 계산한 시각</b>이다.
-     *
-     * <p>예보가 관측보다 늦게 나올 수 있는데, 그 사이에 이미 DB 에 들어와 있던 도착 관측을 라벨로 쓰면
-     * 예보를 내기 전에 답을 본 것이 된다.
-     */
-    private static Instant earliestGeneratedAt(
-        List<PendingForecast> forecasts
-    ) {
-        Instant earliest = forecasts.getFirst().generatedAt();
-        for (PendingForecast forecast : forecasts) {
-            if (forecast.generatedAt().isBefore(earliest)) {
-                earliest = forecast.generatedAt();
+    private synchronized void discardInactive(Snapshot snapshot, List<Long> versions) {
+        if (snapshot.revision() != memoryRevision) return;
+        Set<Long> active = Set.copyOf(versions);
+        boolean changed = cursors.keySet().removeIf(version -> !active.contains(version));
+        for (var entry : buffer.snapshot()) {
+            if (!active.contains(entry.key().routeVersionId())) {
+                buffer.invalidate(entry);
+                changed = true;
             }
         }
-        return earliest;
+        if (changed) memoryRevision++;
     }
 
+    private synchronized void apply(Snapshot snapshot, int status, EvaluationRouteCommitter.Change change) {
+        if (status == TransactionSynchronization.STATUS_ROLLED_BACK
+            || snapshot.revision() != memoryRevision) return;
+        memoryRevision++;
+        if (status != TransactionSynchronization.STATUS_COMMITTED) {
+            resetMemory();
+            log.warn("event=evaluation_memory_reset reason=UNKNOWN_TRANSACTION_RESULT");
+            return;
+        }
+        try {
+            for (var entry : buffer.snapshot()) {
+                if (entry.key().routeVersionId() == change.version()
+                    && change.checked().contains(entry.key().observationId())) {
+                    buffer.invalidate(entry);
+                }
+            }
+            cursors.put(change.version(), change.cursor());
+            for (var item : change.remaining()) {
+                while (!buffer.restore(item.qualityRevision(), item.workRevision(), item.forecasts())) {
+                    buffer.evictOldest();
+                }
+            }
+        } catch (RuntimeException failure) {
+            resetMemory();
+            log.warn("event=evaluation_memory_reset reason=AFTER_COMMIT_FAILED exceptionType={}",
+                failure.getClass().getSimpleName());
+        }
+    }
+
+    private void resetMemory() {
+        buffer.clear();
+        cursors.clear();
+    }
+
+    private record Snapshot(long revision, Map<Long, EvaluationSelection.Cursor> cursors,
+                            List<PendingEvaluationBuffer.Entry> entries) { }
+
+    record RouteInput(long version, long revision, boolean investigating,
+        EvaluationSelection.Cursor cursor, List<Long> checked, Map<Long, Long> workRevisions,
+        List<EvaluationWorkPageReader.Ready> ready, List<PendingForecast> selected) { }
 }

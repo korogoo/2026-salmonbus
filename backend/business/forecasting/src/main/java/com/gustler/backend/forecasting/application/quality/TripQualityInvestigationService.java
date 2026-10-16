@@ -12,6 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TripQualityInvestigationService {
+    private WorkerQualityTransactions memory;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void useQualityMemory(WorkerQualityTransactions memory) { this.memory = memory; }
     private final TripQualityInvestigationRepository investigations;
     private final TripQualityStore store;
     private final RouteDataQualityAccess quality;
@@ -29,6 +33,7 @@ public class TripQualityInvestigationService {
     public void observationsStored(final QualityObservationBatch batch) {
         final var anomalies = batch.firstAnomalies();
         if (anomalies.isEmpty()) { return; }
+        if (memory != null) memory.changing();
         // 조사 완료와 새 이상 관측 저장을 직렬화한다. 조사 중의 동일 차량은 새 요청을 만들지 않는다.
         quality.lock(batch.routeVersionId());
         final var active = investigations.activeVehicleIds(batch.routeVersionId());
@@ -53,6 +58,7 @@ public class TripQualityInvestigationService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void investigateLocked(final long version, final String vehicle) {
+        if (memory != null) memory.changing();
         quality.lock(version);
         final var pending = investigations.findPending(version, vehicle);
         if (pending.isEmpty()) { return; }

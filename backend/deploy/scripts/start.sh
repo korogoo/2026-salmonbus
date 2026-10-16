@@ -3,6 +3,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 claim_deploy
 
+source "$(dirname "${BASH_SOURCE[0]}")/evaluation-work-transition.sh"
+transition_check_deployment "$COMPONENT" "$MANIFEST"
+
 # worker 가 둘 겹치면 하루 호출 한도가 두 배로 나간다.
 # restart 대신 stop 하고 완전히 멈춘 것을 본 뒤에 start 한다
 stop_unit() {

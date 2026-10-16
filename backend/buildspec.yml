@@ -135,10 +135,11 @@ phases:
         pack() {
           local component="$1" jar="$2" digest="$3"
           local out="build/revision/$component"
-          rm -rf "$out"; mkdir -p "$out/jars" "$out/scripts" "$out/systemd"
+          rm -rf "$out"; mkdir -p "$out/jars" "$out/scripts" "$out/systemd" "$out/sql"
           cp "$jar" "$out/jars/$component-app.jar"
           cp "deploy/appspec-$component.yml" "$out/appspec.yml"
           cp deploy/scripts/*.sh "$out/scripts/"; chmod +x "$out/scripts/"*.sh
+          cp deploy/sql/*evaluation-work*.sql "$out/sql/"
           cp "deploy/systemd/salmonbus-$component.service" "$out/systemd/"
           {
             echo "component=$component"

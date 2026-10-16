@@ -2,8 +2,15 @@ package com.gustler.backend.forecasting.infrastructure.jdbc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 
+import com.gustler.backend.forecasting.api.evaluation.EvaluateForecasts;
 import com.gustler.backend.forecasting.application.evaluation.ForecastEvaluationWriter;
+import com.gustler.backend.forecasting.application.evaluation.RecentArrivalObservationCache;
 import com.gustler.backend.forecasting.api.ForecastTelemetry;
 import com.gustler.backend.forecasting.domain.evaluation.SettledEvaluation;
 import com.gustler.backend.forecasting.application.evaluation.SameDayFullOutcomesService;
@@ -19,6 +26,7 @@ import com.gustler.backend.forecasting.domain.publication.SeatForecast;
 import com.gustler.backend.forecasting.domain.statistics.DemandSampleStore;
 import com.gustler.backend.support.ConfirmedTripFixture;
 import com.gustler.backend.forecasting.support.ForecastingIntegrationTest;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -35,11 +43,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @ForecastingIntegrationTest
+@Import(JdbcForecastEvaluationTransactionTest.FixedClock.class)
+@TestPropertySource(properties = "forecast.evaluation.observation-cache.enabled=true")
 class JdbcForecastEvaluationTransactionTest {
 
     private static final Instant OBSERVED_AT = Instant.parse("2026-08-19T02:14:00Z");
@@ -73,6 +89,18 @@ class JdbcForecastEvaluationTransactionTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private EvaluateForecasts settlement;
+
+    @Autowired
+    private RecentArrivalObservationCache observationCache;
+
+    @MockitoSpyBean
+    private JdbcArrivalObservationQuery arrivals;
+
+    @MockitoSpyBean
+    private JdbcRecentObservationBatches recentBatches;
 
     private long routeId;
     private long routeVersionId;
@@ -119,7 +147,7 @@ class JdbcForecastEvaluationTransactionTest {
     @AfterEach
     void 이_테스트가_저장한_자료만_정리한다() {
         inTransaction(() -> {
-            jdbc.sql("DELETE FROM forecast_evaluation_pending WHERE route_version_id = ?").param(routeVersionId).update();
+            jdbc.sql("DELETE FROM forecast_evaluation_work WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_evaluation_result WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM seat_forecast WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_publication WHERE route_version_id = ?").param(routeVersionId).update();
@@ -140,6 +168,59 @@ class JdbcForecastEvaluationTransactionTest {
             jdbc.sql("DELETE FROM model_deployment WHERE id = ?").param(modelId).update();
             return null;
         });
+    }
+
+    @Test
+    void 정산이_취소되면_커밋된_관측은_재사용하고_정산_결과를_다시_저장한다() {
+        // given
+        jdbc.sql("""
+            CREATE FUNCTION reject_settlement_preview_fixture() RETURNS trigger LANGUAGE plpgsql AS $body$
+            BEGIN
+                RAISE EXCEPTION '정산 결과 저장 실패';
+            END;
+            $body$
+            """).update();
+        jdbc.sql("""
+            CREATE TRIGGER reject_settlement_preview_fixture BEFORE INSERT ON forecast_evaluation_result
+            FOR EACH ROW EXECUTE FUNCTION reject_settlement_preview_fixture()
+            """).update();
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(settlement::settleArrivalLabels)
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        } finally {
+            jdbc.sql("DROP TRIGGER reject_settlement_preview_fixture ON forecast_evaluation_result").update();
+            jdbc.sql("DROP FUNCTION reject_settlement_preview_fixture()").update();
+        }
+        assertThat(evaluationState()).isEqualTo("PENDING");
+
+        // when
+        settlement.settleArrivalLabels();
+
+        // then
+        // 이 입력은 관측 간격이 90초를 넘으므로 기존 규칙대로 추적 중단이다.
+        assertThat(evaluationState()).isEqualTo("LOST");
+        verify(recentBatches, times(1)).restore(eq(routeVersionId), anyList(), anyInt());
+    }
+
+    @Test
+    void 정산이_커밋되면_다음_조회에서_관측을_재사용한다() {
+        // given
+        settlement.settleArrivalLabels();
+        assertThat(evaluationState()).isEqualTo("LOST");
+
+        // when
+        var reused = inTransaction(() -> {
+            long revision = qualityAccess.lock(routeVersionId);
+            return observationCache.begin(SCORED_AT).read(arrivals, routeVersionId, revision, false,
+                "evaluation-vehicle", OBSERVED_AT.plusSeconds(1), 400);
+        });
+
+        // then
+        assertThat(reused).singleElement().satisfies(row -> {
+            assertThat(row.observationId()).isEqualTo(arrivalObservationId);
+            assertThat(row.remainingSeats()).isZero();
+        });
+        verify(recentBatches, times(1)).restore(eq(routeVersionId), anyList(), anyInt());
     }
 
     @Test
@@ -419,6 +500,15 @@ class JdbcForecastEvaluationTransactionTest {
         throw new AssertionError("평가 트랜잭션이 초기화 트랜잭션의 잠금을 기다리지 않았다");
     }
 
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FixedClock {
+        @Bean
+        @Primary
+        Clock arrivalCacheTestClock() {
+            return Clock.fixed(SCORED_AT, ZoneOffset.UTC);
+        }
+    }
+
     private ForecastEvaluation completedEvaluation() {
         return ForecastEvaluation.completed(sourceObservationId, TARGET_STOP_ORDER,
             new ArrivalLabel.Settled(arrivalObservationId, 0), SCORED_AT);
@@ -428,8 +518,8 @@ class JdbcForecastEvaluationTransactionTest {
         return jdbc.sql("""
                 INSERT INTO observation_batch(route_version_id, scheduled_at, attempt_number, attempt_key,
                     requested_at, response_received_at, completed_at, outcome,
-                    normalization_version, collection_strategy_version)
-                VALUES (?, ?, 1, ?, ?, ?, ?, 'SUCCESS_ROWS', 'normalization-v1', 'collection-v1')
+                    normalization_version, collection_strategy_version, stored_rows)
+                VALUES (?, ?, 1, ?, ?, ?, ?, 'SUCCESS_ROWS', 'normalization-v1', 'collection-v1', 1)
                 RETURNING id
                 """).params(routeVersionId, offset(observedAt), UUID.randomUUID().toString(),
                 offset(observedAt), offset(observedAt), offset(observedAt))

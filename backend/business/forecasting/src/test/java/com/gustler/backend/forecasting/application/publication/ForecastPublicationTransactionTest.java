@@ -51,6 +51,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /** 외부 테스트 트랜잭션 없이 실제 발행의 커밋·롤백과 수집 배치 잠금을 검증한다. */
@@ -85,8 +89,11 @@ class ForecastPublicationTransactionTest {
     @MockitoBean
     private SameDayFullOutcomesService outcomes;
 
-    @MockitoBean
+    @Autowired
     private RouteDataQualityAccess quality;
+
+    @Autowired
+    private PlatformTransactionManager transactions;
 
     @MockitoBean
     private ForecastRuntime forecastRuntime;
@@ -103,7 +110,6 @@ class ForecastPublicationTransactionTest {
     @BeforeEach
     void 발행_입력을_별도_트랜잭션에서_조회할_수_있게_저장한다() {
         when(forecastRuntime.resolveActive()).thenReturn(Optional.empty());
-        when(quality.lock(anyLong())).thenReturn(1L);
         final String routeKey = "publication-" + UUID.randomUUID().toString().substring(0, 12);
         routeId = jdbc.sql("""
                 INSERT INTO route (
@@ -153,8 +159,10 @@ class ForecastPublicationTransactionTest {
 
     @AfterEach
     void 이_테스트에서_저장한_자료를_정리한다() {
+        jdbc.sql("DROP TRIGGER IF EXISTS publication_work_failure ON forecast_evaluation_work").update();
+        jdbc.sql("DROP FUNCTION IF EXISTS publication_work_failure()").update();
         if (routeVersionId != 0) {
-            jdbc.sql("DELETE FROM forecast_evaluation_pending WHERE route_version_id = ?").param(routeVersionId).update();
+            jdbc.sql("DELETE FROM forecast_evaluation_work WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_evaluation_result WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM seat_forecast WHERE route_version_id = ?").param(routeVersionId).update();
             jdbc.sql("DELETE FROM forecast_publication WHERE route_version_id = ?").param(routeVersionId).update();
@@ -164,6 +172,7 @@ class ForecastPublicationTransactionTest {
             jdbc.sql("DELETE FROM route_version WHERE id = ?").param(routeVersionId).update();
         }
         if (routeId != 0) {
+            jdbc.sql("DELETE FROM route_data_quality WHERE route_id = ?").param(routeId).update();
             jdbc.sql("DELETE FROM route WHERE id = ?").param(routeId).update();
         }
         for (long deploymentId : deploymentIds) {
@@ -215,6 +224,107 @@ class ForecastPublicationTransactionTest {
         // when & then
         assertThatThrownBy(() -> writer.writeForecastsOf(batch, stops, runtime))
             .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
+    }
+
+    @Test
+    void 예보를_계산하는_동안_같은_노선의_품질_행을_잠그는_트랜잭션을_완료할_수_있다() {
+        // given
+        RuntimeSnapshot checking = runtime("unlocked-calculation", input -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            new TransactionTemplate(transactions).executeWithoutResult(status -> quality.lock(routeVersionId));
+            return RESULT;
+        });
+
+        // when
+        int saved = writer.writeForecastsOf(batch, stops, checking);
+
+        // then
+        assertThat(saved).isEqualTo(2);
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+    }
+
+    @Test
+    void 예보_계산_시작_후_품질_버전이_바뀌면_예보와_발행_기록과_정산_작업을_저장하지_않는다() {
+        // given
+        RuntimeSnapshot changing = runtime("quality-changed", input -> {
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                quality.lock(routeVersionId);
+                jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
+                    .param(routeId).update();
+            });
+            return RESULT;
+        });
+
+        // when
+        int saved = writer.writeForecastsOf(batch, stops, changing);
+
+        // then
+        assertThat(saved).isZero();
+        assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
+        assertThat(jdbc.sql("SELECT count(*) FROM forecast_evaluation_work WHERE route_version_id=?")
+            .param(routeVersionId).query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void 품질_변경으로_예보를_저장하지_않은_배치는_다음_호출에서_다시_계산해_저장한다() {
+        // given
+        RuntimeSnapshot changing = runtime("retry-after-quality", input -> {
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                quality.lock(routeVersionId);
+                jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
+                    .param(routeId).update();
+            });
+            return RESULT;
+        });
+        assertThat(writer.writeForecastsOf(batch, stops, changing)).isZero();
+        assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
+
+        // when
+        int saved = writer.writeForecastsOf(batch, stops, runtime);
+
+        // then
+        assertThat(saved).isEqualTo(2);
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+    }
+
+    @Test
+    void 정산_작업_등록이_실패하면_저장한_예보와_발행_기록을_롤백하고_수집_입력을_확정하지_않는다() {
+        // given
+        jdbc.sql("""
+            CREATE FUNCTION publication_work_failure() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION '정산 작업 등록 실패';
+            END;
+            $$
+            """).update();
+        jdbc.sql("""
+            CREATE TRIGGER publication_work_failure BEFORE INSERT ON forecast_evaluation_work
+            FOR EACH ROW EXECUTE FUNCTION publication_work_failure()
+            """).update();
+
+        // when
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(
+            () -> writer.writeForecastsOf(batch, stops, runtime));
+
+        // then
+        assertThat(failure).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
+        assertThat(jdbc.sql("SELECT count(*) FROM forecast_evaluation_work WHERE route_version_id=?")
+            .param(routeVersionId).query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void 이미_열린_트랜잭션_안에서_예보_계산을_호출하면_실행하지_않는다() {
+        // given
+        var transaction = new TransactionTemplate(transactions);
+
+        // when
+        Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
+            transaction.executeWithoutResult(status -> writer.writeForecastsOf(batch, stops, runtime)));
+
+        // then
+        assertThat(failure).isInstanceOf(IllegalTransactionStateException.class);
         assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
     }
 

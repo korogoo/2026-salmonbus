@@ -10,6 +10,16 @@ public class JdbcRouteDataQualityAccess implements RouteDataQualityAccess {
     public JdbcRouteDataQualityAccess(final JdbcClient jdbc) { this.jdbc = jdbc; }
 
     @Override
+    public long current(final long version) {
+        return jdbc.sql("""
+            SELECT COALESCE(q.quality_revision, 1)
+            FROM route_version v
+            LEFT JOIN route_data_quality q ON q.route_id = v.route_id
+            WHERE v.id = ?
+            """).param(version).query(Long.class).single();
+    }
+
+    @Override
     public long lock(final long version) {
         final long routeId = jdbc.sql("SELECT route_id FROM route_version WHERE id = ?")
             .param(version).query(Long.class).single();
@@ -18,10 +28,9 @@ public class JdbcRouteDataQualityAccess implements RouteDataQualityAccess {
 
     @Override
     public long lockByRoute(final long routeId) {
-        jdbc.sql("SELECT id FROM route WHERE id = ? FOR UPDATE").param(routeId).query(Long.class).single();
         jdbc.sql("INSERT INTO route_data_quality(route_id) VALUES (?) ON CONFLICT(route_id) DO NOTHING")
             .param(routeId).update();
-        return jdbc.sql("SELECT quality_revision FROM route_data_quality WHERE route_id = ?")
+        return jdbc.sql("SELECT quality_revision FROM route_data_quality WHERE route_id = ? FOR UPDATE")
             .param(routeId).query(Long.class).single();
     }
 

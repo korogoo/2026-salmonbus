@@ -69,7 +69,9 @@ final class BasisLifecycle {
         return path;
     }
 
-    private static void preserveData(RevisionStore.Revision previous, RevisionStore.Revision next) {
+    private static void preserveData(RevisionStore.Revision previous, RevisionStore.Revision next,
+            DataTransition.Approval approval) {
+        if (approval != null) approval.verify(previous, next, java.time.Instant.now());
         for (var name :
                 List.of(
                         "tools/data-contract.sha256",
@@ -89,6 +91,7 @@ final class BasisLifecycle {
         var names = new java.util.TreeSet<>(previous.files().keySet());
         names.addAll(next.files().keySet());
         for (var name : names) {
+            if (name.equals("tools/data-contract.sha256") && approval != null) continue;
             if (name.startsWith("tools/data/")
                     || List.of(
                                     "tools/data-contract.sha256",
@@ -133,6 +136,10 @@ final class BasisLifecycle {
     }
 
     Map<String, Object> change(Path incoming, final boolean apply) throws Exception {
+        return change(incoming, apply, null);
+    }
+
+    Map<String, Object> change(Path incoming, final boolean apply, DataTransition.Approval approval) throws Exception {
         Checks.require(host.root(), "ROOT_REQUIRED");
         var next = RevisionStore.verify(incoming, true);
         Checks.require(next.kind().equals("basis"), "DEV_BASIS_REVISION");
@@ -142,7 +149,7 @@ final class BasisLifecycle {
         Checks.require(
                 !FileOps.exists(journal()) && !FileOps.exists(layout.root().resolve(".deploying")),
                 "DEV_BASIS_RECOVERY_REQUIRED");
-        preserveData(previous, next);
+        preserveData(previous, next, approval);
         new Preflight(layout, host).check("prepare", Map.of());
         host.verifyInstance(host.identity());
         DataPreparation.requireStopped(host, "STOP_DEV_APPS_BEFORE_BASIS_CHANGE");

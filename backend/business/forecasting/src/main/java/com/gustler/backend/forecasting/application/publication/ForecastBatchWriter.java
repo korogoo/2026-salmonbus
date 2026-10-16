@@ -1,12 +1,6 @@
 package com.gustler.backend.forecasting.application.publication;
 
-import com.gustler.backend.forecasting.api.ForecastTelemetry;
-import com.gustler.backend.forecasting.application.AfterCommitTelemetry;
-import org.springframework.beans.factory.annotation.Autowired;
-
 import com.gustler.backend.forecasting.application.evaluation.SameDayFullOutcomesService;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
 import com.gustler.backend.forecasting.domain.publication.ForecastTimeSlot;
 import com.gustler.backend.forecasting.domain.model.SeatForecastInput;
 import com.gustler.backend.forecasting.domain.model.SeatRangeException;
@@ -14,14 +8,12 @@ import com.gustler.backend.forecasting.domain.publication.PendingForecastBatch;
 import com.gustler.backend.forecasting.domain.model.RouteStops;
 import com.gustler.backend.forecasting.domain.publication.SeatForecast;
 import com.gustler.backend.forecasting.domain.publication.ForecastPublication;
-import com.gustler.backend.forecasting.domain.publication.ForecastPublicationRepository;
 import com.gustler.backend.forecasting.domain.model.VehicleTrajectory;
 import com.gustler.backend.forecasting.domain.publication.VehicleTrajectoryQuery;
 import com.gustler.backend.forecasting.domain.statistics.StopDemandStatistics;
 import com.gustler.backend.forecasting.domain.statistics.StopDemandStatisticsRepository;
 import com.gustler.backend.forecasting.domain.statistics.TimeSlot;
 import com.gustler.backend.forecasting.application.quality.RouteDataQualityAccess;
-import com.gustler.backend.observations.api.CollectionInputs;
 
 import com.gustler.backend.forecasting.domain.deployment.RuntimeSnapshot;
 import com.gustler.backend.forecasting.domain.model.SameDayFullOutcomes;
@@ -35,72 +27,55 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
-/** 수집 배치 하나의 예측 계산과 발행을 한 트랜잭션으로 처리한다. */
+/** 조회·계산은 트랜잭션 밖에서 수행하고, 발행 확정만 별도 빈에 맡긴다. */
 @Component
 @ConditionalOnProperty(prefix = "forecast", name = "enabled", havingValue = "true")
 public class ForecastBatchWriter {
-    private ForecastTelemetry telemetry = ForecastTelemetry.NONE;
-
-    @Autowired(required = false)
-    public void setTelemetry(ForecastTelemetry telemetry) { this.telemetry = telemetry; }
-
-
     private static final Logger log = LoggerFactory.getLogger(ForecastBatchWriter.class);
 
     private final VehicleTrajectoryQuery vehicleTrajectoryQuery;
-    private final ForecastPublicationRepository publications;
-    private final ForecastEvaluationRepository evaluations;
+    private final ForecastBatchCommitter committer;
     private final SameDayFullOutcomesService sameDayFullOutcomesService;
     private final StopDemandStatisticsRepository stopDemandStatisticsRepository;
     private final Clock clock;
     private final RouteDataQualityAccess quality;
-    private final CollectionInputs collectionInputs;
 
     public ForecastBatchWriter(
         VehicleTrajectoryQuery vehicleTrajectoryQuery,
-        ForecastPublicationRepository publications,
-        ForecastEvaluationRepository evaluations,
+        ForecastBatchCommitter committer,
         SameDayFullOutcomesService sameDayFullOutcomesService,
         StopDemandStatisticsRepository stopDemandStatisticsRepository,
         Clock clock,
-        RouteDataQualityAccess quality,
-        CollectionInputs collectionInputs
+        RouteDataQualityAccess quality
     ) {
         this.vehicleTrajectoryQuery = vehicleTrajectoryQuery;
-        this.publications = publications;
-        this.evaluations = evaluations;
+        this.committer = committer;
         this.sameDayFullOutcomesService = sameDayFullOutcomesService;
         this.stopDemandStatisticsRepository = stopDemandStatisticsRepository;
         this.clock = clock;
         this.quality = quality;
-        this.collectionInputs = collectionInputs;
     }
 
     /** 이번 호출에서 저장한 예보 수. 빈 발행도 기존처럼 처리 완료로 확정한다. */
-    @Transactional
+    @Transactional(propagation = Propagation.NEVER)
     public int writeForecastsOf(
         PendingForecastBatch batch,
         RouteStops stops,
         RuntimeSnapshot runtime
     ) {
-        final long qualityRevision = quality.lock(batch.routeVersionId());
+        final long qualityRevision = quality.current(batch.routeVersionId());
         Instant generatedAt = clock.instant();
         TimeSlot timeSlot = ForecastTimeSlot.of(batch, clock);
         StopDemandStatistics statistics = stopDemandStatisticsOf(batch, runtime, timeSlot);
         Map<Integer, SameDayFullOutcomes> sameDayOutcomes =
             sameDayFullOutcomesService.outcomesFor(batch.routeId(), runtime.deploymentId(), batch.responseReceivedAt());
         List<SeatForecast> predictions = forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt);
-        publications.save(new ForecastPublication(
+        ForecastPublication publication = new ForecastPublication(
             batch.observationBatchId(), batch.routeVersionId(), runtime.deploymentId(), statistics.revision(),
-            qualityRevision, batch.responseReceivedAt(), generatedAt, generatedAt, predictions));
-        evaluations.addPending(batch.routeVersionId(), predictions.stream()
-            .map(prediction -> ForecastEvaluation.pending(prediction.vehicleObservationId(), prediction.targetStopOrder()))
-            .toList());
-        collectionInputs.confirmInput(batch.observationBatchId(), generatedAt);
-        AfterCommitTelemetry.record(() -> telemetry.published(batch.routeId(), batch.routeVersionId(),
-            batch.responseReceivedAt(), predictions.size()));
-        return predictions.size();
+            qualityRevision, batch.responseReceivedAt(), generatedAt, generatedAt, predictions);
+        return committer.commit(batch, publication);
     }
 
     /** 관측 시점에 사용할 수 있었던 통계 값과 버전을 함께 읽는다. */

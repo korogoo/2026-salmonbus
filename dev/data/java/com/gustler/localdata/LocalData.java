@@ -139,14 +139,17 @@ public final class LocalData {
     private static void resetGenerated(Connection connection, RouteDataset data) throws Exception {
         execute(connection, """
             TRUNCATE daily_call_quota, observation_batch, vehicle_observation, seat_forecast,
-                forecast_publication, forecast_evaluation_pending, forecast_evaluation_result,
+                forecast_publication, forecast_evaluation_work, forecast_evaluation_result,
+                evaluation_archive_member, evaluation_archive_batch, evaluation_archive_scan,
+                file_statistics_publication,
                 observation_trip_assignment,
                 vehicle_one_way_trip, trip_quality_rebuild, same_day_full_outcomes,
                 same_day_model_full_outcomes, stop_demand_pending_sample, stop_demand_rebuild_request,
                 stop_demand_current_total, stop_demand_baseline, stop_demand_rebuild_progress,
                 stop_demand_rebuild_total, stop_demand_rebuild_scan, stop_demand_vehicle,
                 stop_demand_run, stop_demand_capacity_stage, stop_demand_day_stage,
-                stop_demand_cell_stage, stop_demand_statistics, demand_statistics_version
+                stop_demand_cell_stage, stop_demand_statistics, demand_statistics_version;
+            INSERT INTO evaluation_archive_scan(id) VALUES(1)
             """);
         execute(connection, "UPDATE route_data_quality SET quality_revision=1");
         for (RouteDataset.Route route : data.routes()) {

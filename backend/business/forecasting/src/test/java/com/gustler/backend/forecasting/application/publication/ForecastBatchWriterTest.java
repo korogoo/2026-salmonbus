@@ -22,7 +22,7 @@ import com.gustler.backend.forecasting.domain.publication.SeatForecast;
 import com.gustler.backend.forecasting.domain.publication.ForecastPublication;
 import com.gustler.backend.forecasting.domain.publication.ForecastPublicationRepository;
 import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluation;
-import com.gustler.backend.forecasting.domain.evaluation.ForecastEvaluationRepository;
+import com.gustler.backend.forecasting.application.evaluation.EvaluationWorkStore;
 import com.gustler.backend.forecasting.domain.evaluation.ScoringState;
 import com.gustler.backend.observations.api.CollectionInputs;
 import com.gustler.backend.forecasting.domain.model.SeatSlope;
@@ -84,18 +84,20 @@ class ForecastBatchWriterTest {
 
     private final VehicleTrajectoryQuery trajectories = mock(VehicleTrajectoryQuery.class);
     private final ForecastPublicationRepository forecasts = mock(ForecastPublicationRepository.class);
-    private final ForecastEvaluationRepository evaluations = mock(ForecastEvaluationRepository.class);
+    private final EvaluationWorkStore evaluations = mock(EvaluationWorkStore.class);
     private final StopDemandStatisticsRepository statistics = mock(StopDemandStatisticsRepository.class);
     private final RouteDataQualityAccess quality =
         mock(RouteDataQualityAccess.class);
     private final SameDayFullOutcomesService outcomes = mock(SameDayFullOutcomesService.class);
     private final CollectionInputs inputs = mock(CollectionInputs.class);
-    private final ForecastBatchWriter writer = new ForecastBatchWriter(trajectories, forecasts, evaluations, outcomes,
-        statistics, CLOCK, quality, inputs);
+    private final ForecastBatchWriter writer = new ForecastBatchWriter(trajectories,
+        new ForecastBatchCommitter(forecasts, evaluations, quality, inputs), outcomes,
+        statistics, CLOCK, quality);
     private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 
     @BeforeEach
     void setUp() {
+        when(quality.current(anyLong())).thenReturn(1L);
         when(quality.lock(anyLong())).thenReturn(1L);
         when(statistics.readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW)).thenReturn(STATISTICS);
         when(outcomes.outcomesFor(1, 7L, NOW)).thenReturn(Map.of());
@@ -110,7 +112,7 @@ class ForecastBatchWriterTest {
     }
 
     @Test
-    void 예보_생성은_편도_조사_없이_노선_잠금_후_통계를_조회한다() {
+    void 예보_계산에_쓸_품질_버전과_통계를_읽은_뒤_저장_직전에_품질_행을_잠근다() {
         // given
         var snapshot = runtime(input -> RESULT);
 
@@ -119,8 +121,10 @@ class ForecastBatchWriterTest {
 
         // then
         var order = inOrder(quality, statistics, forecasts);
-        order.verify(quality).lock(BATCH.routeVersionId());
+        order.verify(quality).current(BATCH.routeVersionId());
         order.verify(statistics).readAsOf(1, STATISTICS.timeSlot(), "feature-v1", NOW);
+        order.verify(quality).lock(BATCH.routeVersionId());
+        order.verify(forecasts).save(any());
     }
 
     @Test
@@ -140,7 +144,7 @@ class ForecastBatchWriterTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void 발행한_예측마다_평가를_대기_상태로_만든다() {
+    void 한_관측에서_여러_예보를_발행해도_작업은_관측별로_등록한다() {
         // given
         when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(10, 12, 44), vehicle(11, 20, 44)));
 
@@ -148,12 +152,9 @@ class ForecastBatchWriterTest {
         writer.writeForecastsOf(BATCH, STOPS, runtime(this::predictWithSeatValidation));
 
         // then
-        ArgumentCaptor<List<ForecastEvaluation>> pending = ArgumentCaptor.forClass(List.class);
-        verify(evaluations).addPending(eq(BATCH.routeVersionId()), pending.capture());
-        assertThat(pending.getValue())
-            .extracting(ForecastEvaluation::vehicleObservationId, ForecastEvaluation::targetStopOrder)
-            .containsExactlyInAnyOrder(tuple(10L, 4), tuple(10L, 5), tuple(11L, 4), tuple(11L, 5));
-        assertThat(pending.getValue()).extracting(ForecastEvaluation::state).containsOnly(ScoringState.PENDING);
+        ArgumentCaptor<List<Long>> pending = ArgumentCaptor.forClass(List.class);
+        verify(evaluations).register(eq(BATCH.routeVersionId()), pending.capture());
+        assertThat(pending.getValue()).containsExactlyInAnyOrder(10L, 11L);
     }
 
     @ParameterizedTest

@@ -71,6 +71,9 @@ class JdbcForecastEvaluationRepositoryTest {
     private JdbcForecastEvaluationRepository evaluationRepository;
 
     @Autowired
+    private JdbcEvaluationWorkStore work;
+
+    @Autowired
     private JdbcClient jdbcClient;
 
     @Autowired
@@ -81,6 +84,54 @@ class JdbcForecastEvaluationRepositoryTest {
     private long modelDeploymentId;
     private long observationBatchId;
     private long vehicleObservationId;
+
+    @Test
+    void 같은_관측의_예보가_여럿이어도_복구_기록은_하나만_남긴다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT),
+            forecastOf(NEXT_TARGET_STOP_ORDER, STOPS_TO_NEXT_TARGET, NEXT_GENERATED_AT)));
+
+        // when
+        work.register(routeVersionId, List.of(vehicleObservationId));
+
+        // then
+        assertThat(work.page(routeVersionId, 0, vehicleObservationId, 100)).containsExactly(vehicleObservationId);
+        assertThat(work.restore(routeVersionId, List.of(vehicleObservationId))).hasSize(2);
+    }
+
+    @Test
+    void 같은_관측의_모든_예보가_종료돼야_복구_기록을_제거한다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT),
+            forecastOf(NEXT_TARGET_STOP_ORDER, STOPS_TO_NEXT_TARGET, NEXT_GENERATED_AT)));
+        evaluationRepository.settle(List.of(ForecastEvaluation.completed(vehicleObservationId,
+            TARGET_STOP_ORDER, new ArrivalLabel.Lost(), SCORED_AT)));
+        assertThat(work.releaseCompleted(routeVersionId, List.of(vehicleObservationId))).isEmpty();
+
+        // when
+        evaluationRepository.settle(List.of(ForecastEvaluation.completed(vehicleObservationId,
+            NEXT_TARGET_STOP_ORDER, new ArrivalLabel.Lost(), SCORED_AT)));
+        List<Long> released = work.releaseCompleted(routeVersionId, List.of(vehicleObservationId));
+
+        // then
+        assertThat(released).containsExactly(vehicleObservationId);
+        assertThat(work.restore(routeVersionId, List.of(vehicleObservationId))).isEmpty();
+        assertThat(work.completed(routeVersionId, List.of(vehicleObservationId))).hasSize(2);
+    }
+
+    @Test
+    void 순회_끝점_뒤의_작업은_이번_조회에_포함하지_않는다() {
+        // given
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+
+        // when
+        List<Long> before = work.page(routeVersionId, 0, vehicleObservationId - 1, 100);
+        List<Long> through = work.page(routeVersionId, 0, vehicleObservationId, 100);
+
+        // then
+        assertThat(before).isEmpty();
+        assertThat(through).containsExactly(vehicleObservationId);
+    }
 
     @BeforeEach
     void 노선_판본과_정류소와_모델과_관측을_먼저_저장한다() {

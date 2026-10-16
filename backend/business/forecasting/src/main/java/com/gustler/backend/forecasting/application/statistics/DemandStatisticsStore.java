@@ -17,6 +17,9 @@ public interface DemandStatisticsStore {
 
     void limitStatementTime();
 
+    /** 쓰기·행 잠금 없이, 재집계할 일이 없고 갱신 주기가 남은 완료 통계의 기준 시각을 읽는다. */
+    Optional<Instant> idleDataUntil(long routeVersionId, Instant completedAfter);
+
     DemandStatisticsBaseline baseline(long routeVersionId);
 
     void recordBaseline(long routeVersionId, boolean initialized, Instant dataUntil);

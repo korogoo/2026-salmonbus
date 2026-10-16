@@ -21,6 +21,7 @@ class BasisDigestTest {
                         "dev/server/tools/src/main/Tool.java",
                         "dev/server/tools/build.gradle",
                         "dev/server/tools/settings.gradle",
+                        "backend/deploy/sql/prepare-evaluation-work-transition.sql",
                         "dev/server/api.yml",
                         "dev/server/worker.yml",
                         "dev/server/replay.json",
