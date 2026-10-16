@@ -208,6 +208,9 @@ final class DeploymentPreparation {
                 return Map.of("status", "ok", "recoveryRequired", false);
             }
             var state = Json.read(FileOps.privateText(journal()).getBytes());
+            if (List.of("COMPLETE", "ROLLED_BACK").contains(state.path("phase").asText())) {
+                return Map.of("status", "ok", "recoveryRequired", false);
+            }
             if (state.path("dataTransition").asBoolean() && !state.path("phase").asText().equals("COMPLETE")) {
                 stopApplications();
                 ((tools.jackson.databind.node.ObjectNode) state).put("phase", "RECOVERY_REQUIRED");

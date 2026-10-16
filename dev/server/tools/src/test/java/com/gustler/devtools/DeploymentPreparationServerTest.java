@@ -141,6 +141,56 @@ class DeploymentPreparationServerTest {
     }
 
     @Test
+    void 복구_완료_기록은_다음_실패에서_서비스를_다시_중지하지_않는다() throws Exception {
+        // given
+        changeDataContract();
+        approveDataContract();
+        preparation().prepare(incoming, apiEnvironment);
+        var journal = fixture.layout.data().resolve("deployment-preparation/current.json");
+        var state = (tools.jackson.databind.node.ObjectNode) Json.read(journal);
+        state.put("phase", "ROLLED_BACK");
+        FileOps.atomicFile(journal, Json.bytes(state), 0600);
+        host.apiActive = true;
+        host.workerActive = true;
+        host.calls.clear();
+
+        // when
+        var result = preparation().recover(incoming, apiEnvironment);
+        var oldWorker = RevisionStore.verify(fixture.layout.root().resolve("worker/current").toRealPath(), true);
+        DataTransition.requireApplication(fixture.layout, oldWorker);
+
+        // then
+        assertEquals(false, result.get("recoveryRequired"));
+        assertTrue(host.apiActive);
+        assertTrue(host.workerActive);
+        assertTrue(host.calls.stream().noneMatch(c -> c.contains("stop")));
+        assertEquals("ROLLED_BACK", Json.read(journal).path("phase").asText());
+    }
+
+    @Test
+    void 만료된_승인은_앱을_중지하거나_복구_기록을_만들기_전에_거절한다() throws Exception {
+        // given
+        changeDataContract();
+        approveDataContract();
+        var file = fixture.layout.data().resolve("deployment-preparation/approval.json");
+        var approval = (tools.jackson.databind.node.ObjectNode) Json.read(file);
+        approval.put("expiresAt", java.time.Instant.now().minusSeconds(1).toString());
+        FileOps.atomicFile(file, Json.bytes(approval), 0600);
+
+        // when
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> preparation().prepare(incoming, apiEnvironment));
+        var recovery = preparation().recover(incoming, apiEnvironment);
+
+        // then
+        assertEquals("DEV_DATA_TRANSITION_APPROVAL", failure.getMessage());
+        assertEquals(false, recovery.get("recoveryRequired"));
+        assertTrue(host.apiActive);
+        assertTrue(host.workerActive);
+        assertFalse(Files.exists(fixture.layout.data().resolve("deployment-preparation/current.json")));
+    }
+
+    @Test
     void 승인_없이_데이터_계약을_바꾸면_앱을_중지하기_전에_거절한다() throws Exception {
         // given
         changeDataContract();
