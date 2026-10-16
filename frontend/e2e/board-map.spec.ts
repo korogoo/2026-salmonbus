@@ -840,7 +840,8 @@ test("70% 시트에서 버스 선택은 펼친 정류장을 유지하고 갱신�
   vehicle.currentStopSequence = nextStop.sequence;
   vehicle.stopId = nextStop.stopId;
   vehicle.stopName = nextStop.name;
-  api.data.vehicles.observation.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.board.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.vehicles.observation.observedAt = api.data.board.observedAt;
   api.data.vehicles.observation.staleAt = "2026-09-16T08:06:00+09:00";
   const refreshedVehicles = page.waitForResponse(
     (response) => new URL(response.url()).pathname === apiPaths.vehicles && response.status() === 200,
@@ -948,7 +949,8 @@ test("목록 버스는 70% 시트와 펼침·스크롤을 유지하며 지도에
   vehicle.currentStopSequence = nextStop.sequence;
   vehicle.stopId = nextStop.stopId;
   vehicle.stopName = nextStop.name;
-  api.data.vehicles.observation.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.board.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.vehicles.observation.observedAt = api.data.board.observedAt;
   api.data.vehicles.observation.staleAt = "2026-09-16T08:06:00+09:00";
   const refreshedVehicles = page.waitForResponse(
     (response) => new URL(response.url()).pathname === apiPaths.vehicles && response.status() === 200,
@@ -1114,7 +1116,8 @@ test("정류장명과 현재 좌석을 함께 표시하고 줌과 잔여석 응�
   await expect(stopName).toBeHidden();
   await expect(bus).toBeVisible();
   vehicle.seat = { kind: "EXACT", remaining: 0 };
-  api.data.vehicles.observation.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.board.observedAt = "2026-09-16T08:01:00+09:00";
+  api.data.vehicles.observation.observedAt = api.data.board.observedAt;
   api.data.vehicles.observation.staleAt = "2026-09-16T08:06:00+09:00";
   const refreshedVehicles = page.waitForResponse(
     (response) => new URL(response.url()).pathname === apiPaths.vehicles && response.status() === 200,

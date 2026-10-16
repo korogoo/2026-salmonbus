@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { track } from "@/shared/analytics/track";
 import type { ApiFailure, ApiResult } from "@/shared/api/client";
-import { latestSuccessOf, type PolledResource } from "@/shared/api/polledResource";
+import type { PolledResource } from "@/shared/api/polledResource";
 import { fetchBoard } from "@/shared/api/routeForecast.api";
 import type { Board, Direction, DirectionInfo, LiveVehicles } from "@/shared/api/routeForecast.types";
 import { usePolledRequest } from "@/shared/api/usePolledRequest";
@@ -16,13 +16,15 @@ import {
   type ExpandableStopView,
 } from "./components/displayPolicy";
 import { liveVehicleViewsFor } from "./components/liveVehiclePolicy";
-import { useLiveVehicles } from "./hooks/useLiveVehicles";
+import { useFreshLiveVehicles, useLiveVehicles } from "./hooks/useLiveVehicles";
 import { useLiveVehicleMotion } from "./hooks/useLiveVehicleMotion";
 import { useStationArrivals } from "./hooks/useStationArrivals";
 import type { StopSelection } from "./components/stopSelection";
 import type { BoardSheetSnap } from "./components/boardSheetPolicy";
 import { BoardBottomSheet } from "./components/BoardBottomSheet";
 import { BoardRouteSummary } from "./components/BoardRouteSummary";
+import type { BoardSnapshot } from "./boardSnapshotPolicy";
+import { useBoardSnapshot } from "./useBoardSnapshot";
 import { DirectionTabs } from "./components/DirectionTabs";
 import { StopBoard } from "./components/StopBoard";
 import { useBoardVisitEvents } from "./analytics/useBoardVisitEvents";
@@ -58,13 +60,15 @@ export function VerdictBoardPage() {
 }
 
 function RouteBoard({ routeId }: { routeId: Board["route"]["id"] }) {
-  const resource = usePolledRequest(loadBoard, routeId);
-  const liveVehicleState = useLiveVehicles(routeId);
+  const boardResource = usePolledRequest(loadBoard, routeId);
+  const { liveVehicleResource, motionDurationMs } = useLiveVehicles(routeId);
+  const snapshot = useBoardSnapshot(routeId, boardResource, liveVehicleResource);
+  const freshLiveVehicles = useFreshLiveVehicles(snapshot?.liveVehicles ?? null);
   const [preferredDirection, setPreferredDirection] = useState<Direction | null>(null);
   const [switched, setSwitched] = useState(false);
-  const state = boardStateOf(resource, preferredDirection);
+  const state = boardStateOf(boardResource, snapshot, preferredDirection);
   const screen = boardScreenOf(state);
-  const { trackStopExpanded } = useBoardVisitEvents({ routeId, screen, latestSuccess: latestSuccessOf(resource) });
+  const { trackStopExpanded } = useBoardVisitEvents({ routeId, screen, latestSuccess: snapshot?.board ?? null });
 
   function selectDirection(next: Direction) {
     if (state.status === "ready" && next !== state.direction.id) {
@@ -81,8 +85,8 @@ function RouteBoard({ routeId }: { routeId: Board["route"]["id"] }) {
         board={state.board}
         direction={state.direction}
         switched={switched}
-        liveVehicles={liveVehicleState.liveVehicles}
-        liveMotionDurationMs={liveVehicleState.motionDurationMs}
+        liveVehicles={freshLiveVehicles}
+        liveMotionDurationMs={motionDurationMs}
         onDirectionChange={selectDirection}
         onStopExpand={(stop, rowPosition) => trackStopExpanded(stop, state.direction.id, rowPosition)}
       />
@@ -302,18 +306,19 @@ function BoardBackLink({ inHeader = false }: { inHeader?: boolean }) {
   );
 }
 
-function boardStateOf(resource: PolledResource<Board>, preferredDirection: Direction | null): BoardState {
-  switch (resource.status) {
-    case "pending":
-      return { status: "loading" };
-    case "loadingError":
-      return { status: "error", failure: resource.failure };
-    case "success":
-    case "refetchError": {
-      const board = resource.latestSuccess.body;
-      return { status: "ready", board, direction: directionInfoFor(board, preferredDirection) };
-    }
+function boardStateOf(
+  resource: PolledResource<Board>,
+  snapshot: BoardSnapshot | null,
+  preferredDirection: Direction | null,
+): BoardState {
+  if (snapshot !== null) {
+    const board = snapshot.board.body;
+    return { status: "ready", board, direction: directionInfoFor(board, preferredDirection) };
   }
+  if (resource.status === "loadingError") {
+    return { status: "error", failure: resource.failure };
+  }
+  return { status: "loading" };
 }
 
 function boardScreenOf(state: BoardState): BoardScreen {
