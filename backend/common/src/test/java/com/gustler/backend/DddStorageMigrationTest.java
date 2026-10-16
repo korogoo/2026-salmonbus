@@ -240,6 +240,88 @@ class DddStorageMigrationTest {
         assertThat(scalar("SELECT to_regclass('forecast_evaluation_work')::text")).isNull();
     }
 
+    @Test
+    void 기존_대기가_이관_기록과_겹쳐_복원에서_빠지면_전환을_취소한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        execute("""
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
+            VALUES('00000000-0000-0000-0000-000000000002',1,7,
+                   '00000000-0000-0000-0000-000000000003',now(),1);
+            INSERT INTO evaluation_archive_member(vehicle_observation_id,target_stop_order,route_version_id,batch_id,original_sha256)
+            VALUES(1,3,1,'00000000-0000-0000-0000-000000000002',repeat('a',64))
+            """);
+        approveEvaluationTransition();
+
+        // when
+        assertThatThrownBy(() -> migrate("39"))
+            .hasMessageContaining("기존 대기와 관측별 복원 결과가 다르다");
+
+        // then
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
+        assertThat(scalar("SELECT to_regclass('forecast_evaluation_work')::text")).isNull();
+    }
+
+    @Test
+    void 개발_DB의_V33에서_승인_후_V39까지_한번에_전환해도_대기와_완료_평가를_보존한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("33");
+        long pending = number("SELECT count(*) FROM forecast_evaluation_pending");
+        long completed = number("SELECT count(*) FROM forecast_evaluation_result");
+        approveEvaluationTransition();
+
+        // when
+        migrate("39");
+        migrate("39");
+
+        // then
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(completed);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
+        assertThat(scalar("SELECT relkind::text FROM pg_class WHERE oid='forecast_evaluation_pending'::regclass"))
+            .isEqualTo("v");
+        assertThat(scalar("SELECT to_regclass('sal175_evaluation_transition')::text")).isNull();
+    }
+
+    @Test
+    void 전환_검증은_전체_예보를_읽지_않고_대기_관측의_기존_인덱스를_사용한다() throws Exception {
+        // given: 실제 데이터가 아닌 10만 건의 합성 예보 중 마지막 관측의 10건만 대기한다.
+        execute("""
+            CREATE TABLE seat_forecast(vehicle_observation_id bigint, target_stop_order integer,
+                route_version_id bigint, PRIMARY KEY(vehicle_observation_id,target_stop_order));
+            CREATE TABLE forecast_evaluation_result(LIKE seat_forecast INCLUDING INDEXES);
+            CREATE TABLE evaluation_archive_member(LIKE seat_forecast INCLUDING INDEXES);
+            CREATE TABLE forecast_evaluation_work(vehicle_observation_id bigint PRIMARY KEY, route_version_id bigint);
+            CREATE TABLE forecast_evaluation_pending_legacy(LIKE seat_forecast INCLUDING INDEXES);
+            INSERT INTO seat_forecast SELECT (n-1)/10+1,(n-1)%10+1,1 FROM generate_series(1,100000) n;
+            INSERT INTO forecast_evaluation_work VALUES(10000,1);
+            INSERT INTO forecast_evaluation_pending_legacy SELECT * FROM seat_forecast WHERE vehicle_observation_id=10000;
+            ANALYZE seat_forecast;
+            ANALYZE forecast_evaluation_work;
+            ANALYZE forecast_evaluation_pending_legacy;
+            ANALYZE forecast_evaluation_result;
+            ANALYZE evaluation_archive_member
+            """);
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/V39__observation_evaluation_work.sql"));
+        String verification = migration.substring(migration.indexOf("WITH restored AS MATERIALIZED"),
+            migration.indexOf(" INTO mismatch;"));
+
+        // when
+        StringBuilder plan = new StringBuilder();
+        try (var statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("EXPLAIN (ANALYZE, BUFFERS) " + verification)) {
+            while (rows.next()) plan.append(rows.getString(1)).append('\n');
+        }
+
+        // then
+        assertThat(scalar(verification)).isEqualTo("f");
+        assertThat(plan.toString()).contains("seat_forecast_pkey")
+            .doesNotContain("Seq Scan on seat_forecast");
+        System.out.println("V39 synthetic verification plan:\n" + plan);
+    }
+
     private void preparePendingTransition() throws SQLException {
         migrate("24");
         insertLegacyData();
