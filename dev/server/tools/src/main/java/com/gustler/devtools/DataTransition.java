@@ -113,7 +113,7 @@ class DataTransition {
         var journal = layout.data().resolve("deployment-preparation/current.json");
         if (!FileOps.exists(journal)) return;
         var state = Json.read(FileOps.privateText(journal).getBytes());
-        if (!state.path("dataTransition").asBoolean() || state.path("phase").asText().equals("COMPLETE")) return;
+        if (!state.path("dataTransition").asBoolean() || Set.of("COMPLETE", "ROLLED_BACK").contains(state.path("phase").asText())) return;
         var allowed = app.kind().equals("api") ? Set.of("PREPARED", "API_READY") : Set.of("API_READY");
         Checks.require(app.commit().equals(state.path("commit").asText())
                         && allowed.contains(state.path("phase").asText()),
