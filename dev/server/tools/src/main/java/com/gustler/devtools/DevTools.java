@@ -68,6 +68,19 @@ public final class DevTools {
                     default -> preparation.complete(incoming, environment);
                 });
             }
+            case "start-infra" -> {
+                Checks.require(args.length == 1, "ARGUMENTS");
+                var settings = new Preflight(layout, host).check("infra", environment);
+                var services = Environment.DATABASE.equals(settings.get("api").get("DB_URL"))
+                        ? java.util.List.of("postgres", "mongodb", "gbis-mock")
+                        : java.util.List.of("mongodb", "gbis-mock");
+                var command = new java.util.ArrayList<>(java.util.List.of(
+                        "/usr/bin/docker", "compose", "--env-file", "/dev/null", "--file", "compose.yaml",
+                        "up", "--detach", "--no-build", "--wait", "--wait-timeout", "180"));
+                command.addAll(services);
+                host.run(layout.root().resolve("infra/current"), null,
+                        java.time.Duration.ofSeconds(195), command).checked();
+            }
             case "preflight" -> {
                 Checks.require(args.length == 2, "COMPONENT");
                 new Preflight(layout, host).check(args[1], environment);

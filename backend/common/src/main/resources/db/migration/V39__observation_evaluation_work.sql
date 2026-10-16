@@ -48,6 +48,8 @@ INSERT INTO forecast_evaluation_work(vehicle_observation_id, route_version_id)
 SELECT DISTINCT vehicle_observation_id, route_version_id
 FROM forecast_evaluation_pending;
 
+ANALYZE forecast_evaluation_work;
+
 ALTER TABLE forecast_evaluation_pending RENAME TO forecast_evaluation_pending_legacy;
 
 CREATE VIEW forecast_evaluation_pending AS
@@ -67,21 +69,45 @@ AND NOT EXISTS (
       AND archived.target_stop_order = forecast.target_stop_order
 );
 
+-- 전환 검증에서만 관측별 인덱스 조회를 유지한다. 런타임 뷰의 실행 계획은 바꾸지 않는다.
+-- OFFSET 0은 서브쿼리 병합을 막아 전체 예보와의 해시 조인으로 변하는 것을 방지한다.
 DO $$
+DECLARE mismatch boolean;
 BEGIN
-    IF EXISTS (
+    WITH restored AS MATERIALIZED (
+        SELECT forecast.vehicle_observation_id, forecast.target_stop_order, work.route_version_id
+        FROM forecast_evaluation_work work
+        CROSS JOIN LATERAL (
+            SELECT candidate.vehicle_observation_id, candidate.target_stop_order
+            FROM seat_forecast candidate
+            WHERE candidate.vehicle_observation_id = work.vehicle_observation_id
+              AND candidate.route_version_id = work.route_version_id
+            OFFSET 0
+        ) forecast
+        WHERE NOT EXISTS (
+            SELECT 1 FROM forecast_evaluation_result result
+            WHERE result.vehicle_observation_id = forecast.vehicle_observation_id
+              AND result.target_stop_order = forecast.target_stop_order
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM evaluation_archive_member archived
+            WHERE archived.vehicle_observation_id = forecast.vehicle_observation_id
+              AND archived.target_stop_order = forecast.target_stop_order
+        )
+    )
+    SELECT EXISTS (
         SELECT vehicle_observation_id, target_stop_order, route_version_id
         FROM forecast_evaluation_pending_legacy
         EXCEPT
-        SELECT vehicle_observation_id, target_stop_order, route_version_id
-        FROM forecast_evaluation_pending
+        SELECT * FROM restored
     ) OR EXISTS (
-        SELECT vehicle_observation_id, target_stop_order, route_version_id
-        FROM forecast_evaluation_pending
+        SELECT * FROM restored
         EXCEPT
         SELECT vehicle_observation_id, target_stop_order, route_version_id
         FROM forecast_evaluation_pending_legacy
-    ) THEN
+    ) INTO mismatch;
+
+    IF mismatch THEN
         RAISE EXCEPTION '기존 대기와 관측별 복원 결과가 다르다';
     END IF;
 END $$;
