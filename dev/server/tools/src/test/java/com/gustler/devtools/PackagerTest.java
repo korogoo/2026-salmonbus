@@ -18,6 +18,54 @@ import java.util.jar.Manifest;
 class PackagerTest {
     @TempDir Path root;
 
+    @Test
+    void 개발_배포물의_시작_스크립트가_누락된_운영_스크립트를_요구하지_않는다() throws Exception {
+        var repo = Path.of("../../..").toAbsolutePath().normalize();
+        var bundle = root.resolve("application");
+        new Packager(repo, new Host()).copyApplicationScripts(bundle);
+        var scripts = bundle.resolve("scripts");
+        var calls = root.resolve("calls");
+        Files.writeString(scripts.resolve("common.sh"), """
+                set -euo pipefail
+                COMPONENT=api
+                UNIT=salmonbus-api
+                JAR=/opt/salmonbus-dev/api/current/jars/api-app.jar
+                CHANGED=/nonexistent/change-marker
+                claim_deploy() { :; }
+                unit_pid() { echo 123; }
+                log() { :; }
+                pgrep() { return 1; }
+                systemctl() {
+                  if [ "$1" = is-active ]; then return 1; fi
+                  echo "$*" >> "$CALLS"
+                }
+                """);
+
+        var process = new ProcessBuilder("bash", scripts.resolve("start-body.sh").toString())
+                .redirectErrorStream(true);
+        process.environment().put("CALLS", calls.toString());
+        var running = process.start();
+        var output = new String(running.getInputStream().readAllBytes());
+
+        assertEquals(0, running.waitFor(), output);
+        assertEquals("stop salmonbus-api\nstart salmonbus-api\n", Files.readString(calls));
+    }
+
+    @Test
+    void 개발_배포_검증이_실패하면_서비스를_시작하지_않는다() throws Exception {
+        var repo = Path.of("../../..").toAbsolutePath().normalize();
+        var bundle = root.resolve("rejected");
+        new Packager(repo, new Host()).copyApplicationScripts(bundle);
+        var scripts = bundle.resolve("scripts");
+        Files.writeString(scripts.resolve("common.sh"), "set -euo pipefail\nexit 42\n");
+
+        var running = new ProcessBuilder("bash", scripts.resolve("start-body.sh").toString())
+                .redirectErrorStream(true).start();
+        var output = new String(running.getInputStream().readAllBytes());
+
+        assertEquals(42, running.waitFor(), output);
+    }
+
     private Path archive(String architecture, String entry) throws Exception {
         var path = root.resolve("image-" + java.util.UUID.randomUUID() + ".tar");
         var config = Json.bytes(Map.of("architecture", architecture, "os", "linux"));

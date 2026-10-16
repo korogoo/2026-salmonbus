@@ -30,6 +30,24 @@ final class Packager {
         FileOps.mode(destination, destination.toString().endsWith(".sh") ? 0755 : 0644);
     }
 
+    void copyApplicationScripts(Path directory) throws Exception {
+        for (var name : List.of("common.sh", "guard.sh", "preflight.sh", "preflight-body.sh",
+                "install.sh", "install-body.sh", "start.sh", "start-body.sh", "validate.sh")) {
+            copy(
+                    repo.resolve("dev/server/deploy/" + name),
+                    directory.resolve("scripts/" + name));
+        }
+        for (var name : List.of("common.sh", "validate.sh")) {
+            copy(
+                    repo.resolve("backend/deploy/scripts/" + name),
+                    directory.resolve(
+                            "scripts/"
+                                    + (name.equals("common.sh")
+                                            ? "production-common.sh"
+                                            : name.replace(".sh", "-body.sh"))));
+        }
+    }
+
     static void embedBasis(Path basis, Path application) throws Exception {
         for (var name : RevisionStore.inventory(basis).keySet()) {
             copy(basis.resolve(name), application.resolve("basis").resolve(name));
@@ -315,21 +333,7 @@ final class Packager {
                 if (component.equals("api")) {
                     embedBasis(basis, directory);
                 }
-                for (var name : List.of("common.sh", "guard.sh", "preflight.sh", "preflight-body.sh",
-                        "install.sh", "install-body.sh", "start.sh", "validate.sh")) {
-                    copy(
-                            repo.resolve("dev/server/deploy/" + name),
-                            directory.resolve("scripts/" + name));
-                }
-                for (var name : List.of("common.sh", "start.sh", "validate.sh")) {
-                    copy(
-                            repo.resolve("backend/deploy/scripts/" + name),
-                            directory.resolve(
-                                    "scripts/"
-                                            + (name.equals("common.sh")
-                                                    ? "production-common.sh"
-                                                    : name.replace(".sh", "-body.sh"))));
-                }
+                copyApplicationScripts(directory);
                 var unit = "systemd/salmonbus-" + component + ".service";
                 copy(repo.resolve("dev/server/" + unit), directory.resolve(unit));
                 var runtime =
