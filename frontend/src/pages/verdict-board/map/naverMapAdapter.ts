@@ -65,7 +65,9 @@ export function createNaverRouteMap(
       onError();
     }
   };
-  const first = data.stops[0]?.coordinate;
+  const mappedDirections = new Set(data.paths.map((path) => path.direction));
+  const fullPath = data.fullPath ?? [];
+  const first = data.stops[0]?.coordinate ?? fullPath[0] ?? data.paths[0]?.coordinates[0];
   if (first === undefined) throw new Error("지도 좌표가 없어요");
   const toNaverCoordinate = (coordinate: GeoCoordinate) => new sdk.LatLng(coordinate.latitude, coordinate.longitude);
   const map = new sdk.Map(element, {
@@ -124,6 +126,7 @@ export function createNaverRouteMap(
         if (!routeRevealed) {
           routeRevealed = true;
           paths.forEach(({ direction, line }) => line.setOptions(routePathStyleFor(direction)));
+          fullRouteLine?.setOptions({ strokeColor: "#5B6472", strokeOpacity: 0.95, zIndex: 1 });
           // 노선의 GPU 그리기를 먼저 예약한 뒤 HTML 마커와 버튼을 함께 공개한다.
           notifyReadyAfterFrame();
           return;
@@ -151,6 +154,19 @@ export function createNaverRouteMap(
       ...routePathStyleFor(path.direction),
     }),
   }));
+  // 전체 형상만 있거나 일부 방향이 미분리된 경우에도 API가 제공한 도로는 그대로 표시한다.
+  // 방향을 알 수 없는 전체 선에는 방향별 색상과 화살표를 붙이지 않는다.
+  const fullRouteLine =
+    fullPath.length >= 2 && board.route.directions.some(({ id }) => !mappedDirections.has(id))
+      ? new sdk.Polyline({
+          map,
+          path: fullPath.map(toNaverCoordinate),
+          strokeWeight: 6,
+          strokeColor: "#5B6472",
+          strokeOpacity: 0,
+          zIndex: 1,
+        })
+      : null;
   const arrows: ArrowMarker[] = [];
   let arrowsShowBothDirections: boolean | null = null;
   let userMarker: NaverMarker | null = null;
@@ -284,7 +300,7 @@ export function createNaverRouteMap(
       if (button.dataset.labelAbove !== labelAbove) button.dataset.labelAbove = labelAbove;
       if (label.hidden !== hidden) {
         label.hidden = hidden;
-        marker.setVisible(!hidden);
+        marker.setVisible(!hidden || !mappedDirections.has(selection.direction));
       }
       if (selectionChanged || directionChanged) marker.setZIndex(isSelected ? 15 : isActive ? 6 : 5);
       // 아이콘을 다시 설정하면 SDK가 DOM을 재구성하므로 표시 위치만 조정한다.
@@ -419,7 +435,7 @@ export function createNaverRouteMap(
     element.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
   }
 
-  const routeCoordinates = data.paths.flatMap((path) => path.coordinates);
+  const routeCoordinates = fullPath.length > 0 ? fullPath : data.paths.flatMap((path) => path.coordinates);
   function fitInitialRoute() {
     if (!initialFitPending) return;
     initialFitPending = false;
@@ -498,7 +514,12 @@ export function createNaverRouteMap(
           view.vehicle.currentStopSequence,
           view.vehicle.direction,
         );
-        if (coordinate === null) return;
+        if (coordinate === null) {
+          if (vehicleFocusKey === view.key) cancelVehicleFocus();
+          vehicles.get(view.key)?.marker.setMap(null);
+          vehicles.delete(view.key);
+          return;
+        }
         let item = vehicles.get(view.key);
         if (item === undefined) {
           const content = document.createElement("button");
@@ -560,7 +581,11 @@ export function createNaverRouteMap(
       frames.forEach((frame) => {
         const item = vehicles.get(frame.key);
         if (item === undefined) return;
-        const coordinate = routeMapCoordinateForSequence(data, frame.sequencePosition, item.selection.direction);
+        // 방향 경로가 없을 때는 보간 프레임 대신 최근 응답의 정류장 위치에 머문다.
+        const sequencePosition = mappedDirections.has(item.selection.direction)
+          ? frame.sequencePosition
+          : item.selection.sequence;
+        const coordinate = routeMapCoordinateForSequence(data, sequencePosition, item.selection.direction);
         if (coordinate === null) return;
         const key = `${coordinate.latitude}:${coordinate.longitude}`;
         const group = groups.get(key) ?? [];
@@ -630,6 +655,7 @@ export function createNaverRouteMap(
       vehicles.forEach(({ marker }) => cleanup(() => marker.setMap(null)));
       arrows.forEach(({ marker }) => cleanup(() => marker.setMap(null)));
       paths.forEach(({ line }) => cleanup(() => line.setMap(null)));
+      cleanup(() => fullRouteLine?.setMap(null));
       cleanup(() => userMarker?.setMap(null));
       cleanup(() => map.destroy());
     },

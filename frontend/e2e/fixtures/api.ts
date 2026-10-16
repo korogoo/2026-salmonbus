@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { createApiMockRouter, type ApiMockRouter } from "./api-mock-router";
-import { apiPaths, createApiData, observedAt, pollIntervalMs } from "./mock-data";
+import { apiPaths, createApiData, observedAt, pollIntervalMs, routeId } from "./mock-data";
 import { createStationArrivalsData } from "./station-arrivals";
 
 type Endpoint = keyof typeof apiPaths | "arrivals";
@@ -30,8 +30,8 @@ export const test = base.extend<{ api: MockApi }>({
       const api: MockApi = {
         route: router.route,
         data: createApiData(),
-        mode: { routes: "success", board: "success", vehicles: "success", arrivals: "success" },
-        requests: { routes: 0, board: 0, vehicles: 0, arrivals: 0 },
+        mode: { routes: "success", board: "success", vehicles: "success", geometry: "success", arrivals: "success" },
+        requests: { routes: 0, board: 0, vehicles: 0, geometry: 0, arrivals: 0 },
         arrivalRequests: [],
         cacheMaxAgeSeconds: pollIntervalMs / 1_000,
       };
@@ -45,9 +45,13 @@ export const test = base.extend<{ api: MockApi }>({
           await route.fulfill({ status: 404, headers: { "Cache-Control": "no-store" } });
           return;
         }
+        // 채팅 테스트가 가상 노선을 재사용하므로 geometry도 요청한 노선 ID로 응답한다.
+        const geometryRoute = /^\/api\/v2\/routes\/([^/]+)\/geometry$/.exec(path)?.[1];
         const endpoint: Endpoint | undefined = /^\/api\/v2\/stations\/[^/]+\/arrivals$/.test(path)
           ? "arrivals"
-          : (Object.keys(apiPaths) as (keyof typeof apiPaths)[]).find((key) => apiPaths[key] === path);
+          : geometryRoute !== undefined
+            ? "geometry"
+            : (Object.keys(apiPaths) as (keyof typeof apiPaths)[]).find((key) => apiPaths[key] === path);
         if (endpoint === undefined || request.method() !== "GET") {
           unexpectedRequests.push(`${request.method()} ${path}`);
           await route.abort();
@@ -71,7 +75,11 @@ export const test = base.extend<{ api: MockApi }>({
             "Cache-Control": `public, max-age=${endpoint === "arrivals" ? 5 : api.cacheMaxAgeSeconds}`,
           },
           json:
-            endpoint === "arrivals" ? (api.data.arrivals ?? createStationArrivalsData(url, now)) : api.data[endpoint],
+            endpoint === "arrivals"
+              ? (api.data.arrivals ?? createStationArrivalsData(url, now))
+              : endpoint === "geometry" && geometryRoute !== undefined && geometryRoute !== routeId
+                ? { ...api.data.geometry, routeId: decodeURIComponent(geometryRoute) }
+                : api.data[endpoint],
         });
       });
 
