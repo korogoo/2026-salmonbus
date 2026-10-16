@@ -3,7 +3,7 @@ server:
 
 spring:
   profiles:
-    include: api-docs-dev
+    include: api-docs-dev,observability
   flyway:
     enabled: true
 

@@ -66,7 +66,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Build with Gradle
-        run: ./gradlew clean build --no-daemon
+        run: ./gradlew clean build --continue --no-daemon
 
       - name: Publish test report
         if: ${{ !cancelled() && hashFiles('backend/**/build/test-results/*/TEST-*.xml') != '' }}

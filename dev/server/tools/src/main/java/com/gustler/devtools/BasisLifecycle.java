@@ -69,7 +69,7 @@ final class BasisLifecycle {
         return path;
     }
 
-    private static void preserveData(RevisionStore.Revision previous, RevisionStore.Revision next,
+    static void preserveData(RevisionStore.Revision previous, RevisionStore.Revision next,
             DataTransition.Approval approval) {
         if (approval != null) approval.verify(previous, next, java.time.Instant.now());
         for (var name :
@@ -91,7 +91,8 @@ final class BasisLifecycle {
         var names = new java.util.TreeSet<>(previous.files().keySet());
         names.addAll(next.files().keySet());
         for (var name : names) {
-            if (name.equals("tools/data-contract.sha256") && approval != null) continue;
+            if (name.equals("tools/data-contract.sha256")
+                    && (approval != null || CompatiblePreparation.permits(previous, next))) continue;
             if (name.startsWith("tools/data/")
                     || List.of(
                                     "tools/data-contract.sha256",

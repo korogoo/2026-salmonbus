@@ -31,15 +31,16 @@ public final class ScenarioControl {
             if (args[0].equals("showcase") && !selected.equals("all")) {
                 throw new IllegalArgumentException();
             }
-            var data = ReplayEngine.readRoutes(Path.of("/local/data/routes.json"));
-            var routes = data.routes().stream().filter(route -> selected.equals("all") || selected.equals(route.displayName())).toList();
+            var data = ReplayEngine.readAllRoutes(Path.of("/local/data/routes.json"));
+            var routes = data.routes().stream().filter(route -> ReplayEngine.REPLAY_ROUTES.contains(route.displayName()))
+                .filter(route -> selected.equals("all") || selected.equals(route.displayName())).toList();
             if (routes.isEmpty()) {
                 throw new IllegalArgumentException();
             }
             var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
             var selections = new java.util.LinkedHashMap<String, String>();
             routes.forEach(route -> selections.put(route.routeId(),
-                args[0].equals("showcase") ? SHOWCASE.get(route.displayName()) : args[0]));
+                args[0].equals("showcase") ? SHOWCASE.getOrDefault(route.displayName(), "normal") : args[0]));
             configure(client, "http://127.0.0.1:8080", selections);
             System.out.println(Json.write(Map.of("status", "ok", "mode", args[0], "routes", routes.size())));
         } catch (Exception error) {

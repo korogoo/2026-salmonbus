@@ -79,7 +79,7 @@ final class Preflight {
             for (var name : Set.of("manifest.json", "weights.safetensors")) {
                 Checks.require(
                         Files.isRegularFile(
-                                layout.data().resolve("models/reference-20261002/" + name)),
+                                layout.data().resolve("models/coldstart-20261016/" + name)),
                         "DEV_MODEL_REQUIRED");
             }
         }

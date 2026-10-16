@@ -28,7 +28,7 @@ class RouteGeometryRuntimeTest {
 
     @Test
     @Timeout(90)
-    void 기본설정의_기존_8노선_643방문을_수집하고_노선별_형상과_방향과_회차를_보존한다() throws Exception {
+    void 지정한_기존_8노선_643방문을_수집하고_노선별_형상과_방향과_회차를_보존한다() throws Exception {
         var catalogRows = JSON.readTree(Files.readString(Path.of(System.getProperty("geometry.routes.fixture")))).path("routes");
         var catalog = new java.util.HashMap<String, JsonNode>();
         catalogRows.forEach(route -> catalog.put(route.path("routeId").asString(), route));
@@ -41,9 +41,11 @@ class RouteGeometryRuntimeTest {
 
         try (var runtime = new ArrivalRuntime()) {
             runtime.source.enableGeometry(fixtures);
-            // route-geometry.route-ids를 지정하지 않아 실제 Worker 기본 8노선의 상속도 검증한다.
+            // 저장된 8개 노선 응답을 검증한다. 운영의 수집 대상이 늘어나도 미준비 응답을 요청하지 않는다.
             runtime.startWorker(false, Map.of("SPRING_APPLICATION_JSON", """
-                {"collection":{"enabled":false},"route-geometry":{"enabled":true},"arrivals":{"enabled":false}}
+                {"collection":{"enabled":false},"route-geometry":{"enabled":true,"route-ids":
+                  ["204000057","234000050","204000070","234000886","233000392","227000038","228000184","234000051"]},
+                 "arrivals":{"enabled":false}}
                 """));
             var versions = new HashSet<String>();
             var revisions = new HashSet<String>();

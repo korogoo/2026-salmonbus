@@ -57,6 +57,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ripgrep
       - name: Verify local Docker development environment
         run: |
+          python3 -m unittest discover -s dev/tests -p "test_*.py"
           ./dev/local.sh check
           bash dev/tests/cli-contract.sh
           bash dev/tests/image-lifecycle.sh

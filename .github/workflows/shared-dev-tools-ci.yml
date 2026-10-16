@@ -1,0 +1,54 @@
+name: SHARED-DEV-TOOLS-CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'dev/**'
+      - 'backend/**'
+      - '.github/workflows/shared-dev-tools-ci.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'dev/**'
+      - 'backend/**'
+      - '.github/workflows/shared-dev-tools-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-dev-tools-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  shared-dev-tools:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Test development deployment tools
+        run: >-
+          ./backend/gradlew -p dev/server/tools test testHarnessJar
+          --no-daemon --max-workers=1 --console=plain
+      - name: Test development database target contract
+        working-directory: backend
+        run: >-
+          ./gradlew --init-script ../dev/server/data.init :worker-app:sharedDevDataTest
+          --no-daemon --max-workers=1 --console=plain
+      - name: Test Linux permissions and deployment recovery in an isolated container
+        # serverTest와 같은 linux-root 태그를 기존 TestRunner로 실행한다.
+        # AWS 인증정보나 호스트 Docker 소켓은 컨테이너에 전달하지 않는다.
+        run: |
+          docker run --rm --network none --cpus 1 --memory 512m \
+            --mount "type=bind,source=${GITHUB_WORKSPACE}/dev/server/tools/build/libs/shared-dev-tools-tests.jar,target=/tests.jar,readonly" \
+            eclipse-temurin:21-jre \
+            sh -ec 'ln -s /opt/java/openjdk/bin/java /usr/bin/java; java -Xmx256m -jar /tests.jar'

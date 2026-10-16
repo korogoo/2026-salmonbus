@@ -17,10 +17,12 @@ class GeometryPackagingTest {
         for (String name : List.of(
             "dev/server/tools/src/main/Tool.java", "dev/server/tools/build.gradle",
             "dev/server/tools/settings.gradle", "dev/server/api.yml", "dev/server/worker.yml",
+            "backend/deploy/sql/prepare-evaluation-work-transition.sql",
             "dev/server/replay.json", "dev/server/compose.yaml", "dev/server/init-chat.js",
             "dev/server/wiremock.Dockerfile", "dev/server/systemd/salmonbus-dev-infra.service",
             "dev/config/mongodb.yml", "dev/data/java/Data.java", "dev/data/routes.json",
             "dev/data/catalog-routes.json", "dev/data/route-shapes.json",
+            "dev/data/models/coldstart-20261016/manifest.json",
             "dev/data/model-reference/manifest.json", "dev/wiremock/mappings/route-line.json",
             "dev/wiremock-extension/src/main/Replay.java",
             "dev/wiremock-extension/build/libs/local-gbis-replay.jar",
@@ -42,6 +44,12 @@ class GeometryPackagingTest {
         Files.writeString(repo.resolve("dev/data/route-shapes.json"), "new road snapshot");
         assertNotEquals(basis, packager.basisContract());
         assertEquals(preparation, packager.preparationContract());
+        String geometryBasis = packager.basisContract();
+        Files.writeString(repo.resolve("dev/server/worker.yml"), "collection: twenty routes");
+        Files.writeString(repo.resolve("dev/wiremock-extension/src/main/Replay.java"), "twenty route replay");
+        assertNotEquals(geometryBasis, packager.basisContract());
+        assertEquals(preparation, packager.preparationContract());
+        // 수집과 재생 확장은 basis 교체 대상이며 DB 초기화 계약은 바꾸지 않는다.
         Path replacement = root.resolve("replacement");
         packager.imageContext(replacement);
         assertEquals("new road snapshot", Files.readString(replacement.resolve("data/route-shapes.json")));

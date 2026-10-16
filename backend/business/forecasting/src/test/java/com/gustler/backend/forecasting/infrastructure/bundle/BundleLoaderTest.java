@@ -268,6 +268,21 @@ class BundleLoaderTest {
     }
 
     @Test
+    void 스무_노선_번들은_추가_노선을_지원하고_여덟_노선_번들은_지원하지_않는다() {
+        // given
+        var routes = List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500",
+            "1151", "9000", "1500-2", "8100", "1150", "G8110", "6801", "6003", "3100", "1101", "7007-1", "4000");
+
+        // when
+        var twenty = DummyBundle.withRoutes(routes).loadAt(directory);
+        var eight = DummyBundle.withRoutes(EIGHT_ROUTES).loadAt(directory);
+
+        // then
+        assertThat(twenty.scope().coversSourceRoute("200000314")).isTrue();
+        assertThat(eight.scope().coversSourceRoute("200000314")).isFalse();
+    }
+
+    @Test
     void 여덟_노선_묶음의_순서가_계약과_다르면_거절한다() {
         // when & then
         assertRejectedBy(

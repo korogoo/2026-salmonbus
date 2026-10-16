@@ -47,7 +47,7 @@ class GbisGeometryReplayTest {
             }
             assertEquals(404, get(client, server.baseUrl(), data.routes().get(0).routeId(), "unsupported").statusCode());
             assertEquals(404, get(client, server.baseUrl(), "999999999", "local-only-placeholder").statusCode());
-            for (var route : data.routes().subList(8, data.routes().size())) {
+            for (var route : data.routes().stream().filter(route -> !ReplayEngine.REPLAY_ROUTES.contains(route.displayName())).toList()) {
                 assertEquals(404, engine.response("location", "normal", route.routeId()).status());
             }
         } finally {

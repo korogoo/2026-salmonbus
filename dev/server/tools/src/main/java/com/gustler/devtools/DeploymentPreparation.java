@@ -75,7 +75,8 @@ final class DeploymentPreparation {
         }
         var dataChange = !java.util.Objects.equals(previous.files().get("tools/data-contract.sha256"),
                 next.files().get("tools/data-contract.sha256"));
-        var approval = dataChange ? DataTransition.approval(layout, previous, next) : null;
+        var approval = dataChange && !CompatiblePreparation.permits(previous, next)
+                ? DataTransition.approval(layout, previous, next) : null;
         FileOps.directory(directory(), 0700);
         Checks.require((FileOps.attribute(directory(), "mode") & 0777) == 0700,
                 "DEV_PREPARATION_DIRECTORY");

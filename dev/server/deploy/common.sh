@@ -15,7 +15,7 @@ CURRENT="$BASE/current"
 PREVIOUS="$BASE/previous"
 CHANGED="$BASE/.changed"
 ENV_FILE="/etc/salmonbus-dev/$COMPONENT.env"
-MODEL_DIRECTORY=/srv/salmonbus-dev/models/reference-20261002
+MODEL_DIRECTORY=/srv/salmonbus-dev/models/coldstart-20261016
 JAR="$CURRENT/jars/$COMPONENT-app.jar"
 MARKER="$ROOT/.deploying"
 
