@@ -109,4 +109,87 @@ class DatabaseTargetServerTest {
         assertEquals("DEV_RDS_CERTIFICATE",
                 assertThrows(IllegalArgumentException.class, () -> Environment.load(directory)).getMessage());
     }
+
+    private Fixtures.FakeHost infrastructureHost(boolean rds, boolean fail) {
+        return new Fixtures.FakeHost() {
+            @Override
+            tools.jackson.databind.JsonNode identity() {
+                var identity = (tools.jackson.databind.node.ObjectNode) super.identity();
+                if (rds) identity.put("accountId", "000000000000");
+                return identity;
+            }
+
+            @Override
+            Result run(Path cwd, Map<String, String> environment, java.time.Duration timeout,
+                    java.util.List<String> command) {
+                calls.add(command);
+                assertEquals(fixture.layout.root().resolve("infra/current"), cwd);
+                assertEquals(java.time.Duration.ofSeconds(195), timeout);
+                return new Result(fail ? 1 : 0, "", "");
+            }
+        };
+    }
+
+    @Test
+    void RDS를_사용하면_PostgreSQL_컨테이너를_시작하지_않는다() throws Exception {
+        // given
+        enableRds();
+        var host = infrastructureHost(true, false);
+        var environment = Environment.load(fixture.layout.config()).get("infra");
+
+        // when
+        DevTools.execute(new String[]{"start-infra"}, fixture.layout, host, environment);
+
+        // then
+        assertEquals(java.util.List.of(java.util.List.of(
+                "/usr/bin/docker", "compose", "--env-file", "/dev/null", "--file", "compose.yaml",
+                "up", "--detach", "--no-build", "--wait", "--wait-timeout", "180", "mongodb", "gbis-mock")),
+                host.calls);
+    }
+
+    @Test
+    void 로컬_DB_설정에서는_PostgreSQL도_함께_시작한다() throws Exception {
+        // given
+        var host = infrastructureHost(false, false);
+        var environment = Environment.load(fixture.layout.config()).get("infra");
+
+        // when
+        DevTools.execute(new String[]{"start-infra"}, fixture.layout, host, environment);
+
+        // then
+        assertEquals(java.util.List.of("postgres", "mongodb", "gbis-mock"),
+                host.calls.getFirst().subList(12, 15));
+    }
+
+    @Test
+    void RDS_설정이_잘못되면_컨테이너_시작_전에_실패한다() throws Exception {
+        // given
+        enableRds();
+        var host = infrastructureHost(true, false);
+        var environment = Environment.load(fixture.layout.config()).get("infra");
+        Files.writeString(fixture.layout.config().resolve(DatabaseTarget.CERTIFICATE), "changed certificate");
+
+        // when
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> DevTools.execute(new String[]{"start-infra"}, fixture.layout, host, environment));
+
+        // then
+        assertEquals("DEV_RDS_CERTIFICATE", failure.getMessage());
+        assertTrue(host.calls.isEmpty());
+    }
+
+    @Test
+    void 컨테이너가_준비되지_않으면_기동_성공으로_처리하지_않는다() throws Exception {
+        // given
+        var host = infrastructureHost(false, true);
+        var environment = Environment.load(fixture.layout.config()).get("infra");
+
+        // when
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> DevTools.execute(new String[]{"start-infra"}, fixture.layout, host, environment));
+
+        // then
+        assertEquals("DEV_COMMAND_FAILED", failure.getMessage());
+    }
+
 }
