@@ -13,15 +13,27 @@ import java.util.Map;
  */
 public final class ModelRoute {
 
-    private static final Map<String, String> BY_SOURCE_ROUTE_ID = Map.of(
-        "234000050", "1650",
-        "204000057", "3330",
-        "204000070", "9007",
-        "234000886", "9300",
-        "233000392", "6011",
-        "227000038", "3000",
-        "228000184", "5600",
-        "234000051", "3500");
+    private static final Map<String, String> BY_SOURCE_ROUTE_ID = Map.ofEntries(
+        Map.entry("234000050", "1650"),
+        Map.entry("204000057", "3330"),
+        Map.entry("204000070", "9007"),
+        Map.entry("234000886", "9300"),
+        Map.entry("233000392", "6011"),
+        Map.entry("227000038", "3000"),
+        Map.entry("228000184", "5600"),
+        Map.entry("234000051", "3500"),
+        Map.entry("204000081", "1151"),
+        Map.entry("234000002", "9000"),
+        Map.entry("234000313", "1500-2"),
+        Map.entry("234000878", "8100"),
+        Map.entry("234000882", "1150"),
+        Map.entry("204000082", "G8110"),
+        Map.entry("234001739", "6801"),
+        Map.entry("233000266", "6003"),
+        Map.entry("204000170", "3100"),
+        Map.entry("234000879", "1101"),
+        Map.entry("228000393", "7007-1"),
+        Map.entry("200000314", "4000"));
 
     private ModelRoute() {
     }

@@ -41,7 +41,9 @@ public final class BundleLoader {
     /** 노선 순서가 계약이다. 뒤집으면 다른 노선 계수로 예보한다. */
     private static final List<List<String>> ROUTE_ORDERS = List.of(
         List.of("1650", "3330"),
-        List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500"));
+        List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500"),
+        List.of("1650", "3330", "9007", "9300", "6011", "3000", "5600", "3500",
+            "1151", "9000", "1500-2", "8100", "1150", "G8110", "6801", "6003", "3100", "1101", "7007-1", "4000"));
 
     private static final int SMALLEST_STOPS_AHEAD = 1;
     private static final int LARGEST_STOPS_AHEAD = 12;
