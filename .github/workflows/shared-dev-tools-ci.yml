@@ -39,6 +39,11 @@ jobs:
         run: >-
           ./backend/gradlew -p dev/server/tools test testHarnessJar
           --no-daemon --max-workers=1 --console=plain
+      - name: Test development database target contract
+        working-directory: backend
+        run: >-
+          ./gradlew --init-script ../dev/server/data.init :worker-app:sharedDevDataTest
+          --no-daemon --max-workers=1 --console=plain
       - name: Test Linux permissions and deployment recovery in an isolated container
         # serverTest와 같은 linux-root 태그를 기존 TestRunner로 실행한다.
         # AWS 인증정보나 호스트 Docker 소켓은 컨테이너에 전달하지 않는다.
