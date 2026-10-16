@@ -17,6 +17,7 @@ class GeometryPackagingTest {
         for (String name : List.of(
             "dev/server/tools/src/main/Tool.java", "dev/server/tools/build.gradle",
             "dev/server/tools/settings.gradle", "dev/server/api.yml", "dev/server/worker.yml",
+            "backend/deploy/sql/prepare-evaluation-work-transition.sql",
             "dev/server/replay.json", "dev/server/compose.yaml", "dev/server/init-chat.js",
             "dev/server/wiremock.Dockerfile", "dev/server/systemd/salmonbus-dev-infra.service",
             "dev/config/mongodb.yml", "dev/data/java/Data.java", "dev/data/routes.json",
