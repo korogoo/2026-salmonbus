@@ -304,6 +304,10 @@ class DeploymentPreparationServerTest {
         // then
         assertFalse(databaseApproved);
         assertEquals(original, RevisionStore.selectedBasis(fixture.layout));
+        assertTrue(host.apiActive);
+        assertTrue(host.workerActive);
+        assertFalse(Files.exists(fixture.layout.data().resolve("deployment-preparation/current.json")));
+        assertTrue(host.calls.stream().noneMatch(c -> c.contains("stop")));
     }
 
     @Test

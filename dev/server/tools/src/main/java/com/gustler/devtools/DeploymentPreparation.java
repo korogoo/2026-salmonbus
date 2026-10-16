@@ -77,6 +77,7 @@ final class DeploymentPreparation {
                 next.files().get("tools/data-contract.sha256"));
         var approval = dataChange && !CompatiblePreparation.permits(previous, next)
                 ? DataTransition.approval(layout, previous, next) : null;
+        BasisLifecycle.preserveData(previous, next, approval);
         FileOps.directory(directory(), 0700);
         Checks.require((FileOps.attribute(directory(), "mode") & 0777) == 0700,
                 "DEV_PREPARATION_DIRECTORY");
