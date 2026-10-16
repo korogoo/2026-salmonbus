@@ -2,6 +2,7 @@ gradle.projectsEvaluated {
     def worker = gradle.rootProject.project(':worker-app')
     worker.sourceSets.create('localData') {
         java.srcDirs = ['/local/data/java']
+        resources.srcDirs = ['/local/data/models']
         compileClasspath += worker.sourceSets.main.runtimeClasspath
         runtimeClasspath += worker.sourceSets.main.runtimeClasspath
     }

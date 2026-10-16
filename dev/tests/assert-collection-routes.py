@@ -14,9 +14,11 @@ def verify_board(route_id, status, body, has_model):
     expected = "FORECAST_READY" if has_model else "PREPARING"
     assert body["route"]["id"] == route_id, f"{route_id}: 다른 노선 응답"
     assert body["route"]["status"] == expected, f"{route_id}: board status != {expected}"
-    if not has_model:
-        forecasts = [vehicle["forecast"] for stop in body["stops"] for vehicle in stop["approachingVehicles"]]
-        assert forecasts, f"{route_id}: 확인할 접근 차량 없음"
+    forecasts = [vehicle["forecast"] for stop in body["stops"] for vehicle in stop["approachingVehicles"]]
+    assert forecasts, f"{route_id}: 확인할 접근 차량 없음"
+    if has_model:
+        assert any(item.get("status") == "AVAILABLE" for item in forecasts), f"{route_id}: 제공 중인 예보 없음"
+    else:
         assert all(forecast == {"status": "UNAVAILABLE"} for forecast in forecasts), f"{route_id}: 미지원 예보 노출"
 
 
@@ -43,7 +45,7 @@ def verify(api, data):
         if route_id not in ADDED | reference_ids:
             continue
         try:
-            has_model = route_id in reference_ids
+            has_model = True
             expected = "FORECAST_READY" if has_model else "PREPARING"
             assert listed[route_id]["displayName"] == route["displayName"], f"{route_id}: 노선명 불일치"
             assert listed[route_id]["status"] == expected, f"{route_id}: 목록 status != {expected}"
@@ -52,7 +54,7 @@ def verify(api, data):
         except (AssertionError, KeyError, urllib.error.URLError) as error:
             failures.append(f"{route_id}: {error}")
     assert not failures, "\n".join(failures)
-    print("20개 노선 조회, 기존 8개 예보 응답, 새 12개 UNAVAILABLE 응답 확인 완료")
+    print("20개 노선 조회, 20개 예보 응답 확인 완료")
 
 
 if __name__ == "__main__":

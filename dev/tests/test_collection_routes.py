@@ -11,12 +11,19 @@ spec.loader.exec_module(checks)
 class CollectionRoutesTest(unittest.TestCase):
     def body(self, route_id, status="PREPARING", forecast=None):
         return {"route": {"id": route_id, "status": status}, "stops": [{"approachingVehicles": [
-            {"forecast": forecast if forecast is not None else {"status": "UNAVAILABLE"}}]}]}
+            {"forecast": forecast if forecast is not None else {"status": "AVAILABLE" if status == "FORECAST_READY" else "UNAVAILABLE"}}]}]}
 
     def test_추가_12개_노선의_예보없음은_200과_UNAVAILABLE로_확인한다(self):
         for route_id in checks.ADDED:
             with self.subTest(route=route_id):
                 checks.verify_board(route_id, 200, self.body(route_id), False)
+
+    def test_새_번들을_적용한_추가_12개는_FORECAST_READY를_확인한다(self):
+        for route_id in checks.ADDED:
+            with self.subTest(route=route_id):
+                checks.verify_board(route_id, 200, self.body(route_id, "FORECAST_READY"), True)
+                with self.assertRaises(AssertionError):
+                    checks.verify_board(route_id, 200, self.body(route_id), True)
 
     def test_503을_정상_관측_응답으로_통과시키지_않는다(self):
         with self.assertRaises(AssertionError):

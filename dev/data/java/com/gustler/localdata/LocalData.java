@@ -42,6 +42,7 @@ public final class LocalData {
             String routeDigest = ReferenceBundle.sha(Files.readAllBytes(routeFile));
             step = "MODEL";
             var inspection = ReferenceBundle.prepare(routeFile.resolveSibling("model-reference"), Path.of(args[1]));
+            CandidateBundle.prepare(Path.of(args[1]).resolveSibling(CandidateBundle.DIRECTORY));
             if (target.shared()) {
                 step = "MIGRATION";
                 // 준비 도구에서는 DB 접속 정보 대신 결과 코드만 남긴다.
@@ -84,8 +85,8 @@ public final class LocalData {
                         if (reset) {
                             step = "RESET";
                             require(scalar(connection, """
-                                SELECT count(*) FROM model_deployment WHERE state='ACTIVE' AND bundle_digest<>?
-                                """, inspection.bundleDigest()).equals("0"), "UNOWNED_ACTIVE_MODEL");
+                                SELECT count(*) FROM model_deployment WHERE state='ACTIVE' AND bundle_digest NOT IN (?, ?)
+                                """, inspection.bundleDigest(), CandidateBundle.DIGEST).equals("0"), "UNOWNED_ACTIVE_MODEL");
                             verify(connection, data, args[1], false);
                             verify(connection, catalog, args[1], false, false);
                             resetGenerated(connection, data);
@@ -107,8 +108,8 @@ public final class LocalData {
                     prepareCatalog(connection, data, catalog, catalogDigest, args[1]);
                     step = "VERIFY";
                     require(scalar(connection, """
-                        SELECT count(*) FROM model_deployment WHERE state='ACTIVE' AND bundle_digest<>?
-                        """, inspection.bundleDigest()).equals("0"),
+                        SELECT count(*) FROM model_deployment WHERE state='ACTIVE' AND bundle_digest NOT IN (?, ?)
+                        """, inspection.bundleDigest(), CandidateBundle.DIGEST).equals("0"),
                         "UNOWNED_ACTIVE_MODEL");
                     verify(connection, data, args[1]);
                     verify(connection, catalog, args[1], false, false);
@@ -161,7 +162,7 @@ public final class LocalData {
         }
     }
 
-    private static long seedRoute(Connection connection, RouteDataset.Route route) throws Exception {
+    static long seedRoute(Connection connection, RouteDataset.Route route) throws Exception {
         final long routeId = Long.parseLong(scalar(connection, """
             INSERT INTO route(public_route_id,source_id,source_route_id,display_name,start_stop_name,end_stop_name)
             VALUES (?,'GBIS',?,?,?,?) RETURNING id
@@ -288,7 +289,7 @@ public final class LocalData {
         verify(connection, data, modelDirectory, verifyStatistics, true);
     }
 
-    private static void verify(Connection connection, RouteDataset data, String modelDirectory,
+    static void verify(Connection connection, RouteDataset data, String modelDirectory,
                                final boolean verifyStatistics, final boolean modelSupported) throws Exception {
         JdbcClient jdbc = JdbcClient.create(new SingleConnectionDataSource(connection, true));
         var statistics = new JdbcStopDemandStatisticsRepository(jdbc, new JdbcRouteDataQualityAccess(jdbc));
@@ -334,10 +335,7 @@ public final class LocalData {
                 require(!rows.next(), "STOP_DATA_CHANGED");
             }
             if (!modelSupported) {
-                require(scalar(connection, "SELECT count(*) FROM observation_batch WHERE route_version_id=?", versionId).equals("0")
-                    && scalar(connection, "SELECT count(*) FROM seat_forecast WHERE route_version_id=?", versionId).equals("0")
-                    && scalar(connection, "SELECT count(*) FROM stop_demand_statistics WHERE route_version_id=?", versionId).equals("0"),
-                    "CATALOG_OBSERVATION_OR_FORECAST_EXISTS");
+                // 노선과 정류장 기준만 검증한다. 수집 후 생긴 관측과 통계는 재시작 시 보존한다.
                 continue;
             }
             release.routeReference().requireMatches(new com.gustler.backend.forecasting.domain.model.RouteStops(

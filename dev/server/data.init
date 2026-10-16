@@ -3,6 +3,7 @@ gradle.projectsEvaluated {
     def dev = new File(gradle.rootProject.projectDir, '../dev')
     worker.sourceSets.create('sharedDevData') {
         java.srcDirs = [new File(dev, 'data/java')]
+        resources.srcDirs = [new File(dev, 'data/models')]
         compileClasspath += worker.sourceSets.main.runtimeClasspath
         runtimeClasspath += worker.sourceSets.main.runtimeClasspath
     }
@@ -16,6 +17,7 @@ gradle.projectsEvaluated {
         testClassesDirs = worker.sourceSets.sharedDevDataTest.output.classesDirs
         classpath = worker.sourceSets.sharedDevDataTest.runtimeClasspath
         useJUnitPlatform()
+        systemProperty "dev.data.directory", new File(dev, "data").absolutePath
     }
     def bootJarType = worker.tasks.named('bootJar').get().class.superclass
     worker.tasks.register('sharedDevDataJar', bootJarType) {

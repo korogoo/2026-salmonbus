@@ -92,6 +92,7 @@ final class Packager {
                 repo.resolve("dev/server/systemd/salmonbus-dev-infra.service"),
                 repo.resolve("dev/config/mongodb.yml"),
                 repo.resolve("dev/data/java"),
+                repo.resolve("dev/data/models"),
                 repo.resolve("dev/data/model-reference"),
                 repo.resolve("dev/wiremock/mappings"),
                 repo.resolve("dev/wiremock-extension/src/main")));
@@ -111,6 +112,7 @@ final class Packager {
         return digest(
                 List.of(
                         repo.resolve("dev/data/java"),
+                repo.resolve("dev/data/models"),
                         repo.resolve(
                                 "backend/business/forecasting/src/main/java/com/gustler/backend/forecasting/domain/model/ForecastFeatureContract.java")));
     }

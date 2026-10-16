@@ -31,7 +31,7 @@ record RouteDataset(String version, List<RouteDataset.Route> routes) {
     static RouteDataset readCatalog(Path path) throws Exception {
         RouteDataset data = readFile(path);
         LocalData.require("local-catalog-v1".equals(data.version()), "CATALOG_VERSION");
-        LocalData.require(data.routes().stream().noneMatch(route -> ModelRoute.covers(route.routeId())), "CATALOG_MODEL_OVERLAP");
+        LocalData.require(data.routes().stream().noneMatch(route -> MODEL_ROUTES.contains(route.displayName())), "CATALOG_MODEL_OVERLAP");
         validate(data);
         return data;
     }

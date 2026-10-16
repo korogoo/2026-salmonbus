@@ -22,6 +22,7 @@ class GeometryPackagingTest {
             "dev/server/wiremock.Dockerfile", "dev/server/systemd/salmonbus-dev-infra.service",
             "dev/config/mongodb.yml", "dev/data/java/Data.java", "dev/data/routes.json",
             "dev/data/catalog-routes.json", "dev/data/route-shapes.json",
+            "dev/data/models/coldstart-20261016/manifest.json",
             "dev/data/model-reference/manifest.json", "dev/wiremock/mappings/route-line.json",
             "dev/wiremock-extension/src/main/Replay.java",
             "dev/wiremock-extension/build/libs/local-gbis-replay.jar",

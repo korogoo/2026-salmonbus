@@ -39,5 +39,5 @@ forecast:
 
 model:
   bundle:
-    directory: /srv/salmonbus-dev/models/reference-20261002
-    promote-on-start: false
+    directory: /srv/salmonbus-dev/models/coldstart-20261016
+    promote-on-start: true

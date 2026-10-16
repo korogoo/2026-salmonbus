@@ -34,6 +34,7 @@ class BasisDigestTest {
                         "dev/data/routes.json",
                         "dev/data/catalog-routes.json",
                         "dev/data/model-reference/manifest.json",
+                        "dev/data/models/coldstart-20261016/manifest.json",
                         "dev/wiremock/mappings/location.json",
                         "dev/wiremock-extension/src/main/Replay.java",
                         "dev/scenarios/replay.json",
