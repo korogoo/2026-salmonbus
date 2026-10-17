@@ -1,0 +1,660 @@
+package com.gustler.backend.api.board.controller;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.aMapWithSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.gustler.backend.api.board.application.BoardCachePolicy;
+import com.gustler.backend.api.board.support.BoardDatabaseFixture;
+import com.gustler.backend.api.board.support.BoardDatabaseFixture.RouteContext;
+import com.gustler.backend.support.IntegrationTest;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.WebApplicationContext;
+
+@IntegrationTest
+@Transactional
+@Import(BoardApiContractTest.FixedClockConfig.class)
+class BoardApiContractTest {
+
+    private static final String ROUTE_ID = "204000057";
+
+    @Autowired
+    private WebApplicationContext applicationContext;
+
+    @Autowired
+    private JdbcClient jdbcClient;
+
+    @Autowired
+    private Clock clock;
+
+    private MockMvc mockMvc;
+    private BoardDatabaseFixture fixture;
+
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders
+            .webAppContextSetup(applicationContext)
+            .build();
+        fixture = new BoardDatabaseFixture(jdbcClient);
+    }
+
+    @Test
+    void 최신_예보_완료_관측_묶음으로_v4_Board를_조립한다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        final long snapshotModelId = fixture.insertModel(
+            "model-snapshot",
+            "RETIRED",
+            now.minusDays(2)
+        );
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        final long completedBatchId = fixture.insertBatch(
+            route,
+            observedAt,
+            "SUCCESS_ROWS",
+            5
+        );
+        fixture.insertBatch(
+            route,
+            now,
+            "SUCCESS_ROWS",
+            1
+        );
+        fixture.insertPublication(completedBatchId, snapshotModelId,
+            observedAt.plusSeconds(1), observedAt.plusSeconds(2));
+        insertPredictions(route, completedBatchId, snapshotModelId, observedAt);
+
+        String cacheControl = "max-age="
+            + new BoardCachePolicy(clock).maxAgeAt(observedAt).toSeconds()
+            + ", public";
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, cacheControl))
+            .andExpect(jsonPath("$", aMapWithSize(6)))
+            .andExpect(jsonPath("$.route", aMapWithSize(8)))
+            .andExpect(jsonPath("$.route.id").value(ROUTE_ID))
+            .andExpect(jsonPath("$.route.status").value("FORECAST_READY"))
+            .andExpect(jsonPath("$.route.turnSequence").value(2))
+            .andExpect(jsonPath("$.route.referenceVersionId")
+                .value(String.valueOf(route.routeVersionId())))
+            .andExpect(jsonPath("$.route.directions[0]", aMapWithSize(6)))
+            .andExpect(jsonPath("$.route.directions[0].name").value("회차점 방면"))
+            .andExpect(jsonPath("$.route.directions[1].name").value("종점 방면"))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)))
+            .andExpect(jsonPath("$.staleAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt.plusMinutes(5))))
+            .andExpect(jsonPath("$.model", aMapWithSize(2)))
+            .andExpect(jsonPath("$.model.releaseId").value("model-snapshot"))
+            .andExpect(jsonPath("$.vehiclesInService").value(5))
+            .andExpect(jsonPath("$.stops.length()").value(3))
+            .andExpect(jsonPath("$.stops[0]", aMapWithSize(6)))
+            .andExpect(jsonPath("$.stops[0].stationId").doesNotExist())
+            .andExpect(jsonPath("$.stops[0].approachingVehicles").isEmpty())
+            .andExpect(jsonPath("$.stops[1].boardingAllowed").value(false))
+            .andExpect(jsonPath("$.stops[1].approachingVehicles").isEmpty())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles.length()").value(3))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0]", aMapWithSize(3)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].vehicleId")
+                .value("0"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast.expectedSeats")
+                .doesNotExist())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1]", aMapWithSize(3)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].vehicleId")
+                .value("B"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast.seatAvailableProbability")
+                .value(0.996))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[2]", aMapWithSize(3)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[2].vehicleId").isEmpty())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[2].forecast.expectedSeats")
+                .doesNotExist());
+    }
+
+    @Test
+    void 예보_완료_관측_묶음이_같은_시각이면_ID가_큰_묶음을_선택한다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        final long firstModel = fixture.insertModel("model-first", "RETIRED", now.minusDays(2));
+        final long secondModel = fixture.insertModel("model-second", "ACTIVE", now.minusDays(1));
+        final long firstBatch = fixture.insertBatch(
+            route,
+            observedAt,
+            "SUCCESS_ROWS",
+            1
+        );
+        final long secondBatch = fixture.insertBatch(
+            route,
+            observedAt,
+            "SUCCESS_ROWS",
+            2
+        );
+        fixture.insertPublication(firstBatch, firstModel,
+            observedAt.plusSeconds(1), observedAt.plusSeconds(1));
+        fixture.insertPublication(secondBatch, secondModel,
+            observedAt.plusSeconds(1), observedAt.plusSeconds(2));
+        insertSinglePrediction(route, firstBatch, firstModel, "FIRST", observedAt);
+        insertSinglePrediction(route, secondBatch, secondModel, "SECOND", observedAt);
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.vehiclesInService").value(2))
+            .andExpect(jsonPath("$.model.releaseId").value("model-second"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].vehicleId")
+                .value("SECOND"));
+    }
+
+    @Test
+    void ACTIVE_모델이_없으면_MODEL_OUT_OF_SCOPE_503이다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        long retiredModel = fixture.insertModel("model-retired", "RETIRED", now.minusDays(1));
+        long batch = fixture.insertBatch(route, now.minusMinutes(1), "SUCCESS_EMPTY", 0);
+        fixture.insertPublication(batch, retiredModel, now, now);
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$", aMapWithSize(3)))
+            .andExpect(jsonPath("$.code").value("MODEL_OUT_OF_SCOPE"));
+    }
+
+    @Test
+    void 모델_기록이_없는_이관된_빈_발행은_현재_ACTIVE_모델로_응답한다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        long batch = fixture.insertBatch(route, observedAt, "SUCCESS_EMPTY", 0);
+        jdbcClient.sql("""
+                INSERT INTO forecast_publication (
+                    source_batch_id, route_version_id,
+                    observed_at, published_at, prediction_count, provenance
+                )
+                SELECT id, route_version_id,
+                       response_received_at, :publishedAt, 0, 'LEGACY_UNKNOWN'
+                FROM observation_batch WHERE id = :batchId
+                """)
+            .param("batchId", batch)
+            .param("publishedAt", now)
+            .update();
+        jdbcClient.sql("UPDATE observation_batch SET input_confirmed_at = :publishedAt WHERE id = :batchId")
+            .param("batchId", batch)
+            .param("publishedAt", now)
+            .update();
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)))
+            .andExpect(jsonPath("$.model.releaseId").value("model-active"))
+            .andExpect(jsonPath("$.vehiclesInService").value(0))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles").isEmpty());
+    }
+
+    @Test
+    void 발행된_예보도_정상_관측도_없으면_NO_RECENT_OBSERVATION_503이다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$", aMapWithSize(3)))
+            .andExpect(jsonPath("$.code").value("NO_RECENT_OBSERVATION"));
+    }
+
+    @Test
+    void 예보_완료_관측_묶음이_5분을_넘으면_NO_RECENT_OBSERVATION_503이다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        long model = fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        long batch = fixture.insertBatch(
+            route,
+            now.minusMinutes(5).minusSeconds(1),
+            "SUCCESS_EMPTY",
+            0
+        );
+        fixture.insertPublication(batch, model, now.minusMinutes(5), now.minusMinutes(5));
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.code").value("NO_RECENT_OBSERVATION"));
+    }
+
+    @Test
+    void routeId_형식이_잘못되면_INVALID_ROUTE_ID_400이다() throws Exception {
+        mockMvc.perform(get("/api/v1/routes/abc/board"))
+            .andExpect(status().isBadRequest())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$", aMapWithSize(3)))
+            .andExpect(jsonPath("$.code").value("INVALID_ROUTE_ID"));
+    }
+
+    @Test
+    void 현재_노선이_없으면_ROUTE_NOT_FOUND_404이다() throws Exception {
+        mockMvc.perform(get("/api/v1/routes/999999999/board"))
+            .andExpect(status().isNotFound())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$", aMapWithSize(3)))
+            .andExpect(jsonPath("$.code").value("ROUTE_NOT_FOUND"));
+    }
+
+    @Test
+    void 예보가_없는_차량과_확률_0인_차량을_함께_반환한다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        long modelId = fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        long batchId = fixture.insertBatch(route, now.minusMinutes(1), "SUCCESS_ROWS", 2);
+        fixture.insertPublication(batchId, modelId, now.plusSeconds(1), now.plusSeconds(1));
+        fixture.insertObservation(route, batchId, 1, "A", 2, "STOP-2", now);
+        insertPrediction(route, batchId, modelId, 2, "B", 2, "STOP-2", 3, 1, 1.0, 0.0, now);
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles.length()").value(2))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].vehicleId").value("A"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast", aMapWithSize(1)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast.status").value("UNAVAILABLE"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].vehicleId").value("B"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast.status").value("AVAILABLE"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast.seatAvailableProbability").value(0.0))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast.expectedSeats").value(0.0));
+    }
+
+    @Test
+    void 모든_차량에_예보가_없어도_관측된_차량을_반환한다() throws Exception {
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        long model = fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        long batchId = fixture.insertBatch(route, now.minusMinutes(1), "SUCCESS_ROWS", 1);
+        fixture.insertPublication(batchId, model, now, now);
+        long observationId = fixture.insertObservation(route, batchId, 1, "A", 2, "STOP-2", now);
+        // 실제 운영 관측이 아닌 회귀 테스트용 82석 입력이다.
+        jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82, seat_unknown_reason = NULL WHERE id = :id")
+            .param("id", observationId).update();
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles.length()").value(1))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].vehicleId").value("A"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast", aMapWithSize(1)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast.status").value("UNAVAILABLE"));
+
+        mockMvc.perform(get("/api/v1/routes/{routeId}/vehicles", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.vehicles[0].vehicleId").value("A"))
+            .andExpect(jsonPath("$.vehicles[0].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[0].seat.remaining").doesNotExist())
+            .andExpect(jsonPath("$.vehicles[0].forecast").doesNotExist());
+    }
+
+    @Test
+    void 이미_예보가_있어도_제외된_편도는_UNAVAILABLE이고_좌석은_UNKNOWN이다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        long model = fixture.insertModel("model-quality", "ACTIVE", now.minusDays(1));
+        long batch = fixture.insertBatch(route, now, "SUCCESS_ROWS", 1);
+        fixture.insertPublication(batch, model, now, now);
+        long observation = fixture.insertObservation(route, batch, 1, "A", 2, "STOP-2", now);
+        fixture.insertForecast(route, observation, 3, 1, model, 0.2, 40.0, now);
+        jdbcClient.sql("UPDATE vehicle_observation SET remaining_seats = 82, seat_unknown_reason = NULL WHERE id = ?")
+            .param(observation).update();
+        jdbcClient.sql("UPDATE vehicle_one_way_trip SET status = 'EXCLUDED', evidence_observation_id = ? WHERE id = CAST(? AS text)")
+            .param(observation).param(observation).update();
+
+        // when
+        var boardResponse = mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID));
+        var vehiclesResponse = mockMvc.perform(get("/api/v1/routes/{routeId}/vehicles", ROUTE_ID));
+
+        // then
+        boardResponse.andExpect(status().isOk())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles.length()").value(1))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast", aMapWithSize(1)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast.status").value("UNAVAILABLE"));
+        vehiclesResponse.andExpect(status().isOk())
+            .andExpect(jsonPath("$.vehicles[0].seat.kind").value("UNKNOWN"))
+            .andExpect(jsonPath("$.vehicles[0].seat.remaining").doesNotExist());
+        assertThat(jdbcClient.sql("SELECT remaining_seats FROM vehicle_observation WHERE id = ?")
+            .param(observation).query(Integer.class).single()).isEqualTo(82);
+        assertThat(jdbcClient.sql("SELECT count(*) FROM seat_forecast WHERE vehicle_observation_id = ?")
+            .param(observation).query(Integer.class).single()).isEqualTo(1);
+    }
+
+    @Test
+    void 발행된_예보가_없으면_최신_정상_관측으로_예보_없는_PREPARING_보드를_만든다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        final long batch = fixture.insertBatch(route, observedAt, "SUCCESS_ROWS", 2);
+        fixture.insertObservation(route, batch, 1, "A", 2, "STOP-2", observedAt);
+        fixture.insertObservation(route, batch, 2, "B", 1, "STOP-1", observedAt);
+        String cacheControl = "max-age="
+            + new BoardCachePolicy(clock).maxAgeAt(observedAt).toSeconds()
+            + ", public";
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, cacheControl))
+            .andExpect(jsonPath("$", aMapWithSize(6)))
+            .andExpect(jsonPath("$.route", aMapWithSize(8)))
+            .andExpect(jsonPath("$.route.status").value("PREPARING"))
+            .andExpect(jsonPath("$.route.referenceVersionId")
+                .value(String.valueOf(route.routeVersionId())))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)))
+            .andExpect(jsonPath("$.staleAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt.plusMinutes(5))))
+            .andExpect(jsonPath("$.model", aMapWithSize(2)))
+            .andExpect(jsonPath("$.model.releaseId").value("model-active"))
+            .andExpect(jsonPath("$.vehiclesInService").value(2))
+            .andExpect(jsonPath("$.stops.length()").value(3))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles.length()").value(2))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0]", aMapWithSize(3)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].vehicleId").value("A"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast", aMapWithSize(1)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[0].forecast.status").value("UNAVAILABLE"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].vehicleId").value("B"))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast", aMapWithSize(1)))
+            .andExpect(jsonPath("$.stops[2].approachingVehicles[1].forecast.status").value("UNAVAILABLE"));
+    }
+
+    @Test
+    void 발행된_예보가_없고_최신_정상_관측이_빈_묶음이면_운행_차량_0대_보드다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        fixture.insertBatch(route, observedAt, "SUCCESS_EMPTY", 0);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.route.status").value("PREPARING"))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)))
+            .andExpect(jsonPath("$.model.releaseId").value("model-active"))
+            .andExpect(jsonPath("$.vehiclesInService").value(0))
+            .andExpect(jsonPath("$.stops[0].approachingVehicles").isEmpty())
+            .andExpect(jsonPath("$.stops[2].approachingVehicles").isEmpty());
+    }
+
+    @Test
+    void 발행된_예보가_없고_정상_관측이_5분을_넘으면_NO_RECENT_OBSERVATION_503이다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        fixture.insertBatch(route, now.minusMinutes(5).minusSeconds(1), "SUCCESS_EMPTY", 0);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$", aMapWithSize(3)))
+            .andExpect(jsonPath("$.code").value("NO_RECENT_OBSERVATION"));
+    }
+
+    @Test
+    void 발행된_예보가_5분을_넘으면_더_최신의_미발행_관측이_있어도_NO_RECENT_OBSERVATION_503이다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        final long model = fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        final long staleBatch = fixture.insertBatch(
+            route,
+            now.minusMinutes(5).minusSeconds(1),
+            "SUCCESS_EMPTY",
+            0
+        );
+        fixture.insertPublication(staleBatch, model, now.minusMinutes(5), now.minusMinutes(5));
+        fixture.insertBatch(route, now.minusSeconds(30), "SUCCESS_ROWS", 1);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.code").value("NO_RECENT_OBSERVATION"));
+    }
+
+    @Test
+    void ACTIVE_모델이_없으면_발행된_예보_없이_정상_관측이_있어도_MODEL_OUT_OF_SCOPE_503이다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-retired", "RETIRED", now.minusDays(2));
+        fixture.insertBatch(route, now.minusMinutes(1), "SUCCESS_EMPTY", 0);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.code").value("MODEL_OUT_OF_SCOPE"));
+    }
+
+    @Test
+    void 발행된_예보가_없으면_더_최신의_실패하거나_응답_없는_묶음을_건너뛰고_정상_관측을_쓴다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(2);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        fixture.insertBatch(route, observedAt, "SUCCESS_ROWS", 1);
+        fixture.insertBatch(route, now.minusMinutes(1), "FAILED_UPSTREAM", null);
+        final long unanswered = fixture.insertBatch(route, now.minusSeconds(30), "SUCCESS_ROWS", 3);
+        jdbcClient.sql("UPDATE observation_batch SET response_received_at = NULL WHERE id = ?")
+            .param(unanswered)
+            .update();
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.route.status").value("PREPARING"))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)))
+            .andExpect(jsonPath("$.vehiclesInService").value(1));
+    }
+
+    @Test
+    void 이전_판본에만_발행된_예보가_있으면_현재_판본의_관측으로_PREPARING_보드를_만든다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime observedAt = now.minusMinutes(1);
+        RouteContext previous = insertRoundTripRoute(now.minusDays(2));
+        final long model = fixture.insertModel("model-active", "ACTIVE", now.minusDays(2));
+        final long previousBatch = fixture.insertBatch(previous, now.minusMinutes(3), "SUCCESS_EMPTY", 0);
+        fixture.insertPublication(previousBatch, model, now.minusMinutes(3), now.minusMinutes(3));
+        RouteContext current = fixture.insertNextVersion(previous, now.minusMinutes(2));
+        insertRoundTripStopsOf(current);
+        fixture.insertBatch(current, observedAt, "SUCCESS_EMPTY", 0);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.route.status").value("PREPARING"))
+            .andExpect(jsonPath("$.route.referenceVersionId")
+                .value(String.valueOf(current.routeVersionId())))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(observedAt)));
+    }
+
+    @Test
+    void 모델_기록이_없는_이관된_발행만_있어도_발행된_묶음으로_FORECAST_READY_보드를_만든다() throws Exception {
+        // given
+        OffsetDateTime now = OffsetDateTime.now(clock).withNano(0);
+        OffsetDateTime publishedObservedAt = now.minusMinutes(2);
+        RouteContext route = insertRoundTripRoute(now.minusDays(1));
+        fixture.insertModel("model-active", "ACTIVE", now.minusDays(1));
+        final long legacyBatch = fixture.insertBatch(route, publishedObservedAt, "SUCCESS_EMPTY", 0);
+        insertLegacyPublication(legacyBatch, now.minusMinutes(2));
+        fixture.insertBatch(route, now.minusMinutes(1), "SUCCESS_ROWS", 1);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/routes/{routeId}/board", ROUTE_ID))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.route.status").value("FORECAST_READY"))
+            .andExpect(jsonPath("$.observedAt")
+                .value(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(publishedObservedAt)));
+    }
+
+    private void insertRoundTripStopsOf(RouteContext route) {
+        fixture.insertStop(route, 1, "STOP-1", "기점", "UP", true);
+        fixture.insertStop(route, 2, "STOP-2", "회차점", "UP", false);
+        fixture.insertStop(route, 3, "STOP-3", "종점", "DOWN", true);
+    }
+
+    private void insertLegacyPublication(
+        final long batchId,
+        OffsetDateTime publishedAt
+    ) {
+        jdbcClient.sql("""
+                INSERT INTO forecast_publication (
+                    source_batch_id, route_version_id,
+                    observed_at, published_at, prediction_count, provenance
+                )
+                SELECT id, route_version_id,
+                       response_received_at, :publishedAt, 0, 'LEGACY_UNKNOWN'
+                FROM observation_batch WHERE id = :batchId
+                RETURNING id
+                """)
+            .param("batchId", batchId)
+            .param("publishedAt", publishedAt)
+            .query(Long.class)
+            .single();
+    }
+
+    private RouteContext insertRoundTripRoute(OffsetDateTime validFrom) {
+        RouteContext route = fixture.insertRoute(
+            ROUTE_ID,
+            "3330",
+            "기점",
+            "종점",
+            2,
+            "04:50",
+            "23:30",
+            "05:00",
+            "23:30",
+            validFrom
+        );
+        fixture.insertStop(route, 1, "STOP-1", "기점", "UP", true);
+        fixture.insertStop(route, 2, "STOP-2", "회차점", "UP", false);
+        fixture.insertStop(route, 3, "STOP-3", "종점", "DOWN", true);
+        return route;
+    }
+
+    private void insertPredictions(
+        RouteContext route,
+        final long batchId,
+        final long modelId,
+        OffsetDateTime observedAt
+    ) {
+        insertPrediction(route, batchId, modelId, 1, "C", 1, "STOP-1", 3, 2, 0.4, 12.0,
+            observedAt);
+        insertPrediction(route, batchId, modelId, 2, null, 2, "STOP-2", 3, 1, 0.2, null,
+            observedAt);
+        insertPrediction(route, batchId, modelId, 3, "A", 1, "STOP-1", 3, 2, 0.1, 20.0,
+            observedAt);
+        insertPrediction(route, batchId, modelId, 4, "B", 2, "STOP-2", 3, 1, 0.004, 15.0,
+            observedAt);
+        insertPrediction(
+            route,
+            batchId,
+            modelId,
+            5,
+            "0",
+            2,
+            "STOP-2",
+            3,
+            1,
+            0.5,
+            Double.POSITIVE_INFINITY,
+            observedAt
+        );
+        insertPrediction(route, batchId, modelId, 6, "IGNORED", 1, "STOP-1", 2, 1, 0.2,
+            10.0, observedAt);
+    }
+
+    private void insertSinglePrediction(
+        RouteContext route,
+        final long batchId,
+        final long modelId,
+        String vehicleId,
+        OffsetDateTime observedAt
+    ) {
+        insertPrediction(route, batchId, modelId, 1, vehicleId, 2, "STOP-2", 3, 1, 0.2,
+            10.0, observedAt);
+    }
+
+    private void insertPrediction(
+        RouteContext route,
+        final long batchId,
+        final long modelId,
+        final int sourceRowNumber,
+        String vehicleId,
+        final int currentStopOrder,
+        String currentStopId,
+        final int targetStopOrder,
+        final int stopsToTarget,
+        final double seatFullChance,
+        Double expectedSeats,
+        OffsetDateTime observedAt
+    ) {
+        final long observationId = fixture.insertObservation(
+            route,
+            batchId,
+            sourceRowNumber,
+            vehicleId,
+            currentStopOrder,
+            currentStopId,
+            observedAt
+        );
+        fixture.insertForecast(
+            route,
+            observationId,
+            targetStopOrder,
+            stopsToTarget,
+            modelId,
+            seatFullChance,
+            expectedSeats,
+            observedAt.plusSeconds(1)
+        );
+    }
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FixedClockConfig {
+
+        @Bean
+        @Primary
+        Clock fixedDaytimeBoardClock() {
+            return Clock.fixed(Instant.parse("2026-08-27T03:00:00Z"), ZoneId.of("Asia/Seoul"));
+        }
+    }
+}

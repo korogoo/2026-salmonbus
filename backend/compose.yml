@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:18
+    container_name: salmonbus-db
+    environment:
+      POSTGRES_DB: salmonbus
+      POSTGRES_USER: salmonbus
+      POSTGRES_PASSWORD: salmonbus
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - salmonbus-db-18:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salmonbus -d salmonbus"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  salmonbus-db-18:

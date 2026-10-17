@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPath": "/buslocationservice/v2/getBusLocationListv2",
+    "queryParameters": {
+      "serviceKey": {
+        "matches": "(local-only-placeholder|shared-dev-placeholder)"
+      },
+      "format": {
+        "equalTo": "json"
+      },
+      "routeId": {
+        "matches": "(234000050|204000057|204000070|234000886|233000392|227000038|228000184|234000051|204000081|234000002|234000313|234000878|234000882|204000082|234001739|233000266|204000170|234000879|228000393|200000314)"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "transformers": [
+      "gbis-replay"
+    ],
+    "transformerParameters": {
+      "operation": "location"
+    }
+  }
+}

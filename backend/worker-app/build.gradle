@@ -1,0 +1,42 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':common')
+    implementation project(':route-catalog')
+    implementation project(':observations')
+    implementation project(':arrivals')
+    implementation project(':forecasting')
+    implementation project(':api-call-quota')
+    implementation project(':gbis-client')
+    implementation project(':operation-log')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-restclient'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-flyway'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation testFixtures(project(':common'))
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    environment 'ARRIVALS_ENABLED', 'false'
+    environment 'ROUTE_GEOMETRY_ENABLED', 'false'
+    environment 'GBIS_SERVICE_KEY', 'fake-service-key-for-test'
+    environment 'GBIS_SERVICE_KEY_B', ''
+    environment 'GBIS_SERVICE_KEY_C', ''
+    environment 'GBIS_SERVICE_KEY_D', ''
+}
+
+springBoot {
+    buildInfo()
+}

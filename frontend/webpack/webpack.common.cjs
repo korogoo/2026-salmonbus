@@ -1,0 +1,60 @@
+const path = require("path");
+const HtmlWebpackPlugin = require("html-webpack-plugin");
+const { VanillaExtractPlugin } = require("@vanilla-extract/webpack-plugin");
+const { execSync } = require("child_process");
+const { DefinePlugin } = require("webpack");
+
+// CodePipeline sources arrive without .git, so buildspec injects APP_VERSION
+function resolveAppVersion() {
+  if (process.env.APP_VERSION) {
+    return process.env.APP_VERSION;
+  }
+  try {
+    return execSync("git rev-parse --short HEAD").toString().trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+const appVersion = resolveAppVersion();
+
+module.exports = {
+  entry: path.resolve(__dirname, "../src/index.tsx"),
+  resolve: {
+    extensions: [".tsx", ".ts", ".js"],
+    alias: {
+      "@": path.resolve(__dirname, "../src"),
+    },
+  },
+  module: {
+    rules: [
+      {
+        test: /\.(png|jpe?g|gif|svg|webp)$/i,
+        type: "asset",
+      },
+      {
+        test: /\.(woff2?|ttf|otf)$/i,
+        type: "asset/resource",
+      },
+    ],
+  },
+  plugins: [
+    new DefinePlugin({
+      __SENTRY_DSN__: JSON.stringify(process.env.WEBPACK_SENTRY_DSN ?? ""),
+      __SENTRY_ENVIRONMENT__: JSON.stringify(process.env.WEBPACK_SENTRY_ENVIRONMENT ?? ""),
+      __APP_RELEASE__: JSON.stringify("salmonbus-fe@" + appVersion),
+      __NAVER_MAP_KEY_ID__: DefinePlugin.runtimeValue(
+        () => JSON.stringify(process.env.WEBPACK_NAVER_MAP_KEY_ID?.trim() ?? ""),
+        true,
+      ),
+    }),
+    new HtmlWebpackPlugin({
+      template: path.resolve(__dirname, "../public/index.html"),
+      favicon: path.resolve(__dirname, "../public/favicon.ico"),
+      meta: {
+        "app-version": appVersion,
+      },
+    }),
+    new VanillaExtractPlugin(),
+  ],
+};

@@ -1,0 +1,25 @@
+### Common ###
+### OS ###
+.DS_Store
+
+### Secret ###
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.jks
+secrets/
+/.local/
+/dev/wiremock-extension/.gradle/
+/dev/wiremock-extension/build/
+/dev/server/tools/.gradle/
+/dev/server/tools/build/
+
+### Backend ###
+### IntelliJ IDEA ###
+.idea/
+*.iml
+*.iws
+*.ipr

@@ -1,0 +1,49 @@
+gbis:
+  base-url: http://gbis-mock:8080
+  daily-limit: 100000
+
+collection:
+  enabled: true
+  fixed-interval: 20s
+  route-ids:
+    - '234000050'
+    - '204000057'
+    - '204000070'
+    - '234000886'
+    - '233000392'
+    - '227000038'
+    - '228000184'
+    - '234000051'
+    - "204000081" # 1151
+    - "234000002" # 9000
+    - "234000313" # 1500-2
+    - "234000878" # 8100
+    - "234000882" # 1150
+    - "204000082" # G8110
+    - "234001739" # 6801
+    - "233000266" # 6003
+    - "204000170" # 3100
+    - "234000879" # 1101
+    - "228000393" # 7007-1
+    - "200000314" # 4000
+
+route-geometry:
+  enabled: true
+  include-catalog: true
+
+forecast:
+  enabled: true
+  interval: 5s
+  settlement-interval: 10s
+
+model:
+  bundle:
+    directory: /local/models/coldstart-20261016
+    promote-on-start: true
+
+logging:
+  level:
+    com.gustler.backend.forecasting.application.publication.ForecastModelUsageLog: WARN
+    com.gustler.backend.forecasting.application.evaluation.InitializeSameDayOutcomesService: WARN
+    org.springframework.web.servlet.DispatcherServlet: WARN
+    org.apache.catalina.core.ContainerBase: WARN
