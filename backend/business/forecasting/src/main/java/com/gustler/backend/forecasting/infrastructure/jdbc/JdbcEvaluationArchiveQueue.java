@@ -55,7 +55,7 @@ public class JdbcEvaluationArchiveQueue implements EvaluationArchiveQueue {
 
     @Override
     public Optional<Candidates> next(int limit) {
-        if (limit < 1 || limit > 100) throw new IllegalArgumentException("탐색 페이지는 1~100개여야 한다");
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("탐색 페이지는 1~1000개여야 한다");
         return inTransaction(() -> {
             var cursor = jdbc.sql("""
                 SELECT observation_id,stop_order FROM evaluation_archive_scan

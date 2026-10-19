@@ -204,6 +204,31 @@ class DddStorageMigrationTest {
     }
 
     @Test
+    void 기존_이관_묶음을_보존하면서_천행까지_확대한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("40");
+        String insert = """
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
+            SELECT gen_random_uuid(),id,1,gen_random_uuid(),clock_timestamp()+interval '5 minutes',%d
+            FROM route_version LIMIT 1
+            """;
+        execute(insert.formatted(100));
+
+        // when
+        migrate("41");
+        execute(insert.formatted(500));
+        execute(insert.formatted(1000));
+
+        // then
+        assertThat(number("SELECT count(*) FROM evaluation_archive_batch")).isEqualTo(3);
+        assertThatThrownBy(() -> execute(insert.formatted(1001))).isInstanceOf(SQLException.class);
+        assertThatThrownBy(() -> execute(insert.formatted(0))).isInstanceOf(SQLException.class);
+    }
+
+    @Test
     void 평가_선택_열을_추가해도_기존_대기와_완료를_보존하고_예보_파일을_다시_쓰지_않는다() throws Exception {
         // given
         preparePendingTransition();

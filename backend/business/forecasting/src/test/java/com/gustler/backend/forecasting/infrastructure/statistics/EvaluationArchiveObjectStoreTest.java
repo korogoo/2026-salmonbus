@@ -293,6 +293,40 @@ class EvaluationArchiveObjectStoreTest {
         assertThat(objects.actions).containsExactly("get:manifest.json");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {500, 1000})
+    void 확대된_묶음을_파일로_검증하고_통계와_복원에서_다시_읽는다(int size) throws Exception {
+        // given
+        var large = new EvaluationArchiveBatch(batch.id(), 3, 1, batch.leaseToken(),
+            batch.leaseUntil(), State.RESERVED, size, null);
+        var rows = java.util.stream.IntStream.rangeClosed(1, size).mapToObj(index -> {
+            String json = ORIGINAL.replace("\"vehicle_observation_id\":7", "\"vehicle_observation_id\":" + index);
+            return new Row(new Key(index, 9), json, EvaluationArchiveFiles.digest(json.getBytes(StandardCharsets.UTF_8)));
+        }).toList();
+        var storage = store(4 * 1024 * 1024);
+
+        // when
+        var saved = storage.storeAndVerify(large, rows);
+        var verified = new EvaluationArchiveBatch(large.id(), 3, 1, large.leaseToken(), large.leaseUntil(),
+            State.VERIFIED, size, saved.manifestSha256());
+        var reference = new com.gustler.backend.forecasting.application.statistics.StatisticsArchiveReader.Reference(
+            large.id(), 3, 1, size, saved.manifestSha256());
+
+        // then
+        assertThat(storage.readOriginal(verified)).containsExactlyElementsOf(rows);
+        assertThat(storage.read(reference)).hasSize(size);
+        assertDirectoryEmpty();
+    }
+
+    @Test
+    void 천행을_넘는_설정과_이관_묶음은_거절한다() {
+        // given / when / then
+        assertThatThrownBy(() -> new com.gustler.backend.forecasting.api.evaluation.EvaluationArchivePolicy(true, 1001))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new EvaluationArchiveBatch(batch.id(), 3, 1, batch.leaseToken(),
+            batch.leaseUntil(), State.RESERVED, 1001, null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private Row row(String json) {
         return new Row(new Key(7, 9), json, EvaluationArchiveFiles.digest(json.getBytes(StandardCharsets.UTF_8)));
     }

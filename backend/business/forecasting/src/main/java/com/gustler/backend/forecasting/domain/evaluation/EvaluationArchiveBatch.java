@@ -13,7 +13,7 @@ public record EvaluationArchiveBatch(UUID id, long routeVersionId, long qualityR
         Objects.requireNonNull(leaseToken);
         Objects.requireNonNull(leaseUntil);
         Objects.requireNonNull(state);
-        if (routeVersionId <= 0 || qualityRevision <= 0 || rowCount < 1 || rowCount > 100) {
+        if (routeVersionId <= 0 || qualityRevision <= 0 || rowCount < 1 || rowCount > 1000) {
             throw new IllegalArgumentException("이관 묶음의 노선·품질 판본·건수가 올바르지 않다");
         }
         if (state == State.VERIFIED ? manifestSha256 == null || !manifestSha256.matches("[0-9a-f]{64}")

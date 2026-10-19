@@ -44,7 +44,7 @@ class MigrationOrderTest {
      * <p>이 브랜치는 V39 관측별 정산 작업 이후 평가 선택 열과 뷰 필터를 추가한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
-        List.of("forecast_evaluation_sampling");
+        List.of("forecast_evaluation_sampling", "evaluation_archive_batch_limit");
 
     private static final String MIGRATION_LOCATION = "db/migration";
     private static final String STAGED_SCHEMA = "staged_deploy";

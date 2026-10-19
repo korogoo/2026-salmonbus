@@ -23,7 +23,7 @@ public class EvaluationArchiveConfiguration {
     @Lazy
     EvaluationArchiveObjectStore evaluationArchiveObjectStore(
         @Value("${forecast.archive.work-directory:/var/lib/salmonbus/evaluation-archive}") Path directory,
-        @Value("${forecast.archive.max-file-bytes:1048576}") long maxBytes) {
+        @Value("${forecast.archive.max-file-bytes:4194304}") long maxBytes) {
         return new EvaluationArchiveObjectStore(directory, maxBytes);
     }
 
@@ -31,7 +31,7 @@ public class EvaluationArchiveConfiguration {
     @ConditionalOnProperty(prefix = "forecast.archive", name = "enabled", havingValue = "true")
     EvaluationArchivePolicy evaluationArchivePolicy(
         @Value("${forecast.archive.delete-enabled:false}") boolean deleteEnabled,
-        @Value("${forecast.archive.page-size:100}") int pageSize) {
+        @Value("${forecast.archive.page-size:500}") int pageSize) {
         return new EvaluationArchivePolicy(deleteEnabled, pageSize);
     }
 

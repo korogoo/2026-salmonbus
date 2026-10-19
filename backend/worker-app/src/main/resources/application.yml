@@ -104,8 +104,8 @@ forecast:
     enabled: ${FORECAST_ARCHIVE_ENABLED:false}
     delete-enabled: ${FORECAST_ARCHIVE_DELETE_ENABLED:false}
     work-directory: ${FORECAST_ARCHIVE_WORK_DIRECTORY:/var/lib/salmonbus/evaluation-archive}
-    page-size: ${FORECAST_ARCHIVE_PAGE_SIZE:100}
-    max-file-bytes: 1048576
+    page-size: ${FORECAST_ARCHIVE_PAGE_SIZE:500}
+    max-file-bytes: ${FORECAST_ARCHIVE_MAX_FILE_BYTES:4194304}
     interval: 5s
     initial-delay: 60s
   same-day-initialization:
