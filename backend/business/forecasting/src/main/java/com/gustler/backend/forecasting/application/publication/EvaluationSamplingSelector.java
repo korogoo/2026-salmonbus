@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/** 노선 잠금 안에서 선택하고, 실제 커밋 후에만 선택 기준을 기억한다. */
+/** 실제 커밋 후에만 선택 기준을 기억한다. 동시 선택은 상세 저장을 더 남기는 쪽으로 처리한다. */
 @Component
 public class EvaluationSamplingSelector {
     private static final int MAX_VEHICLES = 10_000;
