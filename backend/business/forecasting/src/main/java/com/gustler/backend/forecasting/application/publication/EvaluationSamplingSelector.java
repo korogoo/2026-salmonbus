@@ -1,0 +1,93 @@
+package com.gustler.backend.forecasting.application.publication;
+
+import com.gustler.backend.forecasting.domain.evaluation.EvaluationSamplingPoint;
+import com.gustler.backend.forecasting.domain.evaluation.EvaluationSamplingPolicy;
+import com.gustler.backend.forecasting.domain.publication.ForecastPublication;
+import com.gustler.backend.forecasting.domain.publication.SeatForecast;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+/** 노선 잠금 안에서 선택하고, 실제 커밋 후에만 선택 기준을 기억한다. */
+@Component
+public class EvaluationSamplingSelector {
+    private static final int MAX_VEHICLES = 10_000;
+    private final boolean enabled;
+    private final Set<String> routes;
+    private final EvaluationSamplingPolicy policy;
+    private final Map<Key, EvaluationSamplingPoint> committed = new LinkedHashMap<>();
+
+    public EvaluationSamplingSelector(
+        @Value("${forecast.evaluation-sampling.enabled:false}") boolean enabled,
+        @Value("${forecast.evaluation-sampling.route-ids:}") String routeIds,
+        @Value("${forecast.evaluation-sampling.interval:60s}") Duration interval
+    ) {
+        this.enabled = enabled;
+        this.routes = Arrays.stream(routeIds.split(",")).map(String::strip)
+            .filter(value -> !value.isEmpty()).collect(Collectors.toUnmodifiableSet());
+        this.policy = new EvaluationSamplingPolicy(interval);
+    }
+
+    public synchronized Selection select(ForecastPublication publication, List<EvaluationSamplingSource> sources) {
+        if (!enabled || publication.predictions().isEmpty()) {
+            return new Selection(publication, List.of());
+        }
+        Map<Long, Boolean> decisions = new HashMap<>();
+        List<EvaluationSamplingPoint> advances = new ArrayList<>();
+        Set<Long> predicted = publication.predictions().stream().map(SeatForecast::vehicleObservationId)
+            .collect(Collectors.toSet());
+        for (EvaluationSamplingSource source : sources) {
+            EvaluationSamplingPoint current = source.point();
+            if (!predicted.contains(source.observationId())
+                || (!routes.isEmpty() && !routes.contains(source.sourceRouteId()))
+                || current.direction().equals("UNKNOWN")) {
+                continue;
+            }
+            if (current.routeVersionId() != publication.routeVersionId()
+                || current.modelDeploymentId() != publication.modelDeploymentId()) {
+                throw new IllegalArgumentException("평가 선택의 노선과 모델이 발행 정보와 다르다");
+            }
+            boolean all = policy.includeAll(committed.get(Key.of(current)), current);
+            decisions.put(source.observationId(), all);
+            if (all) advances.add(current);
+        }
+        List<SeatForecast> selected = publication.predictions().stream().map(prediction ->
+            prediction.withEvaluationRequired(policy.includesDistance(
+                decisions.getOrDefault(prediction.vehicleObservationId(), true), prediction.stopsToTarget())))
+            .toList();
+        return new Selection(new ForecastPublication(publication.sourceBatchId(), publication.routeVersionId(),
+            publication.modelDeploymentId(), publication.demandStatisticsRevision(), publication.qualityRevision(),
+            publication.observedAt(), publication.generatedAt(), publication.publishedAt(), selected), advances);
+    }
+
+    public synchronized void committed(Selection selection) {
+        for (EvaluationSamplingPoint point : selection.advances()) {
+            Key key = Key.of(point);
+            EvaluationSamplingPoint previous = committed.get(key);
+            if (previous != null && !point.observedAt().isAfter(previous.observedAt())) {
+                continue;
+            }
+            committed.remove(key);
+            committed.put(key, point);
+            while (committed.size() > MAX_VEHICLES) {
+                committed.remove(committed.keySet().iterator().next());
+            }
+        }
+    }
+
+    public record Selection(ForecastPublication publication, List<EvaluationSamplingPoint> advances) {
+        public Selection { advances = List.copyOf(advances); }
+    }
+
+    private record Key(long routeVersion, String vehicle) {
+        static Key of(EvaluationSamplingPoint point) { return new Key(point.routeVersionId(), point.vehicleId()); }
+    }
+}

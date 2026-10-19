@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** 계산에 사용한 품질 버전이 유지될 때만 예보와 정산 작업을 함께 확정한다. */
 @Component
@@ -26,14 +28,16 @@ public class ForecastBatchCommitter {
     private final EvaluationWorkStore work;
     private final RouteDataQualityAccess quality;
     private final CollectionInputs inputs;
+    private final EvaluationSamplingSelector sampling;
     private ForecastTelemetry telemetry = ForecastTelemetry.NONE;
 
     public ForecastBatchCommitter(ForecastPublicationRepository publications, EvaluationWorkStore work,
-        RouteDataQualityAccess quality, CollectionInputs inputs) {
+        RouteDataQualityAccess quality, CollectionInputs inputs, EvaluationSamplingSelector sampling) {
         this.publications = publications;
         this.work = work;
         this.quality = quality;
         this.inputs = inputs;
+        this.sampling = sampling;
     }
 
     @Autowired(required = false)
@@ -43,6 +47,12 @@ public class ForecastBatchCommitter {
 
     @Transactional
     public int commit(PendingForecastBatch batch, ForecastPublication publication) {
+        return commit(batch, publication, List.of());
+    }
+
+    @Transactional
+    public int commit(PendingForecastBatch batch, ForecastPublication publication,
+        List<EvaluationSamplingSource> sources) {
         long currentRevision = quality.lock(batch.routeVersionId());
         if (currentRevision != publication.qualityRevision()) {
             log.info("event=forecast_publication_skipped reason=QUALITY_CHANGED batchId={} routeVersionId={} expectedRevision={} actualRevision={}",
@@ -50,13 +60,25 @@ public class ForecastBatchCommitter {
             return 0;
         }
 
-        publications.save(publication);
-        List<Long> observations = publication.predictions().stream()
+        EvaluationSamplingSelector.Selection selection = sampling.select(publication, sources);
+        publications.save(selection.publication());
+        List<Long> observations = selection.publication().predictions().stream()
+            .filter(SeatForecast::evaluationRequired)
             .map(SeatForecast::vehicleObservationId).distinct().toList();
         for (int from = 0; from < observations.size(); from += 100) {
             work.register(batch.routeVersionId(), observations.subList(from, Math.min(from + 100, observations.size())));
         }
         inputs.confirmInput(batch.observationBatchId(), publication.generatedAt());
+        if (!selection.advances().isEmpty()) {
+            if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+                throw new IllegalStateException("평가 표본 확정에는 실제 트랜잭션이 필요하다");
+            }
+            TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override public void afterCommit() { sampling.committed(selection); }
+                });
+        }
         AfterCommitTelemetry.record(() -> telemetry.published(batch.routeId(), batch.routeVersionId(),
             batch.responseReceivedAt(), publication.predictionCount()));
         return publication.predictionCount();

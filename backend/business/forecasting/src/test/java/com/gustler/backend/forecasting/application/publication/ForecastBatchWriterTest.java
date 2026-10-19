@@ -91,7 +91,8 @@ class ForecastBatchWriterTest {
     private final SameDayFullOutcomesService outcomes = mock(SameDayFullOutcomesService.class);
     private final CollectionInputs inputs = mock(CollectionInputs.class);
     private final ForecastBatchWriter writer = new ForecastBatchWriter(trajectories,
-        new ForecastBatchCommitter(forecasts, evaluations, quality, inputs), outcomes,
+        new ForecastBatchCommitter(forecasts, evaluations, quality, inputs,
+            new EvaluationSamplingSelector(false, "", java.time.Duration.ofSeconds(60))), outcomes,
         statistics, CLOCK, quality);
     private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
 

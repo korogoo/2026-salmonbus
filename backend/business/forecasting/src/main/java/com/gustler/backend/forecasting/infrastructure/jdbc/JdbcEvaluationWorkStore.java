@@ -24,6 +24,7 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
         SELECT DISTINCT forecast.vehicle_observation_id, forecast.route_version_id
         FROM seat_forecast forecast
         WHERE forecast.route_version_id = :version
+          AND forecast.evaluation_required
           AND forecast.vehicle_observation_id IN (:ids)
           AND NOT EXISTS (
               SELECT 1 FROM forecast_evaluation_result result
