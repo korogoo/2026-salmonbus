@@ -38,7 +38,9 @@ jobs:
         run: bash backend/deploy/rehearsal/run.sh
 
   backend-build:
-    runs-on: ubuntu-latest
+    # mongo:8.0 exits on the 7.0.0 kernel in the Ubuntu 24.04 runner image.
+    # Revisit when the MongoDB test image supports the runner's kernel.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: read
