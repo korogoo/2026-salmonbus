@@ -24,12 +24,16 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
         SELECT DISTINCT forecast.vehicle_observation_id, forecast.route_version_id
         FROM seat_forecast forecast
         WHERE forecast.route_version_id = :version
-          AND forecast.evaluation_required
           AND forecast.vehicle_observation_id IN (:ids)
           AND NOT EXISTS (
               SELECT 1 FROM forecast_evaluation_result result
               WHERE result.vehicle_observation_id = forecast.vehicle_observation_id
                 AND result.target_stop_order = forecast.target_stop_order
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM forecast_evaluation_compact compact
+              WHERE compact.vehicle_observation_id = forecast.vehicle_observation_id
+                AND compact.target_stop_order = forecast.target_stop_order
           )
           AND NOT EXISTS (
               SELECT 1 FROM evaluation_archive_member archived
@@ -211,6 +215,11 @@ public class JdbcEvaluationWorkStore implements EvaluationWorkStore {
             SELECT /* salmonbus:evaluation_work.completed */ result.vehicle_observation_id, result.target_stop_order
             FROM forecast_evaluation_result result
             WHERE result.route_version_id=:version AND result.vehicle_observation_id IN (:ids)
+            UNION
+            SELECT compact.vehicle_observation_id, compact.target_stop_order
+            FROM forecast_evaluation_compact compact
+            JOIN seat_forecast forecast USING(vehicle_observation_id,target_stop_order)
+            WHERE forecast.route_version_id=:version AND compact.vehicle_observation_id IN (:ids)
             UNION
             SELECT archived.vehicle_observation_id, archived.target_stop_order
             FROM evaluation_archive_member archived

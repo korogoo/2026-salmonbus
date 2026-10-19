@@ -20,7 +20,7 @@ class EvaluationSamplingSelectorTest {
         selector.select(publication(0), sources(0, "UP"));
         var next = selector.select(publication(15), sources(15, "UP"));
 
-        assertThat(next.publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+        assertThat(next.publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
     }
 
     @Test
@@ -33,11 +33,11 @@ class EvaluationSamplingSelectorTest {
         selector.committed(next);
         var afterMinute = selector.select(publication(60), sources(60, "UP"));
 
-        assertThat(next.publication().predictions()).extracting(SeatForecast::evaluationRequired)
+        assertThat(next.publication().predictions()).extracting(SeatForecast::evaluationDetailRequired)
             .containsExactly(true, false);
-        assertThat(next.publication().predictions().stream().map(p -> p.withEvaluationRequired(true)).toList())
+        assertThat(next.publication().predictions().stream().map(p -> p.withEvaluationDetailRequired(true)).toList())
             .isEqualTo(original.predictions());
-        assertThat(afterMinute.publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+        assertThat(afterMinute.publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
     }
 
     @Test
@@ -47,7 +47,7 @@ class EvaluationSamplingSelectorTest {
 
             var next = selector.select(publication(15), sources(15, "UP"));
 
-            assertThat(next.publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+            assertThat(next.publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
         }
     }
 
@@ -59,8 +59,8 @@ class EvaluationSamplingSelectorTest {
         var unknown = selector.select(publication(15), sources(15, "UNKNOWN"));
         var missing = selector.select(publication(15), List.of());
 
-        assertThat(unknown.publication().predictions()).allMatch(SeatForecast::evaluationRequired);
-        assertThat(missing.publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+        assertThat(unknown.publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
+        assertThat(missing.publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
     }
 
     @Test
@@ -72,7 +72,7 @@ class EvaluationSamplingSelectorTest {
         selector.committed(old);
         var next = selector.select(publication(75), sources(75, "UP"));
 
-        assertThat(next.publication().predictions()).extracting(SeatForecast::evaluationRequired)
+        assertThat(next.publication().predictions()).extracting(SeatForecast::evaluationDetailRequired)
             .containsExactly(true, false);
     }
 

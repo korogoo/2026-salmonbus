@@ -90,7 +90,7 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                    arrival.vehicle_trip_key AS arrival_vehicle_trip_key,
                    arrival.quality_direction AS arrival_quality_direction,
                    version.route_id, forecast.model_deployment_id, forecast.stops_to_target,
-                   forecast.seat_full_chance_raw,
+                   forecast.seat_full_chance_raw, forecast.evaluation_detail_required,
                    forecast.quality_revision = quality.quality_revision AS usable_for_calibration,
                    source.vehicle_id AS prediction_vehicle_id, source.remaining_seats AS prediction_remaining_seats,
                    COALESCE(target_stop.boarding_allowed, false) AS target_boarding_allowed,
@@ -123,10 +123,24 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
                    candidate.arrival_remaining_seats, candidate.arrival_seat_unknown_reason,
                    candidate.arrival_vehicle_trip_key, candidate.arrival_quality_direction
             FROM candidates candidate
+            WHERE candidate.evaluation_detail_required OR candidate.stops_to_target = 1
+               OR candidate.scoring_state <> 'SETTLED'
             ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
             RETURNING vehicle_observation_id, target_stop_order
+        ), compact AS (
+            INSERT INTO forecast_evaluation_compact (
+                vehicle_observation_id, target_stop_order, arrival_observation_id,
+                seats_on_arrival, scored_at, arrived_at, arrival_quality_direction)
+            SELECT vehicle_observation_id, target_stop_order, arrival_observation_id,
+                   seats_on_arrival, scored_at, arrived_at, arrival_quality_direction
+            FROM candidates
+            WHERE NOT evaluation_detail_required AND stops_to_target > 1 AND scoring_state = 'SETTLED'
+            ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
+            RETURNING vehicle_observation_id, target_stop_order
+        ), completed AS (
+            SELECT * FROM saved UNION ALL SELECT * FROM compact
         )
-        SELECT candidate.* FROM candidates candidate JOIN saved USING (vehicle_observation_id, target_stop_order)
+        SELECT candidate.* FROM candidates candidate JOIN completed USING (vehicle_observation_id, target_stop_order)
         """;
 
     private static final int EXCLUSION_LIMIT = 500;

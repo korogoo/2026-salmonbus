@@ -81,7 +81,7 @@ model:
 # 켜는 것은 배포 행이 선 뒤다. 수집(collection.enabled)과 같은 방식으로 끈다.
 forecast:
   evaluation-sampling:
-    # 관측과 사용자용 예보는 유지하고 평가 등록만 줄인다. 운영 검증 후 별도로 켠다.
+    # 모든 예보를 정산하고, 선택되지 않은 정상 평가는 최소 결과만 저장한다. 운영 검증 후 별도로 켠다.
     enabled: ${FORECAST_EVALUATION_SAMPLING_ENABLED:false}
     # GBIS 노선 ID를 쉼표로 구분한다. 비어 있으면 전체 노선에 적용한다.
     route-ids: ${FORECAST_EVALUATION_SAMPLING_ROUTE_IDS:}

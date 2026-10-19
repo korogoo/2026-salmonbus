@@ -221,9 +221,9 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT pg_relation_filenode('seat_forecast')")).isEqualTo(forecastFile);
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
-        assertThat(number("SELECT count(*) FROM seat_forecast WHERE NOT evaluation_required")).isZero();
-        execute("UPDATE seat_forecast SET evaluation_required=false WHERE (vehicle_observation_id,target_stop_order) IN (SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_pending)");
-        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isZero();
+        assertThat(number("SELECT count(*) FROM seat_forecast WHERE NOT evaluation_detail_required")).isZero();
+        execute("UPDATE seat_forecast SET evaluation_detail_required=false WHERE (vehicle_observation_id,target_stop_order) IN (SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_pending)");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
     }
 

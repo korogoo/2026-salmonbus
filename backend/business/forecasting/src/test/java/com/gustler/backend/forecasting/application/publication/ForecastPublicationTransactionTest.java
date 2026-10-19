@@ -197,7 +197,7 @@ class ForecastPublicationTransactionTest {
     }
 
     @Test
-    void 평가를_줄여도_모든_예보를_저장하고_다음_정류장만_정산_대상으로_남긴다() {
+    void 상세_저장을_줄여도_모든_예보를_정산_대상으로_남긴다() {
         var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
         var source = samplingSources(OBSERVED_AT.minusSeconds(15));
         sampling.committed(sampling.select(samplingPublication(), source));
@@ -206,10 +206,10 @@ class ForecastPublicationTransactionTest {
         new TransactionTemplate(transactions).executeWithoutResult(status ->
             committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
 
-        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 1, true));
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
         assertThat(jdbc.sql("SELECT target_stop_order FROM forecast_evaluation_pending WHERE vehicle_observation_id = ?")
-            .param(observationId).query(Integer.class).list()).containsExactly(4);
-        assertThat(jdbc.sql("SELECT evaluation_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Integer.class).list()).containsExactlyInAnyOrder(4, 5);
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
             .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
     }
 
@@ -226,11 +226,11 @@ class ForecastPublicationTransactionTest {
         assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
         assertThat(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
             .publication().predictions()).allMatch(
-                SeatForecast::evaluationRequired);
+                SeatForecast::evaluationDetailRequired);
     }
 
     @Test
-    void 기능을_꺼도_재발행한_기존_예보의_평가_제외_선택은_유지한다() {
+    void 기능을_꺼도_재발행한_기존_예보의_상세_저장_선택은_유지한다() {
         var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
         sampling.committed(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.minusSeconds(15))));
         var enabled = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
@@ -242,7 +242,7 @@ class ForecastPublicationTransactionTest {
         new TransactionTemplate(transactions).executeWithoutResult(status ->
             disabled.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
 
-        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 1, true));
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
     }
 
     @Test
@@ -261,9 +261,9 @@ class ForecastPublicationTransactionTest {
             committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
 
         // then
-        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 1, true));
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
         assertThat(restarted.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
-            .publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+            .publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
     }
 
     private ForecastPublication samplingPublication() {

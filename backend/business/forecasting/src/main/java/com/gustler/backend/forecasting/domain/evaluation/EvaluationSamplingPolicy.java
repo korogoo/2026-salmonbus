@@ -3,7 +3,7 @@ package com.gustler.backend.forecasting.domain.evaluation;
 import java.time.Duration;
 import java.util.Objects;
 
-/** 한 정류장 앞 예보는 유지하고, 다른 거리의 평가 등록 여부를 정한다. */
+/** 모든 예보를 평가하되, 상세 결과를 남길 예보를 고른다. 한 정류장 앞은 항상 상세를 남긴다. */
 public record EvaluationSamplingPolicy(Duration interval) {
     public EvaluationSamplingPolicy {
         Objects.requireNonNull(interval);

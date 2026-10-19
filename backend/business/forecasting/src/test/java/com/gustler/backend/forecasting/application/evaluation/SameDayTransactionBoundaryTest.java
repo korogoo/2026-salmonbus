@@ -564,6 +564,143 @@ class SameDayTransactionBoundaryTest {
 
     long count(String table) { return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single(); }
 
+    @Test
+    void 상세를_생략한_평가도_보정에_한번만_반영하고_집계를_다시_만들_수_있다() {
+        // given
+        saveCompactPending();
+        initializeEmptyDay();
+
+        // when
+        settlement.settleArrivalLabels();
+        settlement.settleArrivalLabels();
+
+        // then
+        assertCompactSettledOnce();
+        assertThat(count("forecast_evaluation_pending")).isZero();
+        assertThat(count("forecast_evaluation_work")).isZero();
+        jdbc.sql("TRUNCATE same_day_model_full_outcomes").update();
+        initializer().initialize(routeId, SeoulDay.containing(ARRIVED_AT));
+        assertCompactSettledOnce();
+    }
+
+    @Test
+    void 상세를_생략한_평가도_초기화_전_정산을_집계에서_빠뜨리지_않는다() {
+        // given
+        saveCompactPending();
+
+        // when
+        settlement.settleArrivalLabels();
+        initializer().initialize(routeId, SeoulDay.containing(ARRIVED_AT));
+
+        // then
+        assertCompactSettledOnce();
+    }
+
+    @Test
+    void 보정_저장에_실패하면_최소_결과도_롤백하고_재시도는_한번만_반영한다() {
+        // given
+        saveCompactPending();
+        initializeEmptyDay();
+        doAnswer(call -> { call.callRealMethod(); timeout(); return null; })
+            .when(countsSpy).addCounts(anyLong(), anyLong(), any(), any());
+
+        // when
+        assertThatThrownBy(settlement::settleArrivalLabels).isInstanceOf(QueryTimeoutException.class);
+
+        // then
+        assertThat(count("forecast_evaluation_compact")).isZero();
+        assertUnsettled();
+        doAnswer(call -> call.callRealMethod()).when(countsSpy).addCounts(anyLong(), anyLong(), any(), any());
+        settlement.settleArrivalLabels();
+        settlement.settleArrivalLabels();
+        assertCompactSettledOnce();
+    }
+
+    @Test
+    void 한_정류장_앞은_상세_생략_표시가_있어도_상세와_승하차_자료를_보존한다() {
+        // given
+        savePending();
+        jdbc.sql("UPDATE seat_forecast SET evaluation_detail_required=false").update();
+        initializeEmptyDay();
+
+        // when
+        settlement.settleArrivalLabels();
+
+        // then
+        assertSettledOnce();
+        assertThat(count("forecast_evaluation_result")).isOne();
+        assertThat(count("forecast_evaluation_compact")).isZero();
+    }
+
+    @Test
+    void 최소_결과도_품질이_바뀐_예보를_다시_집계하지_않는다() {
+        // given
+        saveCompactPending();
+        settlement.settleArrivalLabels();
+        jdbc.sql("UPDATE route_data_quality SET quality_revision=quality_revision+1 WHERE route_id=?")
+            .param(routeId).update();
+
+        // when
+        initializer().initialize(routeId, SeoulDay.containing(ARRIVED_AT));
+
+        // then
+        assertThat(countsSpy.findCounts(routeId, modelId, SeoulDay.containing(ARRIVED_AT)))
+            .allMatch(row -> row.rowCount() == 0);
+        assertThat(count("forecast_evaluation_compact")).isOne();
+    }
+
+    @Test
+    void 최소_결과를_동시에_저장해도_보정은_한번만_증가한다() throws Exception {
+        // given
+        saveCompactPending();
+        initializeEmptyDay();
+        var writer = context.getBean(ForecastEvaluationWriter.class);
+        var completed = ForecastEvaluation.completed(sourceId, 2,
+            new com.gustler.backend.forecasting.domain.evaluation.ArrivalLabel.Settled(arrivalId, 0), NOW);
+        var start = new CountDownLatch(1);
+
+        // when
+        Future<?> first = workers.submit(() -> { await(start); return writer.complete(List.of(completed)); });
+        Future<?> second = workers.submit(() -> { await(start); return writer.complete(List.of(completed)); });
+        start.countDown();
+        first.get(10, TimeUnit.SECONDS);
+        second.get(10, TimeUnit.SECONDS);
+
+        // then
+        assertCompactSettledOnce();
+    }
+
+    @Test
+    void 최소_결과를_저장한_예보는_재등록해도_대기로_되돌아가지_않는다() {
+        // given
+        saveCompactPending();
+        initializeEmptyDay();
+        settlement.settleArrivalLabels();
+
+        // when
+        new TransactionTemplate(context.getBean(PlatformTransactionManager.class)).executeWithoutResult(status ->
+            workSpy.register(versionId, List.of(sourceId)));
+
+        // then
+        assertThat(count("forecast_evaluation_work")).isZero();
+        assertThat(count("forecast_evaluation_pending")).isZero();
+        assertCompactSettledOnce();
+    }
+
+    void saveCompactPending() {
+        savePending();
+        jdbc.sql("UPDATE seat_forecast SET stops_to_target=2, evaluation_detail_required=false").update();
+    }
+
+    void assertCompactSettledOnce() {
+        assertThat(count("forecast_evaluation_result")).isZero();
+        assertThat(count("forecast_evaluation_compact")).isOne();
+        assertThat(count("stop_demand_pending_sample")).isZero();
+        assertThat(countsSpy.findCounts(routeId, modelId, SeoulDay.containing(ARRIVED_AT)).stream()
+            .filter(row -> row.rowCount() > 0).toList()).containsExactly(
+            new SameDayFullOutcomeCount(2, 1, 1, .25, ARRIVED_AT));
+    }
+
     void initializeEmptyDay() {
         var day = SeoulDay.containing(ARRIVED_AT);
         countsSpy.upsertCounts(routeId, modelId, day, List.of(new SameDayFullOutcomeCount(0, 0, 0, 0, day.start())));

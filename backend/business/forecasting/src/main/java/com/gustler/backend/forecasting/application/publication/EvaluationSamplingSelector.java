@@ -60,7 +60,7 @@ public class EvaluationSamplingSelector {
             if (all) advances.add(current);
         }
         List<SeatForecast> selected = publication.predictions().stream().map(prediction ->
-            prediction.withEvaluationRequired(policy.includesDistance(
+            prediction.withEvaluationDetailRequired(policy.includesDistance(
                 decisions.getOrDefault(prediction.vehicleObservationId(), true), prediction.stopsToTarget())))
             .toList();
         return new Selection(new ForecastPublication(publication.sourceBatchId(), publication.routeVersionId(),

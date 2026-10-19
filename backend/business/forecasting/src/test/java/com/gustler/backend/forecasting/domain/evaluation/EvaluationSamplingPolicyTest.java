@@ -12,7 +12,7 @@ class EvaluationSamplingPolicyTest {
     private final EvaluationSamplingPolicy policy = new EvaluationSamplingPolicy(Duration.ofSeconds(60));
 
     @Test
-    void 처음_본_차량과_재시작_후_첫_관측은_모두_평가한다() {
+    void 처음_본_차량과_재시작_후_첫_관측은_모두_상세_저장한다() {
         var current = point(1, 1, "vehicle", 3, "UP", NOW);
 
         boolean actual = policy.includeAll(null, current);
@@ -21,7 +21,7 @@ class EvaluationSamplingPolicyTest {
     }
 
     @Test
-    void 같은_정류장의_60초_미만_관측은_한_정류장_앞만_평가한다() {
+    void 같은_정류장의_60초_미만_관측은_한_정류장_앞만_상세_저장한다() {
         var previous = point(1, 1, "vehicle", 3, "UP", NOW);
         var current = point(1, 1, "vehicle", 3, "UP", NOW.plusMillis(59_999));
 
@@ -34,7 +34,7 @@ class EvaluationSamplingPolicyTest {
     }
 
     @Test
-    void 마지막_저장으로부터_정확히_60초가_지나면_모든_거리를_평가한다() {
+    void 마지막_저장으로부터_정확히_60초가_지나면_모든_거리를_상세_저장한다() {
         var previous = point(1, 1, "vehicle", 3, "UP", NOW);
         var current = point(1, 1, "vehicle", 3, "UP", NOW.plusSeconds(60));
 
@@ -45,7 +45,7 @@ class EvaluationSamplingPolicyTest {
     }
 
     @Test
-    void 시간_구간_경계를_넘어도_60초가_안_지났으면_생략한다() {
+    void 시간_구간_경계를_넘어도_60초가_안_지났으면_상세를_생략한다() {
         var previous = point(1, 1, "vehicle", 3, "UP", NOW.plusSeconds(59));
         var current = point(1, 1, "vehicle", 3, "UP", NOW.plusSeconds(61));
 
@@ -55,7 +55,7 @@ class EvaluationSamplingPolicyTest {
     }
 
     @Test
-    void 정류장이나_방향이_바뀌면_60초_이전에도_평가한다() {
+    void 정류장이나_방향이_바뀌면_60초_이전에도_상세_저장한다() {
         var previous = point(1, 1, "vehicle", 3, "UP", NOW);
 
         boolean moved = policy.includeAll(previous, point(1, 1, "vehicle", 4, "UP", NOW.plusSeconds(15)));

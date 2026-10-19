@@ -41,7 +41,7 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
         INSERT /* salmonbus:forecast_publication.upsert_prediction */ INTO seat_forecast (
             publication_id, vehicle_observation_id, target_stop_order, route_version_id, stops_to_target,
             model_deployment_id, demand_statistics_revision, seat_full_chance_raw, seat_full_chance,
-            expected_seats, generated_at, quality_revision, evaluation_required
+            expected_seats, generated_at, quality_revision, evaluation_detail_required
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO UPDATE SET
             publication_id = EXCLUDED.publication_id,
@@ -92,7 +92,7 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
                     prediction.routeVersionId(), prediction.stopsToTarget(), prediction.modelDeploymentId(),
                     prediction.demandStatisticsRevision(), prediction.seatFullChanceRaw(),
                     prediction.seatFullChance(), prediction.expectedSeats(), offset(prediction.generatedAt()),
-                    publication.qualityRevision(), prediction.evaluationRequired())
+                    publication.qualityRevision(), prediction.evaluationDetailRequired())
                 .update();
         }
         existing.ifPresent(id -> jdbc.sql(COUNT_PREDICTIONS).params(publication.sourceBatchId(), id).update());

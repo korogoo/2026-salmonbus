@@ -23,7 +23,7 @@ public record SeatForecast(
     double seatFullChance,
     Double expectedSeats,
     Instant generatedAt,
-    boolean evaluationRequired
+    boolean evaluationDetailRequired
 ) {
 
     public SeatForecast(long vehicleObservationId, long routeVersionId, int targetStopOrder, int stopsToTarget,
@@ -33,7 +33,7 @@ public record SeatForecast(
             demandStatisticsRevision, seatFullChanceRaw, seatFullChance, expectedSeats, generatedAt, true);
     }
 
-    public SeatForecast withEvaluationRequired(boolean required) {
+    public SeatForecast withEvaluationDetailRequired(boolean required) {
         return new SeatForecast(vehicleObservationId, routeVersionId, targetStopOrder, stopsToTarget,
             modelDeploymentId, demandStatisticsRevision, seatFullChanceRaw, seatFullChance, expectedSeats,
             generatedAt, required);

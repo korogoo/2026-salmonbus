@@ -63,7 +63,6 @@ public class ForecastBatchCommitter {
         EvaluationSamplingSelector.Selection selection = sampling.select(publication, sources);
         boolean firstPublication = publications.save(selection.publication());
         List<Long> observations = selection.publication().predictions().stream()
-            .filter(SeatForecast::evaluationRequired)
             .map(SeatForecast::vehicleObservationId).distinct().toList();
         for (int from = 0; from < observations.size(); from += 100) {
             work.register(batch.routeVersionId(), observations.subList(from, Math.min(from + 100, observations.size())));
