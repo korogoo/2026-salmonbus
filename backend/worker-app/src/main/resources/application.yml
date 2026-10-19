@@ -80,6 +80,12 @@ model:
 # 예보 배치와 라벨 회수 배치. 계수 번들이 없어 도는 배포가 하나도 없으므로 꺼둔 채로 낸다.
 # 켜는 것은 배포 행이 선 뒤다. 수집(collection.enabled)과 같은 방식으로 끈다.
 forecast:
+  evaluation-sampling:
+    # 관측과 사용자용 예보는 유지하고 평가 등록만 줄인다. 운영 검증 후 별도로 켠다.
+    enabled: ${FORECAST_EVALUATION_SAMPLING_ENABLED:false}
+    # GBIS 노선 ID를 쉼표로 구분한다. 비어 있으면 전체 노선에 적용한다.
+    route-ids: ${FORECAST_EVALUATION_SAMPLING_ROUTE_IDS:}
+    interval: ${FORECAST_EVALUATION_SAMPLING_INTERVAL:60s}
   quality-memory:
     # 단일 worker 전용. 수동 DB 품질 변경 또는 다중 worker 실행 시 끈다.
     enabled: ${FORECAST_QUALITY_MEMORY_ENABLED:false}

@@ -245,6 +245,27 @@ class ForecastPublicationTransactionTest {
         assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 1, true));
     }
 
+    @Test
+    void 재시작_후_재발행은_새_전체_평가_표본으로_기억하지_않는다() {
+        // given
+        var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        sampling.committed(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.minusSeconds(15))));
+        var original = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            original.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+        var restarted = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        var committer = new ForecastBatchCommitter(publications, work, quality, inputs, restarted);
+
+        // when
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+
+        // then
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 1, true));
+        assertThat(restarted.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
+            .publication().predictions()).allMatch(SeatForecast::evaluationRequired);
+    }
+
     private ForecastPublication samplingPublication() {
         return new ForecastPublication(
             batchId, routeVersionId, runtime.deploymentId(), 0, 1, OBSERVED_AT, GENERATED_AT, GENERATED_AT,

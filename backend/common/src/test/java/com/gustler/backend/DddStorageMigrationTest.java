@@ -204,6 +204,30 @@ class DddStorageMigrationTest {
     }
 
     @Test
+    void 평가_선택_열을_추가해도_기존_대기와_완료를_보존하고_예보_파일을_다시_쓰지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("39");
+        long forecastFile = number("SELECT pg_relation_filenode('seat_forecast')");
+        long pending = number("SELECT count(*) FROM forecast_evaluation_pending");
+        long results = number("SELECT count(*) FROM forecast_evaluation_result");
+
+        // when
+        migrate("40");
+
+        // then
+        assertThat(number("SELECT pg_relation_filenode('seat_forecast')")).isEqualTo(forecastFile);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
+        assertThat(number("SELECT count(*) FROM seat_forecast WHERE NOT evaluation_required")).isZero();
+        execute("UPDATE seat_forecast SET evaluation_required=false WHERE (vehicle_observation_id,target_stop_order) IN (SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_pending)");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isZero();
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
+    }
+
+    @Test
     void 관측별_작업으로_전환해도_미완료_예보와_완료_이력은_그대로다() throws Exception {
         // given
         preparePendingTransition();
@@ -342,12 +366,12 @@ class DddStorageMigrationTest {
     }
 
     @Test
-    void 최신_스키마를_이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
+    void V39_스키마를_이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
         // given
         preparePendingTransition();
         migrate("38");
         approveEvaluationTransition();
-        migrate("latest");
+        migrate("39");
         java.nio.file.Path directory = java.nio.file.Path.of("").toAbsolutePath();
         while (directory != null && !java.nio.file.Files.isRegularFile(
             directory.resolve("deploy/sql/rollback-observation-evaluation-work.sql"))) directory = directory.getParent();
@@ -362,7 +386,7 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
         approveEvaluationTransition();
-        migrate("latest");
+        migrate("39");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
     }

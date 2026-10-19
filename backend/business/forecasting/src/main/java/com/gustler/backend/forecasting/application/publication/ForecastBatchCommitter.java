@@ -61,7 +61,7 @@ public class ForecastBatchCommitter {
         }
 
         EvaluationSamplingSelector.Selection selection = sampling.select(publication, sources);
-        publications.save(selection.publication());
+        boolean firstPublication = publications.save(selection.publication());
         List<Long> observations = selection.publication().predictions().stream()
             .filter(SeatForecast::evaluationRequired)
             .map(SeatForecast::vehicleObservationId).distinct().toList();
@@ -69,7 +69,8 @@ public class ForecastBatchCommitter {
             work.register(batch.routeVersionId(), observations.subList(from, Math.min(from + 100, observations.size())));
         }
         inputs.confirmInput(batch.observationBatchId(), publication.generatedAt());
-        if (!selection.advances().isEmpty()) {
+        // 재발행은 DB에 남아 있는 최초 선택을 유지하므로 새 표본 기준으로 삼지 않는다.
+        if (firstPublication && !selection.advances().isEmpty()) {
             if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
                 throw new IllegalStateException("평가 표본 확정에는 실제 트랜잭션이 필요하다");

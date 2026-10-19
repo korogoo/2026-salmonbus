@@ -72,7 +72,7 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void save(ForecastPublication publication) {
+    public boolean save(ForecastPublication publication) {
         final Optional<Long> existing = jdbc.sql("SELECT id FROM forecast_publication WHERE source_batch_id = ?")
             .param(publication.sourceBatchId()).query(Long.class).optional();
         final long publicationId = existing.orElseGet(() -> jdbc.sql(INSERT_PUBLICATION)
@@ -96,6 +96,7 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
                 .update();
         }
         existing.ifPresent(id -> jdbc.sql(COUNT_PREDICTIONS).params(publication.sourceBatchId(), id).update());
+        return existing.isEmpty();
     }
 
     private static OffsetDateTime offset(Instant instant) {

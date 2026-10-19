@@ -113,6 +113,29 @@ class ForecastBatchWriterTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void 이미_조회한_관측과_정류장에서_평가_선택에_필요한_정보를_전달한다() {
+        // given
+        var committer = mock(ForecastBatchCommitter.class);
+        var writer = new ForecastBatchWriter(trajectories, committer, outcomes, statistics, CLOCK, quality);
+        var stops = new RouteStops(1, "204000057", List.of(
+            new RouteStop(1, 3, "stop-3", true, com.gustler.backend.forecasting.domain.model.RouteDirection.UP),
+            new RouteStop(1, 4, "stop-4", true), new RouteStop(1, 5, "stop-5", true)));
+        when(trajectories.readTrajectories(100)).thenReturn(List.of(vehicle(10, 12, 44)));
+
+        // when
+        writer.writeForecastsOf(BATCH, stops, runtime(input -> RESULT));
+
+        // then
+        ArgumentCaptor<List<EvaluationSamplingSource>> sources = ArgumentCaptor.forClass(List.class);
+        verify(committer).commit(eq(BATCH), any(ForecastPublication.class), sources.capture());
+        assertThat(sources.getValue()).containsExactly(new EvaluationSamplingSource(10, "204000057",
+            new com.gustler.backend.forecasting.domain.evaluation.EvaluationSamplingPoint(
+                1, 7, "vehicle-10", 3, "UP", NOW)));
+        verify(trajectories, times(1)).readTrajectories(100);
+    }
+
+    @Test
     void 예보_계산에_쓸_품질_버전과_통계를_읽은_뒤_저장_직전에_품질_행을_잠근다() {
         // given
         var snapshot = runtime(input -> RESULT);
