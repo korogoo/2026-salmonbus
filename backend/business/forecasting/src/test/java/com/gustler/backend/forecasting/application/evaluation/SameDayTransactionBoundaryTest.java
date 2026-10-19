@@ -671,6 +671,26 @@ class SameDayTransactionBoundaryTest {
     }
 
     @Test
+    void 최소_결과는_도착_당시의_편도_식별값을_유지한다() {
+        // given
+        saveCompactPending();
+        String tripAtSettlement = jdbc.sql("SELECT vehicle_trip_key FROM forecast_eligible_observation WHERE id=?")
+            .param(arrivalId).query(String.class).single();
+
+        // when
+        settlement.settleArrivalLabels();
+        jdbc.sql("DELETE FROM observation_trip_assignment WHERE observation_id=?").param(arrivalId).update();
+        jdbc.sql("UPDATE vehicle_observation SET vehicle_trip_key='changed-after-settlement' WHERE id=?")
+            .param(arrivalId).update();
+
+        // then
+        assertThat(jdbc.sql("SELECT arrival_vehicle_trip_key FROM forecast_evaluation_compact WHERE vehicle_observation_id=?")
+            .param(sourceId).query(String.class).single()).isEqualTo(tripAtSettlement);
+        assertThat(jdbc.sql("SELECT arrival_vehicle_trip_key FROM forecast_evaluation WHERE vehicle_observation_id=?")
+            .param(sourceId).query(String.class).single()).isEqualTo(tripAtSettlement);
+    }
+
+    @Test
     void 최소_결과를_저장한_예보는_재등록해도_대기로_되돌아가지_않는다() {
         // given
         saveCompactPending();

@@ -97,13 +97,13 @@ public class JdbcStopDemandStatisticsRepository implements StopDemandStatisticsR
                    AS net_boarding_total,
                SUM(vehicle_capacity.capacity)::double precision AS capacity_total,
                COUNT(*) AS sample_count
-        FROM quality_eligible_seat_forecast forecast
+        FROM one_stop_quality_eligible_seat_forecast forecast
         JOIN route_stop target_stop
           ON target_stop.route_version_id = forecast.route_version_id
          AND target_stop.stop_order = forecast.target_stop_order
         JOIN vehicle_observation prediction
           ON prediction.id = forecast.vehicle_observation_id
-        JOIN forecast_evaluation evaluation
+        JOIN forecast_evaluation_result evaluation
           ON evaluation.vehicle_observation_id = forecast.vehicle_observation_id
          AND evaluation.target_stop_order = forecast.target_stop_order
         JOIN vehicle_capacity

@@ -249,6 +249,8 @@ class ForecastPublicationTransactionTest {
             disabled.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
 
         assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
     }
 
     @Test
@@ -268,6 +270,8 @@ class ForecastPublicationTransactionTest {
 
         // then
         assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
         assertThat(restarted.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
             .publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
     }

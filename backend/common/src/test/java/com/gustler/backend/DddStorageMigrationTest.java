@@ -247,6 +247,9 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
         assertThat(number("SELECT count(*) FROM seat_forecast WHERE NOT evaluation_detail_required")).isZero();
+        assertThat(scalar("EXPLAIN (FORMAT JSON) SELECT * FROM one_stop_quality_eligible_seat_forecast WHERE vehicle_observation_id=1"))
+            .contains("forecast_evaluation_result")
+            .doesNotContain("forecast_evaluation_compact");
         execute("UPDATE seat_forecast SET evaluation_detail_required=false WHERE (vehicle_observation_id,target_stop_order) IN (SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_pending)");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);

@@ -14,6 +14,7 @@ CREATE TABLE forecast_evaluation_compact (
     seats_on_arrival integer NOT NULL CHECK (seats_on_arrival BETWEEN 0 AND 70),
     scored_at timestamptz NOT NULL,
     arrived_at timestamptz NOT NULL,
+    arrival_vehicle_trip_key varchar(120),
     arrival_quality_direction bigint NOT NULL,
     PRIMARY KEY (vehicle_observation_id, target_stop_order),
     FOREIGN KEY (vehicle_observation_id, target_stop_order)
@@ -52,7 +53,7 @@ SELECT compact.vehicle_observation_id, compact.target_stop_order, forecast.route
        'SETTLED'::varchar(16), compact.arrival_observation_id, compact.seats_on_arrival,
        compact.scored_at, compact.arrived_at, arrival.route_version_id,
        arrival.vehicle_id, arrival.stop_order, arrival.running_state, arrival.remaining_seats,
-       arrival.seat_unknown_reason, arrival.vehicle_trip_key, compact.arrival_quality_direction
+       arrival.seat_unknown_reason, compact.arrival_vehicle_trip_key, compact.arrival_quality_direction
 FROM forecast_evaluation_compact compact
 JOIN seat_forecast forecast USING (vehicle_observation_id, target_stop_order)
 JOIN vehicle_observation arrival ON arrival.id = compact.arrival_observation_id
@@ -62,3 +63,28 @@ SELECT vehicle_observation_id, target_stop_order, route_version_id, 'PENDING'::v
        NULL::bigint, NULL::varchar(40), NULL::integer, NULL::integer, NULL::integer,
        NULL::varchar(20), NULL::varchar(120), NULL::bigint
 FROM forecast_evaluation_pending;
+
+-- 시간대 통계는 한 정류장 앞의 상세 결과만 사용한다. compact 전체를 거치는 뷰를 읽지 않는다.
+CREATE VIEW one_stop_quality_eligible_seat_forecast AS
+SELECT forecast.vehicle_observation_id, forecast.target_stop_order, forecast.route_version_id,
+       forecast.stops_to_target, forecast.model_deployment_id, forecast.demand_statistics_revision,
+       forecast.seat_full_chance_raw, forecast.seat_full_chance, forecast.expected_seats, forecast.generated_at,
+       evaluation.scoring_state, evaluation.arrival_observation_id, evaluation.seats_on_arrival,
+       evaluation.scored_at, forecast.quality_revision
+FROM seat_forecast forecast
+JOIN forecast_evaluation_result evaluation ON evaluation.vehicle_observation_id = forecast.vehicle_observation_id
+    AND evaluation.target_stop_order = forecast.target_stop_order
+JOIN forecast_eligible_observation source ON source.id = forecast.vehicle_observation_id
+LEFT JOIN observation_trip_assignment arrival_assignment ON arrival_assignment.observation_id = evaluation.arrival_observation_id
+LEFT JOIN vehicle_one_way_trip arrival_trip ON arrival_trip.id = COALESCE(arrival_assignment.trip_id, evaluation.arrival_vehicle_trip_key)
+WHERE forecast.stops_to_target = 1
+AND (evaluation.arrival_observation_id IS NULL OR (
+    evaluation.arrival_route_version_id = source.route_version_id
+    AND evaluation.arrival_vehicle_id IS NOT DISTINCT FROM source.vehicle_id
+    AND evaluation.arrival_quality_direction = source.quality_direction
+    AND (evaluation.arrival_remaining_seats IS NULL OR evaluation.arrival_remaining_seats <= 70)
+    AND (arrival_trip.status IS NULL OR arrival_trip.status = 'ELIGIBLE')
+    AND NOT EXISTS (SELECT 1 FROM trip_quality_rebuild rebuild
+        WHERE rebuild.route_version_id = evaluation.arrival_route_version_id AND NOT rebuild.completed
+          AND (rebuild.vehicle_id = '' OR rebuild.vehicle_id = evaluation.arrival_vehicle_id))
+));

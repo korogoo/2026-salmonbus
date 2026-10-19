@@ -130,9 +130,9 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
         ), compact AS (
             INSERT INTO forecast_evaluation_compact (
                 vehicle_observation_id, target_stop_order, arrival_observation_id,
-                seats_on_arrival, scored_at, arrived_at, arrival_quality_direction)
+                seats_on_arrival, scored_at, arrived_at, arrival_vehicle_trip_key, arrival_quality_direction)
             SELECT vehicle_observation_id, target_stop_order, arrival_observation_id,
-                   seats_on_arrival, scored_at, arrived_at, arrival_quality_direction
+                   seats_on_arrival, scored_at, arrived_at, arrival_vehicle_trip_key, arrival_quality_direction
             FROM candidates
             WHERE NOT evaluation_detail_required AND stops_to_target > 1 AND scoring_state = 'SETTLED'
             ON CONFLICT (vehicle_observation_id, target_stop_order) DO NOTHING
