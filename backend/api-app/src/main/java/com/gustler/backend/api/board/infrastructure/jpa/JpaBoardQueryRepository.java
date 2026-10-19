@@ -8,6 +8,8 @@ import com.gustler.backend.api.board.application.SnapshotObservation;
 import com.gustler.backend.api.board.application.StoredPrediction;
 import com.gustler.backend.api.board.domain.BoardStop;
 import com.gustler.backend.api.board.domain.ForecastModel;
+import com.gustler.backend.api.board.domain.HeadwayRange;
+import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.error.ServiceUnavailableException;
 import com.gustler.backend.api.observation.ObservationFreshness;
 import com.gustler.backend.api.route.RouteId;
@@ -112,11 +114,30 @@ public class JpaBoardQueryRepository implements BoardQueryRepository {
                 routeVersion.upFirstDepartureTime(),
                 routeVersion.upLastDepartureTime(),
                 routeVersion.downFirstDepartureTime(),
-                routeVersion.downLastDepartureTime()
+                routeVersion.downLastDepartureTime(),
+                headwaysOf(routeVersion)
             ),
             observation,
             activeModel
         );
+    }
+
+    private RouteHeadways headwaysOf(
+        RouteVersionJpaEntity routeVersion
+    ) {
+        return new RouteHeadways(
+            headwayOf(routeVersion.weekdayMinHeadwayMinutes(), routeVersion.weekdayMaxHeadwayMinutes()),
+            headwayOf(routeVersion.saturdayMinHeadwayMinutes(), routeVersion.saturdayMaxHeadwayMinutes()),
+            headwayOf(routeVersion.sundayMinHeadwayMinutes(), routeVersion.sundayMaxHeadwayMinutes()),
+            headwayOf(routeVersion.holidayMinHeadwayMinutes(), routeVersion.holidayMaxHeadwayMinutes())
+        );
+    }
+
+    private HeadwayRange headwayOf(
+        Integer minMinutes,
+        Integer maxMinutes
+    ) {
+        return HeadwayRange.of(minMinutes, maxMinutes).orElse(null);
     }
 
     private List<ObservationBatchJpaEntity> latestObservationOf(

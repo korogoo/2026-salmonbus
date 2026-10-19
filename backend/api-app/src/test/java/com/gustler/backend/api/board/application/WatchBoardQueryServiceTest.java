@@ -13,6 +13,7 @@ import com.gustler.backend.api.board.domain.BoardDirection;
 import com.gustler.backend.api.board.domain.BoardRoute;
 import com.gustler.backend.api.board.domain.DirectionInfo;
 import com.gustler.backend.api.board.domain.ForecastModel;
+import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.board.domain.StopState;
 import com.gustler.backend.api.error.ServiceUnavailableException;
 import com.gustler.backend.api.route.RouteId;
@@ -189,7 +190,8 @@ class WatchBoardQueryServiceTest {
 
     private static Board board(OffsetDateTime observedAt, final int vehiclesInService) {
         BoardRoute route = new BoardRoute("204000057", "3330", "기점", "종점", RouteStatus.FORECAST_READY, null,
-            List.of(new DirectionInfo(BoardDirection.UP, "종점 방면", "기점", "종점", "04:50", "23:30")), "1");
+            List.of(new DirectionInfo(BoardDirection.UP, "종점 방면", "기점", "종점", "04:50", "23:30")), "1",
+            RouteHeadways.none());
         StopState stop = new StopState(1, "STOP-1", "기점", BoardDirection.UP, true, List.of());
         return new Board(route, observedAt, observedAt.plusMinutes(10), new ForecastModel(7L, "model-7", NOW.minusDays(1)),
             vehiclesInService, List.of(stop));
