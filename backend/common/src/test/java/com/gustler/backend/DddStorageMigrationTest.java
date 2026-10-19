@@ -209,7 +209,7 @@ class DddStorageMigrationTest {
         preparePendingTransition();
         migrate("38");
         approveEvaluationTransition();
-        migrate("40");
+        migrate("41");
         String insert = """
             INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
             SELECT gen_random_uuid(),id,1,gen_random_uuid(),clock_timestamp()+interval '5 minutes',%d
@@ -218,7 +218,7 @@ class DddStorageMigrationTest {
         execute(insert.formatted(100));
 
         // when
-        migrate("41");
+        migrate("42");
         execute(insert.formatted(500));
         execute(insert.formatted(1000));
 
@@ -240,7 +240,7 @@ class DddStorageMigrationTest {
         long results = number("SELECT count(*) FROM forecast_evaluation_result");
 
         // when
-        migrate("40");
+        migrate("41");
 
         // then
         assertThat(number("SELECT pg_relation_filenode('seat_forecast')")).isEqualTo(forecastFile);
@@ -394,7 +394,7 @@ class DddStorageMigrationTest {
     }
 
     @Test
-    void V39_스키마를_이전_구조로_되돌린_뒤_다시_전환해도_미완료_예보가_보존된다() throws Exception {
+    void V39_스키마를_이전_구조로_되돌린_뒤_최신으로_다시_전환해도_미완료_예보가_보존된다() throws Exception {
         // given
         preparePendingTransition();
         migrate("38");
