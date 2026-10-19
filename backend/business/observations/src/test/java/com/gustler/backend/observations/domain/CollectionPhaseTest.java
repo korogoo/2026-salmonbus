@@ -12,8 +12,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class CollectionPhaseTest {
 
-    private static final int PEAK_INTERVAL_SECONDS = 15;
-    private static final int OFF_PEAK_INTERVAL_SECONDS = 20;
+    private static final int PEAK_INTERVAL_SECONDS = 20;
+    private static final int OFF_PEAK_INTERVAL_SECONDS = 30;
     private static final int DEEP_NIGHT_INTERVAL_SECONDS = 600;
     private static final int HOURS_PER_DAY = 24;
 
@@ -126,7 +126,7 @@ class CollectionPhaseTest {
 
     @ParameterizedTest
     @EnumSource(value = CollectionPhase.class, names = {"MORNING_PEAK", "EVENING_PEAK", "LATE_EVENING"})
-    void 첨두와_늦은_저녁은_15초마다_부른다(
+    void 첨두와_늦은_저녁은_20초마다_부른다(
         CollectionPhase phase
     ) {
         // when
@@ -138,7 +138,7 @@ class CollectionPhaseTest {
 
     @ParameterizedTest
     @EnumSource(value = CollectionPhase.class, names = {"EARLY_MORNING", "DAYTIME", "NIGHT_TAIL"})
-    void 이른_아침과_낮과_심야_꼬리는_20초마다_부른다(
+    void 이른_아침과_낮과_심야_꼬리는_30초마다_부른다(
         CollectionPhase phase
     ) {
         // when
@@ -184,7 +184,7 @@ class CollectionPhaseTest {
         final int actual = CollectionPhase.NIGHT_TAIL.dailyCallsPerRoute();
 
         // then
-        assertThat(actual).isEqualTo(360);
+        assertThat(actual).isEqualTo(240);
     }
 
     @Test

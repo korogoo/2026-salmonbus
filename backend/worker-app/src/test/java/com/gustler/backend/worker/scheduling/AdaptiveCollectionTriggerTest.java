@@ -12,7 +12,7 @@ class AdaptiveCollectionTriggerTest {
 
     private static final ZoneId KOREA = ZoneId.of("Asia/Seoul");
 
-    /** 한국 시각 2026-08-28 08:00. 아침 첨두라 15초다. */
+    /** 한국 시각 2026-08-28 08:00. 아침 첨두라 20초다. */
     private static final Instant MORNING_PEAK_MOMENT = Instant.parse("2026-08-27T23:00:00Z");
     /** 한국 시각 2026-08-28 02:00. 심야라 600초다. */
     private static final Instant DEEP_NIGHT_MOMENT = Instant.parse("2026-08-27T17:00:00Z");
@@ -31,12 +31,12 @@ class AdaptiveCollectionTriggerTest {
     }
 
     @Test
-    void 아침_첨두에_끝난_판의_다음_차례는_15초_뒤다() {
+    void 아침_첨두에_끝난_판의_다음_차례는_20초_뒤다() {
         // when
         final Instant actual = trigger.nextExecution(contextCompletedAt(MORNING_PEAK_MOMENT));
 
         // then
-        assertThat(actual).isEqualTo(MORNING_PEAK_MOMENT.plusSeconds(15));
+        assertThat(actual).isEqualTo(MORNING_PEAK_MOMENT.plusSeconds(20));
     }
 
     @Test
@@ -59,7 +59,7 @@ class AdaptiveCollectionTriggerTest {
         final Instant actual = trigger.nextExecution(context);
 
         // then
-        assertThat(actual).isEqualTo(completedLate.plusSeconds(15));
+        assertThat(actual).isEqualTo(completedLate.plusSeconds(20));
     }
 
     private SimpleTriggerContext contextCompletedAt(
