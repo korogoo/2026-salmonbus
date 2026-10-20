@@ -41,10 +41,10 @@ class MigrationOrderTest {
      * 번호가 거꾸로 배정돼도 그 가정에 맞춰 다른 파일을 빼게 되고, 결국 늘 순서가 맞아서 통과한다.
      * 이름으로 고르고, 그 파일들이 정말 마지막 번호인지는 아래에서 따로 단언한다.
      *
-     * <p>이 브랜치는 노선 버전에 요일별 배차간격을 더한다.
+     * <p>이 브랜치는 더 이상 사용하지 않는 최신 배치 시도 인덱스를 제거한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
-        List.of("route_version_headways");
+        List.of("drop_unused_batch_latest_attempt_index");
 
     private static final String MIGRATION_LOCATION = "db/migration";
     private static final String STAGED_SCHEMA = "staged_deploy";
