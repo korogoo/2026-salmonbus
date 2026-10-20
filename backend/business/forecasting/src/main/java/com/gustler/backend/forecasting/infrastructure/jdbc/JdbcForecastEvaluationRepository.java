@@ -109,7 +109,8 @@ public class JdbcForecastEvaluationRepository implements ForecastEvaluationRepos
             JOIN eligible source ON source.id = forecast.vehicle_observation_id
             LEFT JOIN eligible arrival ON arrival.id = input.arrivalObservationId
             LEFT JOIN observation_batch arrival_batch ON arrival_batch.id = arrival.observation_batch_id
-            WHERE CAST(input.arrivalObservationId AS bigint) IS NULL OR (arrival.id IS NOT NULL AND %s)
+            WHERE CAST(input.arrivalObservationId AS bigint) IS NULL OR (
+                arrival.id IS NOT NULL AND arrival_batch.response_received_at IS NOT NULL AND %s)
         ), saved AS (
             INSERT INTO forecast_evaluation_result (
                 vehicle_observation_id, target_stop_order, route_version_id, scoring_state,
