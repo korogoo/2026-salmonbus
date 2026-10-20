@@ -39,6 +39,7 @@ jobs:
 
   backend-build:
     # MongoDB 8.0의 커널 6.19+ 기동 오류(SERVER-121912)를 피해 6.8 커널 러너를 사용한다.
+    # 2027-04-17 러너 지원 종료 전 MongoDB 이미지를 갱신하고 최신 러너로 복귀한다.
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
