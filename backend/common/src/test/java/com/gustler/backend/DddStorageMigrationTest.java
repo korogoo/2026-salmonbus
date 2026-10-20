@@ -209,7 +209,7 @@ class DddStorageMigrationTest {
         preparePendingTransition();
         migrate("38");
         approveEvaluationTransition();
-        migrate("41");
+        migrate("42");
         String insert = """
             INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
             SELECT gen_random_uuid(),id,1,gen_random_uuid(),clock_timestamp()+interval '5 minutes',%d
@@ -218,7 +218,7 @@ class DddStorageMigrationTest {
         execute(insert.formatted(100));
 
         // when
-        migrate("42");
+        migrate("43");
         execute(insert.formatted(500));
         execute(insert.formatted(1000));
 
@@ -240,7 +240,7 @@ class DddStorageMigrationTest {
         long results = number("SELECT count(*) FROM forecast_evaluation_result");
 
         // when
-        migrate("41");
+        migrate("42");
 
         // then
         assertThat(number("SELECT pg_relation_filenode('seat_forecast')")).isEqualTo(forecastFile);

@@ -38,8 +38,7 @@ jobs:
         run: bash backend/deploy/rehearsal/run.sh
 
   backend-build:
-    # mongo:8.0 exits on the 7.0.0 kernel in the Ubuntu 24.04 runner image.
-    # Revisit when the MongoDB test image supports the runner's kernel.
+    # MongoDB 8.0의 커널 6.19+ 기동 오류(SERVER-121912)를 피해 6.8 커널 러너를 사용한다.
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:

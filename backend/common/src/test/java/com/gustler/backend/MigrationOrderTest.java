@@ -41,7 +41,7 @@ class MigrationOrderTest {
      * 번호가 거꾸로 배정돼도 그 가정에 맞춰 다른 파일을 빼게 되고, 결국 늘 순서가 맞아서 통과한다.
      * 이름으로 고르고, 그 파일들이 정말 마지막 번호인지는 아래에서 따로 단언한다.
      *
-     * <p>이 브랜치는 V40 요일별 배차간격 이후 평가 선택 열과 이관 묶음 한도를 추가한다.
+     * <p>이 브랜치는 V41 인덱스 제거 이후 평가 선택 열과 이관 묶음 한도를 추가한다.
      */
     private static final List<String> MIGRATIONS_THIS_BRANCH_ADDS =
         List.of("forecast_evaluation_sampling", "evaluation_archive_batch_limit");

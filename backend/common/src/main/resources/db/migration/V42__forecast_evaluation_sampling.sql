@@ -1,4 +1,4 @@
--- 아직 배포하지 않은 V41. 모든 예보를 평가하고 상세 저장 여부만 선택한다.
+-- 아직 배포하지 않은 V42. 모든 예보를 평가하고 상세 저장 여부만 선택한다.
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
 
