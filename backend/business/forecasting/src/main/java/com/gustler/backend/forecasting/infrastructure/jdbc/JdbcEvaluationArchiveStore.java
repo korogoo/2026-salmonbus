@@ -48,7 +48,7 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
 
     @Override
     public Optional<EvaluationArchiveBatch> reserve(long routeVersionId, List<Key> candidates) {
-        if (routeVersionId <= 0 || candidates == null || candidates.isEmpty() || candidates.size() > 100
+        if (routeVersionId <= 0 || candidates == null || candidates.isEmpty() || candidates.size() > 1000
             || candidates.stream().anyMatch(key -> key == null)) {
             throw new IllegalArgumentException("노선과 한정된 정산 후보가 필요하다");
         }
@@ -61,21 +61,32 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
             }
             var before = clock.instant().atZone(SEOUL).toLocalDate().atStartOfDay(SEOUL)
                 .toInstant().atOffset(ZoneOffset.UTC);
-            List<Row> rows = new ArrayList<>();
-            for (Key key : keys) {
-                jdbc.sql("""
-                    SELECT to_jsonb(e)::text AS original FROM forecast_evaluation_result e
-                    WHERE e.vehicle_observation_id=:observation AND e.target_stop_order=:stop
-                      AND e.route_version_id=:route AND e.scoring_state<>'PENDING'
-                      AND e.scored_at<:before AND (e.arrived_at IS NULL OR e.arrived_at<:before)
-                      AND NOT EXISTS(SELECT 1 FROM evaluation_archive_member m
-                          WHERE m.vehicle_observation_id=e.vehicle_observation_id
-                            AND m.target_stop_order=e.target_stop_order)
-                    FOR UPDATE OF e
-                    """).param("observation", key.observationId()).param("stop", key.stopOrder())
-                    .param("route", routeVersionId).param("before", before).query(String.class).optional()
-                    .ifPresent(json -> rows.add(new Row(key, json, digest(json))));
+            var keyValues = new java.util.StringJoiner(",");
+            for (int index = 0; index < keys.size(); index++) {
+                keyValues.add("(CAST(:observation%d AS bigint),CAST(:stop%d AS integer))".formatted(index, index));
             }
+            var query = jdbc.sql("""
+                WITH keys(observation_id,stop_order) AS (VALUES %s)
+                SELECT e.vehicle_observation_id,e.target_stop_order,to_jsonb(e)::text AS original
+                FROM forecast_evaluation_result e JOIN keys k
+                  ON e.vehicle_observation_id=k.observation_id AND e.target_stop_order=k.stop_order
+                WHERE e.route_version_id=:route AND e.scoring_state<>'PENDING'
+                  AND e.scored_at<:before AND (e.arrived_at IS NULL OR e.arrived_at<:before)
+                  AND NOT EXISTS(SELECT 1 FROM evaluation_archive_member m
+                      WHERE m.vehicle_observation_id=e.vehicle_observation_id
+                        AND m.target_stop_order=e.target_stop_order)
+                ORDER BY e.vehicle_observation_id,e.target_stop_order
+                FOR UPDATE OF e
+                """.formatted(keyValues)).param("route", routeVersionId).param("before", before);
+            for (int index = 0; index < keys.size(); index++) {
+                query = query.param("observation" + index, keys.get(index).observationId())
+                    .param("stop" + index, keys.get(index).stopOrder());
+            }
+            List<Row> rows = query.query((rs, index) -> {
+                String json = rs.getString("original");
+                return new Row(new Key(rs.getLong("vehicle_observation_id"), rs.getInt("target_stop_order")),
+                    json, digest(json));
+            }).list();
             if (rows.isEmpty()) {
                 return Optional.empty();
             }
@@ -87,13 +98,20 @@ public class JdbcEvaluationArchiveStore implements EvaluationArchiveStore, Evalu
                 """).param("id", id).param("route", routeVersionId).param("revision", revision)
                 .param("token", UUID.randomUUID()).param("count", rows.size())
                 .query(JdbcEvaluationArchiveStore::batchOf).single();
-            for (Row row : rows) {
-                jdbc.sql("""
-                    INSERT INTO evaluation_archive_member(vehicle_observation_id,target_stop_order,
-                        route_version_id,batch_id,original_sha256) VALUES(?,?,?,?,?)
-                    """).params(row.key().observationId(), row.key().stopOrder(), routeVersionId, id, row.sha256())
-                    .update();
+            var memberValues = new java.util.StringJoiner(",");
+            for (int index = 0; index < rows.size(); index++) {
+                memberValues.add("(:observation%d,:stop%d,:route,:batch,:digest%d)".formatted(index, index, index));
             }
+            var insert = jdbc.sql("""
+                INSERT INTO evaluation_archive_member(vehicle_observation_id,target_stop_order,
+                    route_version_id,batch_id,original_sha256) VALUES %s
+                """.formatted(memberValues)).param("route", routeVersionId).param("batch", id);
+            for (int index = 0; index < rows.size(); index++) {
+                Row row = rows.get(index);
+                insert = insert.param("observation" + index, row.key().observationId())
+                    .param("stop" + index, row.key().stopOrder()).param("digest" + index, row.sha256());
+            }
+            insert.update();
             return Optional.of(batch);
         });
     }

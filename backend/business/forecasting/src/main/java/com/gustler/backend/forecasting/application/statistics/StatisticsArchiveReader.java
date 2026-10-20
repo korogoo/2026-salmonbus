@@ -20,7 +20,7 @@ public interface StatisticsArchiveReader {
     }
     record Reference(UUID batchId, long routeVersionId, long qualityRevision, int rowCount, String manifestSha256) {
         public Reference {
-            if (batchId == null || routeVersionId <= 0 || qualityRevision <= 0 || rowCount < 1 || rowCount > 100
+            if (batchId == null || routeVersionId <= 0 || qualityRevision <= 0 || rowCount < 1 || rowCount > 1000
                 || manifestSha256 == null || !manifestSha256.matches("[0-9a-f]{64}")) {
                 throw new IllegalArgumentException("검증 완료된 이관 묶음 정보가 필요하다");
             }

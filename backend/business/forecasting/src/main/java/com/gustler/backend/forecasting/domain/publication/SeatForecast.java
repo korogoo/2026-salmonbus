@@ -22,8 +22,22 @@ public record SeatForecast(
     double seatFullChanceRaw,
     double seatFullChance,
     Double expectedSeats,
-    Instant generatedAt
+    Instant generatedAt,
+    boolean evaluationDetailRequired
 ) {
+
+    public SeatForecast(long vehicleObservationId, long routeVersionId, int targetStopOrder, int stopsToTarget,
+        long modelDeploymentId, int demandStatisticsRevision, double seatFullChanceRaw, double seatFullChance,
+        Double expectedSeats, Instant generatedAt) {
+        this(vehicleObservationId, routeVersionId, targetStopOrder, stopsToTarget, modelDeploymentId,
+            demandStatisticsRevision, seatFullChanceRaw, seatFullChance, expectedSeats, generatedAt, true);
+    }
+
+    public SeatForecast withEvaluationDetailRequired(boolean required) {
+        return new SeatForecast(vehicleObservationId, routeVersionId, targetStopOrder, stopsToTarget,
+            modelDeploymentId, demandStatisticsRevision, seatFullChanceRaw, seatFullChance, expectedSeats,
+            generatedAt, required);
+    }
 
     public SeatForecast {
         if (!ForecastDistance.covers(stopsToTarget)) {

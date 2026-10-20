@@ -21,6 +21,9 @@ import com.gustler.backend.forecasting.domain.model.ForecastFeatureContract;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import com.gustler.backend.forecasting.domain.evaluation.EvaluationSamplingPoint;
+import com.gustler.backend.forecasting.domain.model.RouteDirection;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,11 +74,12 @@ public class ForecastBatchWriter {
         StopDemandStatistics statistics = stopDemandStatisticsOf(batch, runtime, timeSlot);
         Map<Integer, SameDayFullOutcomes> sameDayOutcomes =
             sameDayFullOutcomesService.outcomesFor(batch.routeId(), runtime.deploymentId(), batch.responseReceivedAt());
-        List<SeatForecast> predictions = forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt);
+        List<EvaluationSamplingSource> sources = new ArrayList<>();
+        List<SeatForecast> predictions = forecastsOf(batch, stops, statistics, sameDayOutcomes, runtime, generatedAt, sources);
         ForecastPublication publication = new ForecastPublication(
             batch.observationBatchId(), batch.routeVersionId(), runtime.deploymentId(), statistics.revision(),
             qualityRevision, batch.responseReceivedAt(), generatedAt, generatedAt, predictions);
-        return committer.commit(batch, publication);
+        return committer.commit(batch, publication, sources);
     }
 
     /** 관측 시점에 사용할 수 있었던 통계 값과 버전을 함께 읽는다. */
@@ -98,11 +102,25 @@ public class ForecastBatchWriter {
         StopDemandStatistics statistics,
         Map<Integer, SameDayFullOutcomes> sameDayOutcomes,
         RuntimeSnapshot runtime,
-        Instant generatedAt
+        Instant generatedAt,
+        List<EvaluationSamplingSource> sources
     ) {
         return vehicleTrajectoryQuery.readTrajectories(batch.observationBatchId()).stream()
-            .flatMap(trajectory -> forecastsOfVehicleOrEmpty(
-                batch, trajectory, stops, statistics, sameDayOutcomes, runtime, generatedAt).stream())
+            .flatMap(trajectory -> {
+                List<SeatForecast> forecasts = forecastsOfVehicleOrEmpty(
+                    batch, trajectory, stops, statistics, sameDayOutcomes, runtime, generatedAt);
+                if (!forecasts.isEmpty() && trajectory.observation().vehicleId() != null
+                    && !trajectory.observation().vehicleId().isBlank()) {
+                    var observation = trajectory.observation();
+                    String direction = stops.stops().stream()
+                        .filter(stop -> stop.stopOrder() == observation.passedStopOrder())
+                        .map(stop -> stop.direction().name()).findFirst().orElse(RouteDirection.UNKNOWN.name());
+                    sources.add(new EvaluationSamplingSource(trajectory.vehicleObservationId(), stops.sourceRouteId(),
+                        new EvaluationSamplingPoint(batch.routeVersionId(), runtime.deploymentId(),
+                            observation.vehicleId(), observation.passedStopOrder(), direction, observation.observedAt())));
+                }
+                return forecasts.stream();
+            })
             .toList();
     }
 

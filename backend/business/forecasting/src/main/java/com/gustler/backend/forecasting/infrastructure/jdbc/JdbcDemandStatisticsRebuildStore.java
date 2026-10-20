@@ -49,7 +49,7 @@ public class JdbcDemandStatisticsRebuildStore implements DemandStatisticsRebuild
             SELECT forecast.vehicle_observation_id,forecast.target_stop_order,
                 evaluation.arrival_observation_id,evaluation.arrived_at,evaluation.seats_on_arrival
             FROM page JOIN seat_forecast forecast ON forecast.vehicle_observation_id=page.id
-            JOIN forecast_evaluation evaluation ON evaluation.vehicle_observation_id=forecast.vehicle_observation_id
+            JOIN forecast_evaluation_result evaluation ON evaluation.vehicle_observation_id=forecast.vehicle_observation_id
               AND evaluation.target_stop_order=forecast.target_stop_order
             JOIN route_stop stop ON stop.route_version_id=forecast.route_version_id AND stop.stop_order=forecast.target_stop_order
             WHERE evaluation.scoring_state='SETTLED' AND forecast.stops_to_target=1 AND stop.boarding_allowed

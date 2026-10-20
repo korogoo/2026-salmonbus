@@ -204,6 +204,58 @@ class DddStorageMigrationTest {
     }
 
     @Test
+    void 기존_이관_묶음을_보존하면서_천행까지_확대한다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("42");
+        String insert = """
+            INSERT INTO evaluation_archive_batch(id,route_version_id,quality_revision,lease_token,lease_until,row_count)
+            SELECT gen_random_uuid(),id,1,gen_random_uuid(),clock_timestamp()+interval '5 minutes',%d
+            FROM route_version LIMIT 1
+            """;
+        execute(insert.formatted(100));
+
+        // when
+        migrate("43");
+        execute(insert.formatted(500));
+        execute(insert.formatted(1000));
+
+        // then
+        assertThat(number("SELECT count(*) FROM evaluation_archive_batch")).isEqualTo(3);
+        assertThatThrownBy(() -> execute(insert.formatted(1001))).isInstanceOf(SQLException.class);
+        assertThatThrownBy(() -> execute(insert.formatted(0))).isInstanceOf(SQLException.class);
+    }
+
+    @Test
+    void 평가_선택_열을_추가해도_기존_대기와_완료를_보존하고_예보_파일을_다시_쓰지_않는다() throws Exception {
+        // given
+        preparePendingTransition();
+        migrate("38");
+        approveEvaluationTransition();
+        migrate("39");
+        long forecastFile = number("SELECT pg_relation_filenode('seat_forecast')");
+        long pending = number("SELECT count(*) FROM forecast_evaluation_pending");
+        long results = number("SELECT count(*) FROM forecast_evaluation_result");
+
+        // when
+        migrate("42");
+
+        // then
+        assertThat(number("SELECT pg_relation_filenode('seat_forecast')")).isEqualTo(forecastFile);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
+        assertThat(number("SELECT count(*) FROM seat_forecast WHERE NOT evaluation_detail_required")).isZero();
+        assertThat(scalar("EXPLAIN (FORMAT JSON) SELECT * FROM one_stop_quality_eligible_seat_forecast WHERE vehicle_observation_id=1"))
+            .contains("forecast_evaluation_result")
+            .doesNotContain("forecast_evaluation_compact");
+        execute("UPDATE seat_forecast SET evaluation_detail_required=false WHERE (vehicle_observation_id,target_stop_order) IN (SELECT vehicle_observation_id,target_stop_order FROM forecast_evaluation_pending)");
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isEqualTo(pending);
+        assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isEqualTo(results);
+    }
+
+    @Test
     void 관측별_작업으로_전환해도_미완료_예보와_완료_이력은_그대로다() throws Exception {
         // given
         preparePendingTransition();
@@ -362,7 +414,7 @@ class DddStorageMigrationTest {
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_result")).isOne();
         approveEvaluationTransition();
-        migrate("latest");
+        migrate("39");
         assertThat(number("SELECT count(*) FROM forecast_evaluation_work")).isOne();
         assertThat(number("SELECT count(*) FROM forecast_evaluation_pending")).isOne();
     }

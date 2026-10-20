@@ -36,10 +36,18 @@ class SharedDevWorkerScheduleTest {
     }
 
     @Test
-    void sharedDevRetainsPeakAndNightCollectionSchedules() throws Exception {
+    void 공유_개발서버도_시간대별_수집_주기를_사용한다() throws Exception {
+        // given
         var properties = Binder.get(environment(true)).bind("collection", CollectionProperties.class).get();
+
+        // when / then
         for (var entry : java.util.Map.of(
-                Instant.parse("2026-10-15T09:00:00Z"), Duration.ofSeconds(15),
+                Instant.parse("2026-10-15T09:00:00Z"), Duration.ofSeconds(20),
+                Instant.parse("2026-10-15T12:00:00Z"), Duration.ofSeconds(20),
+                Instant.parse("2026-10-15T15:00:00Z"), Duration.ofSeconds(30),
+                Instant.parse("2026-10-15T21:00:00Z"), Duration.ofSeconds(30),
+                Instant.parse("2026-10-15T23:00:00Z"), Duration.ofSeconds(20),
+                Instant.parse("2026-10-15T03:00:00Z"), Duration.ofSeconds(30),
                 Instant.parse("2026-10-15T17:00:00Z"), Duration.ofMinutes(10)).entrySet()) {
             var now = entry.getKey();
             var trigger = new AdaptiveCollectionTrigger(Clock.fixed(now, ZoneOffset.UTC), properties.fixedInterval());

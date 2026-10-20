@@ -32,6 +32,13 @@ import com.gustler.backend.forecasting.domain.publication.VehicleTrajectoryQuery
 import com.gustler.backend.forecasting.domain.statistics.StopDemandStatistics;
 import com.gustler.backend.forecasting.domain.statistics.StopDemandStatisticsRepository;
 import com.gustler.backend.forecasting.support.ForecastingIntegrationTest;
+import com.gustler.backend.forecasting.domain.publication.ForecastPublicationRepository;
+import com.gustler.backend.forecasting.application.evaluation.EvaluationWorkStore;
+import com.gustler.backend.observations.api.CollectionInputs;
+import com.gustler.backend.forecasting.domain.publication.ForecastPublication;
+import com.gustler.backend.forecasting.domain.publication.SeatForecast;
+import com.gustler.backend.forecasting.domain.evaluation.EvaluationSamplingPoint;
+import java.time.Duration;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -103,6 +110,15 @@ class ForecastPublicationTransactionTest {
 
     @MockitoBean
     private ForecastRuntime forecastRuntime;
+
+    @Autowired
+    private ForecastPublicationRepository publications;
+
+    @Autowired
+    private EvaluationWorkStore work;
+
+    @Autowired
+    private CollectionInputs inputs;
 
     private final List<Long> deploymentIds = new ArrayList<>();
     private long routeId;
@@ -184,6 +200,96 @@ class ForecastPublicationTransactionTest {
         for (long deploymentId : deploymentIds) {
             jdbc.sql("DELETE FROM model_deployment WHERE id = ?").param(deploymentId).update();
         }
+    }
+
+    @Test
+    void 상세_저장을_줄여도_모든_예보를_정산_대상으로_남긴다() {
+        var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        var source = samplingSources(OBSERVED_AT.minusSeconds(15));
+        sampling.committed(sampling.select(samplingPublication(), source));
+        var committer = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
+
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+        assertThat(jdbc.sql("SELECT target_stop_order FROM forecast_evaluation_pending WHERE vehicle_observation_id = ?")
+            .param(observationId).query(Integer.class).list()).containsExactlyInAnyOrder(4, 5);
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
+    }
+
+    @Test
+    void 트랜잭션이_롤백되면_평가_선택_기준도_갱신하지_않는다() {
+        var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        var committer = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT));
+            status.setRollbackOnly();
+        });
+
+        assertThat(readCounts()).isEqualTo(new StoredCounts(0, 0, 0, false));
+        assertThat(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
+            .publication().predictions()).allMatch(
+                SeatForecast::evaluationDetailRequired);
+    }
+
+    @Test
+    void 기능을_꺼도_재발행한_기존_예보의_상세_저장_선택은_유지한다() {
+        var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        sampling.committed(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.minusSeconds(15))));
+        var enabled = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
+        var disabled = new ForecastBatchCommitter(publications, work, quality, inputs,
+            new EvaluationSamplingSelector(false, "", Duration.ofSeconds(60)));
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            enabled.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            disabled.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
+    }
+
+    @Test
+    void 재시작_후_재발행은_새_전체_평가_표본으로_기억하지_않는다() {
+        // given
+        var sampling = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        sampling.committed(sampling.select(samplingPublication(), samplingSources(OBSERVED_AT.minusSeconds(15))));
+        var original = new ForecastBatchCommitter(publications, work, quality, inputs, sampling);
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            original.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+        var restarted = new EvaluationSamplingSelector(true, "", Duration.ofSeconds(60));
+        var committer = new ForecastBatchCommitter(publications, work, quality, inputs, restarted);
+
+        // when
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+            committer.commit(batch, samplingPublication(), samplingSources(OBSERVED_AT)));
+
+        // then
+        assertThat(readCounts()).isEqualTo(new StoredCounts(1, 2, 2, true));
+        assertThat(jdbc.sql("SELECT evaluation_detail_required FROM seat_forecast WHERE vehicle_observation_id = ? ORDER BY target_stop_order")
+            .param(observationId).query(Boolean.class).list()).containsExactly(true, false);
+        assertThat(restarted.select(samplingPublication(), samplingSources(OBSERVED_AT.plusSeconds(15)))
+            .publication().predictions()).allMatch(SeatForecast::evaluationDetailRequired);
+    }
+
+    private ForecastPublication samplingPublication() {
+        return new ForecastPublication(
+            batchId, routeVersionId, runtime.deploymentId(), 0, 1, OBSERVED_AT, GENERATED_AT, GENERATED_AT,
+            List.of(
+                new SeatForecast(
+                    observationId, routeVersionId, 4, 1, runtime.deploymentId(), 0, .4, .4, 12.0, GENERATED_AT),
+                new SeatForecast(
+                    observationId, routeVersionId, 5, 2, runtime.deploymentId(), 0, .4, .4, 12.0, GENERATED_AT)));
+    }
+
+    private List<EvaluationSamplingSource> samplingSources(Instant observedAt) {
+        return List.of(new EvaluationSamplingSource(observationId, "3330",
+            new EvaluationSamplingPoint(
+                routeVersionId, runtime.deploymentId(), "vehicle-1", 3, "UP", observedAt)));
     }
 
     @Test

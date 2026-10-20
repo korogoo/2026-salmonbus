@@ -778,6 +778,55 @@ class EvaluationArchiveRetentionTest {
             .param("stopId", "stop-" + stop).query(Long.class).single();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {500, 1000})
+    void 확대된_묶음도_검증한_행만_삭제하고_원본을_복원한다(int size) {
+        // given
+        List<Long> ids = jdbc.sql("""
+            INSERT INTO vehicle_observation OVERRIDING SYSTEM VALUE
+            SELECT (jsonb_populate_record(NULL::vehicle_observation, to_jsonb(source)
+                || jsonb_build_object('id',nextval(pg_get_serial_sequence('vehicle_observation','id')),
+                    'source_row_number',n,'vehicle_id','bulk-'||n))).*
+            FROM vehicle_observation source CROSS JOIN generate_series(1,:size) n
+            WHERE source.id=:source RETURNING id
+            """).param("size", size).param("source", source).query(Long.class).list();
+        jdbc.sql("""
+            INSERT INTO seat_forecast
+            SELECT (jsonb_populate_record(NULL::seat_forecast,to_jsonb(f)
+                || jsonb_build_object('vehicle_observation_id',o.id))).*
+            FROM seat_forecast f CROSS JOIN vehicle_observation o
+            WHERE f.vehicle_observation_id=:source AND f.target_stop_order=9 AND o.id IN (:ids)
+            """).param("source", source).param("ids", ids).update();
+        jdbc.sql("""
+            INSERT INTO forecast_evaluation_result
+            SELECT (jsonb_populate_record(NULL::forecast_evaluation_result,to_jsonb(e)
+                || jsonb_build_object('vehicle_observation_id',o.id))).*
+            FROM forecast_evaluation_result e CROSS JOIN vehicle_observation o
+            WHERE e.vehicle_observation_id=:source AND e.target_stop_order=9 AND o.id IN (:ids)
+            """).param("source", source).param("ids", ids).update();
+        finish();
+        jdbc.sql("UPDATE evaluation_archive_scan SET observation_id=?,stop_order=2147483647,next_attempt_at=clock_timestamp() WHERE id=1")
+            .param(ids.getFirst() - 1).update();
+        var candidates = queue.next(size).orElseThrow();
+        assertThat(candidates.routeVersionId()).isEqualTo(route);
+        assertThat(candidates.keys()).hasSize(size);
+        var batch = store.reserve(route, candidates.keys()).orElseThrow();
+        archived.put(batch.id(), store.readOwned(batch));
+        store.recordVerified(batch, "a".repeat(64));
+
+        // when
+        int removed = purge(batch);
+        int repeated = purge(batch);
+        restore(batch);
+
+        // then
+        assertThat(batch.rowCount()).isEqualTo(size);
+        assertThat(removed).isEqualTo(size);
+        assertThat(repeated).isZero();
+        assertThat(liveCount()).isEqualTo(size + 2);
+        assertThat(location(batch)).isEqualTo("LIVE");
+    }
+
     private void finish() {
         for (int step = 0; step < 100; step++) {
             if (pipeline.step(route).status() == DemandStatisticsPipeline.Step.Status.COMPLETED) return;

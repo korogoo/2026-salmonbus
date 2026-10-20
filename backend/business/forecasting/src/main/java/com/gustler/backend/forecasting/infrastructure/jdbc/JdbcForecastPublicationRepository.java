@@ -38,12 +38,13 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
      *
      * <p>재시도가 같은 판을 두 번 열어도 행이 하나만 남는다.
      */
+    // 재발행은 최초 평가 선택을 유지한다. 비활성화로 과거 생략분이 다시 등록되지 않는다.
     private static final String UPSERT_PREDICTION = """
         INSERT /* salmonbus:forecast_publication.upsert_prediction */ INTO seat_forecast (
             publication_id, vehicle_observation_id, target_stop_order, route_version_id, stops_to_target,
             model_deployment_id, demand_statistics_revision, seat_full_chance_raw, seat_full_chance,
-            expected_seats, generated_at, quality_revision
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            expected_seats, generated_at, quality_revision, evaluation_detail_required
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (vehicle_observation_id, target_stop_order) DO UPDATE SET
             publication_id = EXCLUDED.publication_id,
             route_version_id = EXCLUDED.route_version_id,
@@ -75,7 +76,7 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void save(ForecastPublication publication) {
+    public boolean save(ForecastPublication publication) {
         final Optional<Long> existing = jdbc.sql("SELECT id FROM forecast_publication WHERE source_batch_id = ?")
             .param(publication.sourceBatchId()).query(Long.class).optional();
         final long publicationId = existing.orElseGet(() -> jdbc.sql(INSERT_PUBLICATION)
@@ -94,12 +95,13 @@ public class JdbcForecastPublicationRepository implements ForecastPublicationRep
                 prediction.targetStopOrder(), prediction.routeVersionId(), prediction.stopsToTarget(),
                 prediction.modelDeploymentId(), prediction.demandStatisticsRevision(), prediction.seatFullChanceRaw(),
                 prediction.seatFullChance(), prediction.expectedSeats(), offset(prediction.generatedAt()),
-                publication.qualityRevision()})
+                publication.qualityRevision(), prediction.evaluationDetailRequired()})
             .toList();
         if (!rows.isEmpty()) {
             batches.batchUpdate(UPSERT_PREDICTION, rows);
         }
         existing.ifPresent(id -> jdbc.sql(COUNT_PREDICTIONS).params(publication.sourceBatchId(), id).update());
+        return existing.isEmpty();
     }
 
     private static OffsetDateTime offset(Instant instant) {

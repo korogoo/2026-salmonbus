@@ -42,6 +42,6 @@ class EvaluationArchiveBatchTest {
         assertThatThrownBy(() -> new EvaluationArchiveBatch(id, 1, 1, UUID.randomUUID(), Instant.now(),
             State.RESERVED, 0, null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new EvaluationArchiveBatch(id, 1, 1, UUID.randomUUID(), Instant.now(),
-            State.RESERVED, 101, null)).isInstanceOf(IllegalArgumentException.class);
+            State.RESERVED, 1001, null)).isInstanceOf(IllegalArgumentException.class);
     }
 }

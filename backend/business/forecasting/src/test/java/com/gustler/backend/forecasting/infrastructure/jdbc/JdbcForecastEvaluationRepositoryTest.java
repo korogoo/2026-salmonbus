@@ -496,6 +496,31 @@ class JdbcForecastEvaluationRepositoryTest {
     }
 
     @Test
+    void 도착_응답_시각이_없으면_정산하지_않고_대기로_남긴다() {
+        // given
+        final long arrivalId = insertArrivalObservation();
+        saveForecasts(List.of(forecastOf(TARGET_STOP_ORDER, STOPS_TO_TARGET, GENERATED_AT)));
+        jdbcClient.sql("UPDATE seat_forecast SET evaluation_detail_required = false WHERE vehicle_observation_id = ?")
+            .param(vehicleObservationId).update();
+        jdbcClient.sql("""
+            UPDATE observation_batch SET response_received_at = NULL
+            WHERE id = (SELECT observation_batch_id FROM vehicle_observation WHERE id = ?)
+            """).param(arrivalId).update();
+
+        // when
+        evaluationRepository.settle(List.of(ForecastEvaluation.completed(
+            vehicleObservationId, TARGET_STOP_ORDER, new ArrivalLabel.Settled(arrivalId, 0), SCORED_AT)));
+
+        // then
+        assertThat(jdbcClient.sql("SELECT count(*) FROM forecast_evaluation_result WHERE vehicle_observation_id = ?")
+            .param(vehicleObservationId).query(Long.class).single()).isZero();
+        assertThat(jdbcClient.sql("SELECT count(*) FROM forecast_evaluation_compact WHERE vehicle_observation_id = ?")
+            .param(vehicleObservationId).query(Long.class).single()).isZero();
+        assertThat(jdbcClient.sql("SELECT count(*) FROM forecast_evaluation_pending WHERE vehicle_observation_id = ?")
+            .param(vehicleObservationId).query(Long.class).single()).isOne();
+    }
+
+    @Test
     void 접근_관측은_통과_순번으로_평가하고_근거에는_원_정류장_순번을_남긴다() {
         // given 상태 1은 다음 정류장에 도착 중이므로 통과 순번이 원 순번보다 하나 작다.
         final int approaching = 1;
