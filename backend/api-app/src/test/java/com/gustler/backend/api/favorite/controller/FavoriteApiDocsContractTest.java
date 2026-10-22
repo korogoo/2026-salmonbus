@@ -53,6 +53,21 @@ class FavoriteApiDocsContractTest {
     }
 
     @Test
+    void 즐겨찾기_대상은_stopId와_direction을_공개한다() {
+        JsonNode selection = document.at("/components/schemas/SaveFavoriteSelectionRequest");
+        JsonNode item = document.at("/components/schemas/FavoriteResponse");
+
+        assertThat(names(selection.path("properties"))).containsExactlyInAnyOrder(
+            "routeId", "stopId", "direction", "favoriteGroupIds");
+        assertThat(selection.path("required")).extracting(JsonNode::asString)
+            .containsExactlyInAnyOrder("routeId", "stopId", "direction", "favoriteGroupIds");
+        assertThat(names(item.path("properties"))).containsExactlyInAnyOrder(
+            "id", "routeId", "stopId", "direction");
+        assertThat(document.at("/components/schemas/FavoriteItemResponse").isMissingNode()).isFalse();
+        assertThat(document.at("/components/schemas/FavoriteCardResponse").isMissingNode()).isTrue();
+    }
+
+    @Test
     void 접근_차량은_watch_필드와_좌석_예보를_유지하고_ETA만_추가한다() {
         JsonNode favoriteVehicle = document.at("/components/schemas/FavoriteApproachingVehicleResponse/properties");
         JsonNode watchVehicle = document.at("/components/schemas/ApproachingVehicleResponse/properties");
