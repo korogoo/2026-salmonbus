@@ -2,6 +2,8 @@ package com.gustler.backend.api.favorite.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
@@ -16,11 +18,13 @@ import org.junit.jupiter.api.Test;
 class FavoriteGroupServiceTest {
     private static final UUID MEMBER_ID = UUID.randomUUID();
     private final MemoryRepository repository = new MemoryRepository();
-    private final FavoriteGroupService service = new FavoriteGroupService(repository);
+    private final FavoriteTargetResolver resolver = mock(FavoriteTargetResolver.class);
+    private final FavoriteGroupService service = new FavoriteGroupService(repository, resolver);
 
     @Test
     void 첫_즐겨찾기와_그룹을_한번에_만든다() {
         var target = service.targetOf("204000057", "277102322");
+        when(resolver.requireAvailable(target)).thenReturn(target);
 
         var created = service.create(MEMBER_ID, " 출근 ", target);
 

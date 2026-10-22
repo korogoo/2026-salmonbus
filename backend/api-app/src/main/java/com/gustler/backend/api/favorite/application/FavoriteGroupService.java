@@ -20,9 +20,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class FavoriteGroupService {
     private final FavoriteGroupRepository repository;
+    private final FavoriteTargetResolver targetResolver;
 
-    public FavoriteGroupService(FavoriteGroupRepository repository) {
+    public FavoriteGroupService(FavoriteGroupRepository repository, FavoriteTargetResolver targetResolver) {
         this.repository = repository;
+        this.targetResolver = targetResolver;
     }
 
     public MemberFavoriteGroups findAll(UUID memberPublicId) {
@@ -31,6 +33,9 @@ public class FavoriteGroupService {
 
     public FavoriteGroup create(UUID memberPublicId, String rawName, FavoriteTarget initialFavorite) {
         FavoriteGroupName name = nameOf(rawName);
+        if (initialFavorite != null) {
+            targetResolver.requireAvailable(initialFavorite);
+        }
         FavoriteGroup created = new FavoriteGroup(new FavoriteGroupId(UUID.randomUUID()), name,
             initialFavorite == null ? List.of() : List.of(new Favorite(new FavoriteId(UUID.randomUUID()), initialFavorite)));
         return repository.update(memberPublicId, groups -> {
