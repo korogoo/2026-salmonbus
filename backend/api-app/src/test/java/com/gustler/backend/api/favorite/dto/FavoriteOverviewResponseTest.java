@@ -9,12 +9,12 @@ import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.board.domain.VehicleForecast;
 import com.gustler.backend.api.favorite.application.FavoriteOverview;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.BoardSlice;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.Card;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.CardReason;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.CardStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Eta;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.EtaReason;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Group;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.Item;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemReason;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Stop;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Vehicle;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
@@ -38,11 +38,11 @@ class FavoriteOverviewResponseTest {
             new VehicleForecast.Available(0.8, 12.0));
         Stop stop = new Stop(TARGET.stopId(), "강남역", BoardDirection.UP,
             List.of(new Vehicle(watch, Eta.unavailable(EtaReason.ARRIVAL_UNAVAILABLE))));
-        Card card = new Card(UUID.randomUUID(), TARGET, CardStatus.READY, null,
+        Item item = new Item(UUID.randomUUID(), TARGET, ItemStatus.READY, null,
             new BoardSlice(route, stop));
 
         JsonNode body = json.valueToTree(FavoriteOverviewResponse.from(
-            new FavoriteOverview(List.of(new Group(UUID.randomUUID(), "출근", List.of(card))))));
+            new FavoriteOverview(List.of(new Group(UUID.randomUUID(), "출근", List.of(item))))));
         JsonNode actual = body.at("/groups/0/favorites/0");
 
         assertThat(actual.at("/route/id").asString()).isEqualTo(TARGET.routeId());
@@ -59,12 +59,12 @@ class FavoriteOverviewResponseTest {
     }
 
     @Test
-    void 판정보드를_읽지_못한_카드도_저장_대상과_상태를_남긴다() {
-        Card card = new Card(UUID.randomUUID(), TARGET, CardStatus.UNAVAILABLE,
-            CardReason.OBSERVATION_UNAVAILABLE, null);
+    void 판정보드를_읽지_못한_항목도_저장_대상과_상태를_남긴다() {
+        Item item = new Item(UUID.randomUUID(), TARGET, ItemStatus.UNAVAILABLE,
+            ItemReason.OBSERVATION_UNAVAILABLE, null);
 
         JsonNode body = json.valueToTree(FavoriteOverviewResponse.from(
-            new FavoriteOverview(List.of(new Group(UUID.randomUUID(), "출근", List.of(card))))));
+            new FavoriteOverview(List.of(new Group(UUID.randomUUID(), "출근", List.of(item))))));
         JsonNode actual = body.at("/groups/0/favorites/0");
 
         assertThat(actual.at("/route/id").asString()).isEqualTo(TARGET.routeId());

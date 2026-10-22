@@ -9,8 +9,8 @@ import java.util.UUID;
 public record FavoriteOverviewGroupResponse(
     UUID id,
     String name,
-    @Schema(description = "그룹 안에서 회원이 정한 순서의 즐겨찾기 카드")
-    List<FavoriteCardResponse> favorites
+    @Schema(description = "그룹 안에서 회원이 정한 순서의 노선 정류장 항목")
+    List<FavoriteItemResponse> favorites
 ) {
     public FavoriteOverviewGroupResponse {
         favorites = List.copyOf(favorites);
@@ -18,7 +18,7 @@ public record FavoriteOverviewGroupResponse(
 
     static FavoriteOverviewGroupResponse from(Group group) {
         return new FavoriteOverviewGroupResponse(group.id(), group.name(), group.favorites().stream()
-            .map(FavoriteCardResponse::from)
+            .map(FavoriteItemResponse::from)
             .toList());
     }
 }

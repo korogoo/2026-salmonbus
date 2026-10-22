@@ -14,13 +14,13 @@ public record FavoriteOverview(List<Group> groups) {
         groups = List.copyOf(groups);
     }
 
-    public record Group(UUID id, String name, List<Card> favorites) {
+    public record Group(UUID id, String name, List<Item> favorites) {
         public Group {
             favorites = List.copyOf(favorites);
         }
     }
 
-    public record Card(UUID id, FavoriteTarget target, CardStatus status, CardReason reason, BoardSlice board) {
+    public record Item(UUID id, FavoriteTarget target, ItemStatus status, ItemReason reason, BoardSlice board) {
     }
 
     public record BoardSlice(BoardRoute route, Stop stop) {
@@ -46,11 +46,11 @@ public record FavoriteOverview(List<Group> groups) {
         }
     }
 
-    public enum CardStatus {
+    public enum ItemStatus {
         READY, NO_VEHICLE, PREPARING, UNAVAILABLE, AMBIGUOUS, ERROR
     }
 
-    public enum CardReason {
+    public enum ItemReason {
         TARGET_NOT_IN_CURRENT_ROUTE,
         MULTIPLE_CURRENT_VISITS,
         MODEL_NOT_READY,

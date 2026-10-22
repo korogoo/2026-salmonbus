@@ -14,12 +14,12 @@ import com.gustler.backend.api.error.ApiException;
 import com.gustler.backend.api.error.ErrorCode;
 import com.gustler.backend.api.error.UnauthenticatedException;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.BoardSlice;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.Card;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.CardReason;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.CardStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Eta;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.EtaReason;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Group;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.Item;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemReason;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Stop;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Vehicle;
 import com.gustler.backend.api.favorite.domain.Favorite;
@@ -54,13 +54,13 @@ public class FavoriteOverviewService {
         Map<String, Optional<StationArrivalsOverview>> loadedArrivals = new HashMap<>();
         List<Group> groups = owned.values().stream()
             .map(group -> new Group(group.id().value(), group.name().value(), group.favorites().stream()
-                .map(favorite -> card(favorite, loadedBoards, loadedArrivals))
+                .map(favorite -> item(favorite, loadedBoards, loadedArrivals))
                 .toList()))
             .toList();
         return new FavoriteOverview(groups);
     }
 
-    private Card card(Favorite favorite, Map<String, BoardLoad> loadedBoards,
+    private Item item(Favorite favorite, Map<String, BoardLoad> loadedBoards,
         Map<String, Optional<StationArrivalsOverview>> loadedArrivals) {
         String routeId = favorite.target().routeId();
         String stopId = favorite.target().stopId();
@@ -75,19 +75,19 @@ public class FavoriteOverviewService {
             .filter(stop -> stop.direction().name().equals(favorite.target().direction().name()))
             .toList();
         if (matchingStops.isEmpty()) {
-            return unavailable(favorite, CardStatus.UNAVAILABLE, CardReason.TARGET_NOT_IN_CURRENT_ROUTE);
+            return unavailable(favorite, ItemStatus.UNAVAILABLE, ItemReason.TARGET_NOT_IN_CURRENT_ROUTE);
         }
         if (matchingStops.size() > 1) {
-            return unavailable(favorite, CardStatus.AMBIGUOUS, CardReason.MULTIPLE_CURRENT_VISITS);
+            return unavailable(favorite, ItemStatus.AMBIGUOUS, ItemReason.MULTIPLE_CURRENT_VISITS);
         }
         StopState stop = matchingStops.getFirst();
         List<ApproachingVehicle> approaching = stop.approachingVehicles().stream().limit(3).toList();
-        CardStatus status = board.route().status() == RouteStatus.PREPARING
-            ? CardStatus.PREPARING : approaching.isEmpty() ? CardStatus.NO_VEHICLE : CardStatus.READY;
+        ItemStatus status = board.route().status() == RouteStatus.PREPARING
+            ? ItemStatus.PREPARING : approaching.isEmpty() ? ItemStatus.NO_VEHICLE : ItemStatus.READY;
         List<Vehicle> vehicles = vehicles(board, stop, approaching, loadedArrivals);
         Stop selectedStop = new Stop(stop.stopId(), stop.name(), stop.direction(), vehicles);
         BoardSlice slice = new BoardSlice(board.route(), selectedStop);
-        return new Card(favorite.id().value(), favorite.target(), status, null, slice);
+        return new Item(favorite.id().value(), favorite.target(), status, null, slice);
     }
 
     private List<Vehicle> vehicles(Board board, StopState stop, List<ApproachingVehicle> approaching,
@@ -147,25 +147,25 @@ public class FavoriteOverviewService {
             return new BoardLoad(overview.board(), null, null);
         } catch (ApiException exception) {
             if (exception.code() == ErrorCode.ROUTE_NOT_FOUND) {
-                return new BoardLoad(null, CardStatus.UNAVAILABLE, CardReason.TARGET_NOT_IN_CURRENT_ROUTE);
+                return new BoardLoad(null, ItemStatus.UNAVAILABLE, ItemReason.TARGET_NOT_IN_CURRENT_ROUTE);
             }
             if (exception.code() == ErrorCode.MODEL_OUT_OF_SCOPE) {
-                return new BoardLoad(null, CardStatus.PREPARING, CardReason.MODEL_NOT_READY);
+                return new BoardLoad(null, ItemStatus.PREPARING, ItemReason.MODEL_NOT_READY);
             }
             if (exception.code() == ErrorCode.NO_RECENT_OBSERVATION) {
-                return new BoardLoad(null, CardStatus.UNAVAILABLE, CardReason.OBSERVATION_UNAVAILABLE);
+                return new BoardLoad(null, ItemStatus.UNAVAILABLE, ItemReason.OBSERVATION_UNAVAILABLE);
             }
-            return new BoardLoad(null, CardStatus.ERROR, CardReason.BOARD_UNAVAILABLE);
+            return new BoardLoad(null, ItemStatus.ERROR, ItemReason.BOARD_UNAVAILABLE);
         } catch (RuntimeException exception) {
             log.warn("즐겨찾기 판정보드 조회에 실패했습니다. routeId={}", routeId, exception);
-            return new BoardLoad(null, CardStatus.ERROR, CardReason.BOARD_UNAVAILABLE);
+            return new BoardLoad(null, ItemStatus.ERROR, ItemReason.BOARD_UNAVAILABLE);
         }
     }
 
-    private static Card unavailable(Favorite favorite, CardStatus status, CardReason reason) {
-        return new Card(favorite.id().value(), favorite.target(), status, reason, null);
+    private static Item unavailable(Favorite favorite, ItemStatus status, ItemReason reason) {
+        return new Item(favorite.id().value(), favorite.target(), status, reason, null);
     }
 
-    private record BoardLoad(Board board, CardStatus status, CardReason reason) {
+    private record BoardLoad(Board board, ItemStatus status, ItemReason reason) {
     }
 }

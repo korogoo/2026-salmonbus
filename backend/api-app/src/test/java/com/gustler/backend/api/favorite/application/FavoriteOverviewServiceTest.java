@@ -24,7 +24,7 @@ import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
 import com.gustler.backend.api.favorite.domain.FavoriteId;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
 import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
-import com.gustler.backend.api.favorite.application.FavoriteOverview.CardStatus;
+import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.EtaReason;
 import com.gustler.backend.api.route.domain.RouteStatus;
 import java.time.Duration;
@@ -45,37 +45,37 @@ class FavoriteOverviewServiceTest {
     private final FavoriteOverviewService service = new FavoriteOverviewService(repository, boards, arrivals);
 
     @Test
-    void 그룹과_즐겨찾기_순서대로_최대_세_대의_카드를_만든다() {
+    void 그룹과_즐겨찾기_순서대로_최대_세_대의_노선_정류장_항목을_만든다() {
         repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
         when(boards.getBoard(any())).thenReturn(new BoardOverview(board(ROUTE_ID, STOP_ID, 4), Duration.ZERO));
 
-        FavoriteOverview.Card card = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
+        FavoriteOverview.Item item = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
 
-        assertThat(card.status()).isEqualTo(CardStatus.READY);
-        assertThat(card.target()).isEqualTo(new FavoriteTarget(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
-        assertThat(card.board().stop().stopId()).isEqualTo(STOP_ID);
-        assertThat(card.board().stop().approachingVehicles()).hasSize(3);
-        assertThat(card.board().stop().approachingVehicles().getFirst().watch().horizonStops()).isEqualTo(1);
-        assertThat(card.board().stop().approachingVehicles().get(2).eta().reason())
+        assertThat(item.status()).isEqualTo(ItemStatus.READY);
+        assertThat(item.target()).isEqualTo(new FavoriteTarget(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
+        assertThat(item.board().stop().stopId()).isEqualTo(STOP_ID);
+        assertThat(item.board().stop().approachingVehicles()).hasSize(3);
+        assertThat(item.board().stop().approachingVehicles().getFirst().watch().horizonStops()).isEqualTo(1);
+        assertThat(item.board().stop().approachingVehicles().get(2).eta().reason())
             .isEqualTo(EtaReason.SOURCE_NOT_PROVIDED);
     }
 
     @Test
-    void 현재_방문이_여러_개면_카드를_AMBIGUOUS로_유지한다() {
+    void 현재_방문이_여러_개면_항목을_AMBIGUOUS로_유지한다() {
         repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
         Board board = boardWithStops(ROUTE_ID, List.of(
             stop(STOP_ID, 1, BoardDirection.UP, 0),
             stop(STOP_ID, 8, BoardDirection.UP, 0)));
         when(boards.getBoard(any())).thenReturn(new BoardOverview(board, Duration.ZERO));
 
-        FavoriteOverview.Card card = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
+        FavoriteOverview.Item item = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
 
-        assertThat(card.status()).isEqualTo(CardStatus.AMBIGUOUS);
-        assertThat(card.board()).isNull();
+        assertThat(item.status()).isEqualTo(ItemStatus.AMBIGUOUS);
+        assertThat(item.board()).isNull();
     }
 
     @Test
-    void 한_카드_조회_실패가_다른_카드를_숨기지_않는다() {
+    void 한_항목_조회_실패가_다른_항목을_숨기지_않는다() {
         Favorite broken = favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP);
         Favorite available = favorite("204000058", "277102323", FavoriteDirection.UP);
         repository.groups = groups(broken, available);
@@ -87,10 +87,10 @@ class FavoriteOverviewServiceTest {
             return new BoardOverview(board(routeId, available.target().stopId(), 1), Duration.ZERO);
         });
 
-        List<FavoriteOverview.Card> cards = service.get(MEMBER_ID).groups().getFirst().favorites();
+        List<FavoriteOverview.Item> items = service.get(MEMBER_ID).groups().getFirst().favorites();
 
-        assertThat(cards).extracting(FavoriteOverview.Card::status)
-            .containsExactly(CardStatus.ERROR, CardStatus.READY);
+        assertThat(items).extracting(FavoriteOverview.Item::status)
+            .containsExactly(ItemStatus.ERROR, ItemStatus.READY);
     }
 
     private static MemberFavoriteGroups groups(Favorite... favorites) {
