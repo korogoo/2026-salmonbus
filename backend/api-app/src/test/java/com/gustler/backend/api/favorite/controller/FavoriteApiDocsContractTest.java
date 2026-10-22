@@ -90,7 +90,7 @@ class FavoriteApiDocsContractTest {
         JsonNode route = document.at("/components/schemas/FavoriteBoardRouteResponse/properties");
         JsonNode stop = document.at("/components/schemas/FavoriteStopResponse/properties");
 
-        assertThat(names(route)).containsExactlyInAnyOrder("id", "displayName");
+        assertThat(names(route)).containsExactlyInAnyOrder("id", "displayName", "terminalStopName");
         assertThat(names(stop)).containsExactlyInAnyOrder("stopId", "name", "direction");
     }
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.gustler.backend.api.board.domain.ApproachingVehicle;
 import com.gustler.backend.api.board.domain.BoardDirection;
 import com.gustler.backend.api.board.domain.BoardRoute;
+import com.gustler.backend.api.board.domain.DirectionInfo;
 import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.board.domain.VehicleForecast;
 import com.gustler.backend.api.favorite.application.FavoriteOverview;
@@ -33,7 +34,9 @@ class FavoriteOverviewResponseTest {
     @Test
     void watch_필드_이름을_유지하고_ETA를_추가한다() {
         BoardRoute route = new BoardRoute(TARGET.routeId(), "M5422", "기점", "종점",
-            RouteStatus.FORECAST_READY, null, List.of(), "12", RouteHeadways.none());
+            RouteStatus.FORECAST_READY, null,
+            List.of(new DirectionInfo(BoardDirection.UP, "안양역 방면", "기점", "안양역", "05:00", "23:00")),
+            "12", RouteHeadways.none());
         ApproachingVehicle watch = new ApproachingVehicle("vehicle-1", 2,
             new VehicleForecast.Available(0.8, 12.0));
         Stop stop = new Stop(TARGET.stopId(), "강남역", BoardDirection.UP,
@@ -47,6 +50,7 @@ class FavoriteOverviewResponseTest {
 
         assertThat(actual.at("/route/id").asString()).isEqualTo(TARGET.routeId());
         assertThat(actual.at("/route/displayName").asString()).isEqualTo("M5422");
+        assertThat(actual.at("/route/terminalStopName").asString()).isEqualTo("안양역");
         assertThat(actual.at("/stop/stopId").asString()).isEqualTo(TARGET.stopId());
         assertThat(actual.at("/approachingVehicles/0/horizonStops").asInt()).isEqualTo(2);
         assertThat(actual.at("/approachingVehicles/0/forecast/status").asString())

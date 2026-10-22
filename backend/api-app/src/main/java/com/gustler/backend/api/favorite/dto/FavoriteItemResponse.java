@@ -31,7 +31,8 @@ public record FavoriteItemResponse(
         var vehicles = board == null ? List.<FavoriteApproachingVehicleResponse>of()
             : board.stop().approachingVehicles().stream().map(FavoriteApproachingVehicleResponse::from).toList();
         return new FavoriteItemResponse(item.id(), item.status(), item.reason(),
-            FavoriteBoardRouteResponse.from(item.target().routeId(), board == null ? null : board.route()),
+            FavoriteBoardRouteResponse.from(item.target().routeId(), item.target().direction(),
+                board == null ? null : board.route()),
             FavoriteStopResponse.from(item.target().stopId(), board == null ? null : board.stop()), vehicles);
     }
 }
