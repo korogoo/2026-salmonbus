@@ -16,6 +16,9 @@ public enum ErrorCode {
     NO_RECENT_OBSERVATION(HttpStatus.SERVICE_UNAVAILABLE, "예보 기준으로 사용할 최근 차량 관측이 없습니다."),
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "일시적인 서버 장애가 발생했습니다."),
 
+    FAVORITE_GROUP_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "회원은 즐겨찾기 그룹을 3개까지만 만들 수 있습니다."),
+    FAVORITE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "즐겨찾기 그룹에는 즐겨찾기를 2개까지만 등록할 수 있습니다."),
+
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다."),
     ENDPOINT_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "이 경로에서 지원하지 않는 요청 방식입니다."),
