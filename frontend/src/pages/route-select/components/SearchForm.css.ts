@@ -17,7 +17,7 @@ const PRESS_OUT = [
 export const form = style({
   display: "flex",
   alignItems: "center",
-  height: "60px",
+  height: "48px",
   paddingLeft: "22px",
   borderRadius: "30px",
   backgroundColor: vars.color.surface,
@@ -46,7 +46,6 @@ export const input = style({
   fontSize: "16px",
   color: vars.color.textStrong,
   "::placeholder": { color: vars.color.textSubtle },
-  ":placeholder-shown": { caretColor: "transparent" },
 });
 
 export const searchIcon = style({
