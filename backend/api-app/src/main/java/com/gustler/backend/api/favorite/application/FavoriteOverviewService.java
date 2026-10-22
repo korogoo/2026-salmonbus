@@ -63,7 +63,7 @@ public class FavoriteOverviewService {
     private Card card(Favorite favorite, Map<String, BoardLoad> loadedBoards,
         Map<String, Optional<StationArrivalsOverview>> loadedArrivals) {
         String routeId = favorite.target().routeId();
-        String stationId = favorite.target().stationId();
+        String stopId = favorite.target().stopId();
         BoardLoad load = loadedBoards.computeIfAbsent(routeId, this::loadBoard);
         if (load.board() == null) {
             return unavailable(favorite, load.status(), load.reason());
@@ -71,7 +71,8 @@ public class FavoriteOverviewService {
         Board board = load.board();
         List<StopState> matchingStops = board.stops().stream()
             .filter(StopState::boardingAllowed)
-            .filter(stop -> stop.stopId().equals(stationId))
+            .filter(stop -> stop.stopId().equals(stopId))
+            .filter(stop -> stop.direction().name().equals(favorite.target().direction().name()))
             .toList();
         if (matchingStops.isEmpty()) {
             return unavailable(favorite, CardStatus.UNAVAILABLE, CardReason.TARGET_NOT_IN_CURRENT_ROUTE);

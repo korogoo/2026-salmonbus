@@ -9,13 +9,15 @@ import java.util.regex.Pattern;
  */
 public record FavoriteTarget(
     String routeId,
-    String stationId
+    String stopId,
+    FavoriteDirection direction
 ) {
     private static final Pattern PUBLIC_ID_FORMAT = Pattern.compile("[0-9]{9}");
 
     public FavoriteTarget {
         requirePublicId(routeId, "routeId");
-        requirePublicId(stationId, "stationId");
+        requirePublicId(stopId, "stopId");
+        Objects.requireNonNull(direction, "direction은 null일 수 없습니다.");
     }
 
     private static void requirePublicId(

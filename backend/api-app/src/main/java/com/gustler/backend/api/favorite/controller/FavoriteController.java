@@ -41,8 +41,8 @@ public class FavoriteController {
         if (request == null) {
             throw new InvalidFavoriteRequestException();
         }
-        selections.select(principal.publicId(), groups.targetOf(request.routeId(), request.stationId()),
-            request.favoriteGroupIds());
+        selections.select(principal.publicId(),
+            groups.targetOf(request.routeId(), request.stopId(), request.direction()), request.favoriteGroupIds());
         return noContent();
     }
 

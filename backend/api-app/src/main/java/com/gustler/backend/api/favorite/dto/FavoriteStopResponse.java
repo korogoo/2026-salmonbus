@@ -13,8 +13,8 @@ public record FavoriteStopResponse(
     String name,
     BoardDirection direction
 ) {
-    static FavoriteStopResponse from(String stationId, Stop stop) {
-        return new FavoriteStopResponse(stationId, stop == null ? null : stop.name(),
+    static FavoriteStopResponse from(String stopId, Stop stop) {
+        return new FavoriteStopResponse(stopId, stop == null ? null : stop.name(),
             stop == null ? null : stop.direction());
     }
 }

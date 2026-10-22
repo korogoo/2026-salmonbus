@@ -17,7 +17,8 @@ public class FavoriteTargetResolver {
     public FavoriteTarget requireAvailable(FavoriteTarget target) {
         var reference = routes.reference(target.routeId()).orElseThrow(FavoriteTargetUnavailableException::new);
         long visits = routes.stops(reference.versionId()).stream()
-            .filter(stop -> stop.stationId().equals(target.stationId()))
+            .filter(stop -> stop.stationId().equals(target.stopId()))
+            .filter(stop -> stop.direction().equals(target.direction().name()))
             .filter(stop -> stop.boardingAllowed())
             .count();
         if (visits == 0) {

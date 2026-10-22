@@ -16,14 +16,16 @@ CREATE TABLE favorite (
     id                 uuid       NOT NULL,
     favorite_group_id  uuid       NOT NULL,
     route_id           varchar(9) NOT NULL,
-    station_id         varchar(9) NOT NULL,
+    stop_id            varchar(9) NOT NULL,
+    direction          varchar(4) NOT NULL,
     position           smallint   NOT NULL,
     CONSTRAINT pk_favorite PRIMARY KEY (id),
     CONSTRAINT fk_favorite_group FOREIGN KEY (favorite_group_id)
         REFERENCES favorite_group (id) ON DELETE CASCADE,
-    CONSTRAINT ux_favorite_group_target UNIQUE (favorite_group_id, route_id, station_id),
+    CONSTRAINT ux_favorite_group_target UNIQUE (favorite_group_id, route_id, stop_id, direction),
     CONSTRAINT ux_favorite_group_position UNIQUE (favorite_group_id, position),
     CONSTRAINT ck_favorite_route_id CHECK (route_id ~ '^[0-9]{9}$'),
-    CONSTRAINT ck_favorite_station_id CHECK (station_id ~ '^[0-9]{9}$'),
+    CONSTRAINT ck_favorite_stop_id CHECK (stop_id ~ '^[0-9]{9}$'),
+    CONSTRAINT ck_favorite_direction CHECK (direction IN ('UP', 'DOWN')),
     CONSTRAINT ck_favorite_position CHECK (position BETWEEN 0 AND 1)
 );

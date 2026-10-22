@@ -7,6 +7,7 @@ import com.gustler.backend.api.favorite.InvalidFavoriteGroupNameException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
 import com.gustler.backend.api.favorite.InvalidFavoriteRequestException;
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
@@ -81,9 +82,9 @@ public class FavoriteGroupService {
         }).orElseThrow(UnauthenticatedException::new);
     }
 
-    public FavoriteTarget targetOf(String routeId, String stationId) {
+    public FavoriteTarget targetOf(String routeId, String stopId, FavoriteDirection direction) {
         try {
-            return new FavoriteTarget(routeId, stationId);
+            return new FavoriteTarget(routeId, stopId, direction);
         } catch (RuntimeException exception) {
             throw new InvalidFavoriteRequestException();
         }

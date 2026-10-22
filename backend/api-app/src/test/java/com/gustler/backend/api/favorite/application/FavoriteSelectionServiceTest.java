@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.favorite.FavoriteLimitExceededException;
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
@@ -22,8 +23,8 @@ import org.junit.jupiter.api.Test;
 
 class FavoriteSelectionServiceTest {
     private static final UUID MEMBER_ID = UUID.randomUUID();
-    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322");
-    private static final FavoriteTarget OTHER = new FavoriteTarget("204000057", "277102323");
+    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322", FavoriteDirection.UP);
+    private static final FavoriteTarget OTHER = new FavoriteTarget("204000057", "277102323", FavoriteDirection.UP);
     private final MemoryRepository repository = new MemoryRepository();
     private final FavoriteTargetResolver resolver = mock(FavoriteTargetResolver.class);
     private final FavoriteSelectionService service = new FavoriteSelectionService(repository, resolver);
@@ -47,7 +48,8 @@ class FavoriteSelectionServiceTest {
     @Test
     void 새_등록_대상_중_가득_찬_그룹이_있으면_모두_롤백한다() {
         FavoriteGroup empty = group("출근", List.of());
-        FavoriteGroup full = group("퇴근", List.of(favorite(OTHER), favorite(new FavoriteTarget("204000057", "277102324"))));
+        FavoriteGroup full = group("퇴근", List.of(favorite(OTHER),
+            favorite(new FavoriteTarget("204000057", "277102324", FavoriteDirection.UP))));
         repository.groups = new MemberFavoriteGroups(List.of(empty, full));
 
         assertThatThrownBy(() -> service.select(MEMBER_ID, TARGET,

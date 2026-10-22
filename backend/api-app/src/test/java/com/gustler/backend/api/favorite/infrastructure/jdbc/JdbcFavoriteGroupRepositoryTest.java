@@ -3,6 +3,7 @@ package com.gustler.backend.api.favorite.infrastructure.jdbc;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
@@ -100,9 +101,9 @@ class JdbcFavoriteGroupRepositoryTest {
             new FavoriteGroupName(name),
             List.of(
                 new Favorite(new FavoriteId(uuid("favorite-" + name + "-1")),
-                    new FavoriteTarget("204000057", "27710232" + index)),
+                    new FavoriteTarget("204000057", "27710232" + index, FavoriteDirection.UP)),
                 new Favorite(new FavoriteId(uuid("favorite-" + name + "-2")),
-                    new FavoriteTarget("204000057", "27710233" + index))
+                    new FavoriteTarget("204000057", "27710233" + index, FavoriteDirection.DOWN))
             )
         );
     }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.favorite.FavoriteTargetAmbiguousException;
 import com.gustler.backend.api.favorite.FavoriteTargetUnavailableException;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
 import com.gustler.backend.api.route.application.RouteGeometryQueryRepository;
 import com.gustler.backend.api.route.application.RouteGeometryQueryRepository.Reference;
@@ -16,13 +17,13 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class FavoriteTargetResolverTest {
-    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322");
+    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322", FavoriteDirection.UP);
     private final RouteGeometryQueryRepository routes = mock(RouteGeometryQueryRepository.class);
     private final FavoriteTargetResolver resolver = new FavoriteTargetResolver(routes);
 
     @Test
     void 현재_판본의_유일한_승차_방문을_찾는다() {
-        routeStops(new Stop(TARGET.stationId(), 1, "강남역", "서울역", true, null));
+        routeStops(new Stop(TARGET.stopId(), 1, "강남역", "UP", true, null));
 
         assertThat(resolver.requireAvailable(TARGET)).isEqualTo(TARGET);
     }
@@ -36,10 +37,19 @@ class FavoriteTargetResolverTest {
     }
 
     @Test
-    void 같은_승차_방문이_여러_개면_임의로_고르지_않는다() {
+    void 같은_정류장의_다른_방향은_선택한_방문으로_구분한다() {
         routeStops(
-            new Stop(TARGET.stationId(), 1, "강남역", "서울역", true, null),
-            new Stop(TARGET.stationId(), 9, "강남역", "서울역", true, null));
+            new Stop(TARGET.stopId(), 1, "강남역", "UP", true, null),
+            new Stop(TARGET.stopId(), 9, "강남역", "DOWN", true, null));
+
+        assertThat(resolver.requireAvailable(TARGET)).isEqualTo(TARGET);
+    }
+
+    @Test
+    void 같은_방향의_승차_방문이_여러_개면_임의로_고르지_않는다() {
+        routeStops(
+            new Stop(TARGET.stopId(), 1, "강남역", "UP", true, null),
+            new Stop(TARGET.stopId(), 9, "강남역", "UP", true, null));
 
         assertThatThrownBy(() -> resolver.requireAvailable(TARGET))
             .isInstanceOf(FavoriteTargetAmbiguousException.class);

@@ -2,6 +2,7 @@ package com.gustler.backend.api.favorite.infrastructure.jdbc;
 
 import com.gustler.backend.api.favorite.application.FavoriteGroupRepository;
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
@@ -27,7 +28,7 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
     private static final String FIND_MEMBER_WITH_FAVORITES = """
         SELECT m.id AS member_id,
                fg.id AS group_id, fg.name AS group_name, fg.position AS group_position,
-               f.id AS favorite_id, f.route_id, f.station_id, f.position AS favorite_position
+               f.id AS favorite_id, f.route_id, f.stop_id, f.direction, f.position AS favorite_position
         FROM member m
         LEFT JOIN favorite_group fg ON fg.member_id = m.id
         LEFT JOIN favorite f ON f.favorite_group_id = fg.id
@@ -37,7 +38,7 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
 
     private static final String FIND_FAVORITES = """
         SELECT fg.id AS group_id, fg.name AS group_name, fg.position AS group_position,
-               f.id AS favorite_id, f.route_id, f.station_id, f.position AS favorite_position
+               f.id AS favorite_id, f.route_id, f.stop_id, f.direction, f.position AS favorite_position
         FROM favorite_group fg
         LEFT JOIN favorite f ON f.favorite_group_id = fg.id
         WHERE fg.member_id = ?
@@ -50,8 +51,8 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
         """;
 
     private static final String INSERT_FAVORITE = """
-        INSERT INTO favorite (id, favorite_group_id, route_id, station_id, position)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO favorite (id, favorite_group_id, route_id, stop_id, direction, position)
+        VALUES (?, ?, ?, ?, ?, ?)
         """;
 
     private final JdbcClient jdbcClient;
@@ -127,7 +128,7 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
             Favorite favorite = group.favorites().get(favoritePosition);
             jdbcClient.sql(INSERT_FAVORITE)
                 .params(favorite.id().value(), group.id().value(), favorite.target().routeId(),
-                    favorite.target().stationId(), favoritePosition)
+                    favorite.target().stopId(), favorite.target().direction().name(), favoritePosition)
                 .update();
         }
     }
@@ -144,7 +145,7 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
                 new GroupRows(row.groupId(), row.groupName(), new ArrayList<>()));
             if (row.favoriteId() != null) {
                 group.favorites().add(new Favorite(new FavoriteId(row.favoriteId()),
-                    new FavoriteTarget(row.routeId(), row.stationId())));
+                    new FavoriteTarget(row.routeId(), row.stopId(), row.direction())));
             }
         }
         return new MemberFavoriteGroups(groups.values().stream()
@@ -162,8 +163,13 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
             rows.getString("group_name"),
             rows.getObject("favorite_id", UUID.class),
             rows.getString("route_id"),
-            rows.getString("station_id")
+            rows.getString("stop_id"),
+            direction(rows.getString("direction"))
         );
+    }
+
+    private static FavoriteDirection direction(String value) {
+        return value == null ? null : FavoriteDirection.valueOf(value);
     }
 
     private record FavoriteRow(
@@ -171,7 +177,8 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
         String groupName,
         UUID favoriteId,
         String routeId,
-        String stationId
+        String stopId,
+        FavoriteDirection direction
     ) {
     }
 

@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.UUID;
 
 final class FavoriteDomainFixture {
-    static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322");
-    static final FavoriteTarget OTHER_TARGET = new FavoriteTarget("204000057", "277102323");
-    static final FavoriteTarget THIRD_TARGET = new FavoriteTarget("204000057", "277102324");
+    static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322", FavoriteDirection.UP);
+    static final FavoriteTarget OTHER_TARGET = new FavoriteTarget("204000057", "277102323", FavoriteDirection.UP);
+    static final FavoriteTarget THIRD_TARGET = new FavoriteTarget("204000057", "277102324", FavoriteDirection.UP);
 
     private FavoriteDomainFixture() {
     }

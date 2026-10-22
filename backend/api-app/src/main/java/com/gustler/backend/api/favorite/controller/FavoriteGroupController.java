@@ -96,7 +96,7 @@ public class FavoriteGroupController {
     }
 
     private FavoriteTarget targetOf(FavoriteTargetRequest request) {
-        return request == null ? null : service.targetOf(request.routeId(), request.stationId());
+        return request == null ? null : service.targetOf(request.routeId(), request.stopId(), request.direction());
     }
 
     private static <T> ResponseEntity<T> ok(T body) {

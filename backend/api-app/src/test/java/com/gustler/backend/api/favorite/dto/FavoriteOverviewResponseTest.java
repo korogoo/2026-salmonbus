@@ -18,6 +18,7 @@ import com.gustler.backend.api.favorite.application.FavoriteOverview.Group;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Stop;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Vehicle;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.route.domain.RouteStatus;
 import java.util.List;
 import java.util.UUID;
@@ -26,7 +27,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class FavoriteOverviewResponseTest {
-    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322");
+    private static final FavoriteTarget TARGET = new FavoriteTarget("204000057", "277102322", FavoriteDirection.UP);
     private final JsonMapper json = JsonMapper.builder().findAndAddModules().build();
 
     @Test
@@ -35,7 +36,7 @@ class FavoriteOverviewResponseTest {
             RouteStatus.FORECAST_READY, null, List.of(), "12", RouteHeadways.none());
         ApproachingVehicle watch = new ApproachingVehicle("vehicle-1", 2,
             new VehicleForecast.Available(0.8, 12.0));
-        Stop stop = new Stop(TARGET.stationId(), "강남역", BoardDirection.UP,
+        Stop stop = new Stop(TARGET.stopId(), "강남역", BoardDirection.UP,
             List.of(new Vehicle(watch, Eta.unavailable(EtaReason.ARRIVAL_UNAVAILABLE))));
         Card card = new Card(UUID.randomUUID(), TARGET, CardStatus.READY, null,
             new BoardSlice(route, stop));
@@ -46,7 +47,7 @@ class FavoriteOverviewResponseTest {
 
         assertThat(actual.at("/route/id").asString()).isEqualTo(TARGET.routeId());
         assertThat(actual.at("/route/displayName").asString()).isEqualTo("M5422");
-        assertThat(actual.at("/stop/stopId").asString()).isEqualTo(TARGET.stationId());
+        assertThat(actual.at("/stop/stopId").asString()).isEqualTo(TARGET.stopId());
         assertThat(actual.at("/approachingVehicles/0/horizonStops").asInt()).isEqualTo(2);
         assertThat(actual.at("/approachingVehicles/0/forecast/status").asString())
             .isEqualTo("AVAILABLE");
@@ -67,7 +68,7 @@ class FavoriteOverviewResponseTest {
         JsonNode actual = body.at("/groups/0/favorites/0");
 
         assertThat(actual.at("/route/id").asString()).isEqualTo(TARGET.routeId());
-        assertThat(actual.at("/stop/stopId").asString()).isEqualTo(TARGET.stationId());
+        assertThat(actual.at("/stop/stopId").asString()).isEqualTo(TARGET.stopId());
         assertThat(actual.path("status").asString()).isEqualTo("UNAVAILABLE");
         assertThat(actual.path("reason").asString()).isEqualTo("OBSERVATION_UNAVAILABLE");
         assertThat(actual.path("approachingVehicles").isEmpty()).isTrue();

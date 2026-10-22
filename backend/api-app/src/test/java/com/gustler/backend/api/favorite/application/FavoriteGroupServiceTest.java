@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +24,7 @@ class FavoriteGroupServiceTest {
 
     @Test
     void 첫_즐겨찾기와_그룹을_한번에_만든다() {
-        var target = service.targetOf("204000057", "277102322");
+        var target = service.targetOf("204000057", "277102322", FavoriteDirection.UP);
         when(resolver.requireAvailable(target)).thenReturn(target);
 
         var created = service.create(MEMBER_ID, " 출근 ", target);

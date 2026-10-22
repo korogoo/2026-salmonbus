@@ -32,6 +32,6 @@ public record FavoriteCardResponse(
             : board.stop().approachingVehicles().stream().map(FavoriteApproachingVehicleResponse::from).toList();
         return new FavoriteCardResponse(card.id(), card.status(), card.reason(),
             FavoriteBoardRouteResponse.from(card.target().routeId(), board == null ? null : board.route()),
-            FavoriteStopResponse.from(card.target().stationId(), board == null ? null : board.stop()), vehicles);
+            FavoriteStopResponse.from(card.target().stopId(), board == null ? null : board.stop()), vehicles);
     }
 }

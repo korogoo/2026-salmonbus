@@ -23,7 +23,7 @@ class FavoriteGroupTest {
     }
 
     @Test
-    void 같은_노선과_정류장을_두_번_등록해도_한_개다() {
+    void 같은_노선과_정류장과_방향을_두_번_등록해도_한_개다() {
         // given
         FavoriteGroup group = group("출근", TARGET);
 
@@ -33,6 +33,16 @@ class FavoriteGroupTest {
         // then
         assertThat(actual).isSameAs(group);
         assertThat(actual.favorites()).hasSize(1);
+    }
+
+    @Test
+    void 같은_노선과_정류장도_방향이_다르면_따로_등록한다() {
+        FavoriteGroup group = group("출근", TARGET);
+        FavoriteTarget opposite = new FavoriteTarget(TARGET.routeId(), TARGET.stopId(), FavoriteDirection.DOWN);
+
+        FavoriteGroup actual = group.add(new Favorite(favoriteId("반대방향"), opposite));
+
+        assertThat(actual.favorites()).extracting(Favorite::target).containsExactly(TARGET, opposite);
     }
 
     @Test

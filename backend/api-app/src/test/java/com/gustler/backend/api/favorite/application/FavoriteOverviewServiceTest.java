@@ -17,6 +17,7 @@ import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.board.domain.StopState;
 import com.gustler.backend.api.board.domain.VehicleForecast;
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
@@ -37,7 +38,7 @@ import org.junit.jupiter.api.Test;
 class FavoriteOverviewServiceTest {
     private static final UUID MEMBER_ID = UUID.randomUUID();
     private static final String ROUTE_ID = "204000057";
-    private static final String STATION_ID = "277102322";
+    private static final String STOP_ID = "277102322";
     private final MemoryRepository repository = new MemoryRepository();
     private final BoardQueryService boards = mock(BoardQueryService.class);
     private final ArrivalQueryService arrivals = mock(ArrivalQueryService.class);
@@ -45,14 +46,14 @@ class FavoriteOverviewServiceTest {
 
     @Test
     void 그룹과_즐겨찾기_순서대로_최대_세_대의_카드를_만든다() {
-        repository.groups = groups(favorite(ROUTE_ID, STATION_ID));
-        when(boards.getBoard(any())).thenReturn(new BoardOverview(board(ROUTE_ID, STATION_ID, 4), Duration.ZERO));
+        repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
+        when(boards.getBoard(any())).thenReturn(new BoardOverview(board(ROUTE_ID, STOP_ID, 4), Duration.ZERO));
 
         FavoriteOverview.Card card = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
 
         assertThat(card.status()).isEqualTo(CardStatus.READY);
-        assertThat(card.target()).isEqualTo(new FavoriteTarget(ROUTE_ID, STATION_ID));
-        assertThat(card.board().stop().stopId()).isEqualTo(STATION_ID);
+        assertThat(card.target()).isEqualTo(new FavoriteTarget(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
+        assertThat(card.board().stop().stopId()).isEqualTo(STOP_ID);
         assertThat(card.board().stop().approachingVehicles()).hasSize(3);
         assertThat(card.board().stop().approachingVehicles().getFirst().watch().horizonStops()).isEqualTo(1);
         assertThat(card.board().stop().approachingVehicles().get(2).eta().reason())
@@ -61,8 +62,10 @@ class FavoriteOverviewServiceTest {
 
     @Test
     void 현재_방문이_여러_개면_카드를_AMBIGUOUS로_유지한다() {
-        repository.groups = groups(favorite(ROUTE_ID, STATION_ID));
-        Board board = boardWithStops(ROUTE_ID, List.of(stop(STATION_ID, 1, 0), stop(STATION_ID, 8, 0)));
+        repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
+        Board board = boardWithStops(ROUTE_ID, List.of(
+            stop(STOP_ID, 1, BoardDirection.UP, 0),
+            stop(STOP_ID, 8, BoardDirection.UP, 0)));
         when(boards.getBoard(any())).thenReturn(new BoardOverview(board, Duration.ZERO));
 
         FavoriteOverview.Card card = service.get(MEMBER_ID).groups().getFirst().favorites().getFirst();
@@ -73,15 +76,15 @@ class FavoriteOverviewServiceTest {
 
     @Test
     void 한_카드_조회_실패가_다른_카드를_숨기지_않는다() {
-        Favorite broken = favorite(ROUTE_ID, STATION_ID);
-        Favorite available = favorite("204000058", "277102323");
+        Favorite broken = favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP);
+        Favorite available = favorite("204000058", "277102323", FavoriteDirection.UP);
         repository.groups = groups(broken, available);
         when(boards.getBoard(any())).thenAnswer(invocation -> {
             String routeId = invocation.getArgument(0, com.gustler.backend.api.route.RouteId.class).value();
             if (routeId.equals(ROUTE_ID)) {
                 throw new IllegalStateException("조회 실패");
             }
-            return new BoardOverview(board(routeId, available.target().stationId(), 1), Duration.ZERO);
+            return new BoardOverview(board(routeId, available.target().stopId(), 1), Duration.ZERO);
         });
 
         List<FavoriteOverview.Card> cards = service.get(MEMBER_ID).groups().getFirst().favorites();
@@ -95,12 +98,12 @@ class FavoriteOverviewServiceTest {
             new FavoriteGroupName("출근"), List.of(favorites))));
     }
 
-    private static Favorite favorite(String routeId, String stationId) {
-        return new Favorite(new FavoriteId(UUID.randomUUID()), new FavoriteTarget(routeId, stationId));
+    private static Favorite favorite(String routeId, String stopId, FavoriteDirection direction) {
+        return new Favorite(new FavoriteId(UUID.randomUUID()), new FavoriteTarget(routeId, stopId, direction));
     }
 
-    private static Board board(String routeId, String stationId, int vehicleCount) {
-        return boardWithStops(routeId, List.of(stop(stationId, 1, vehicleCount)));
+    private static Board board(String routeId, String stopId, int vehicleCount) {
+        return boardWithStops(routeId, List.of(stop(stopId, 1, BoardDirection.UP, vehicleCount)));
     }
 
     private static Board boardWithStops(String routeId, List<StopState> stops) {
@@ -110,12 +113,12 @@ class FavoriteOverviewServiceTest {
         return new Board(route, now, now.plusMinutes(1), new ForecastModel(1, "model", now), 3, stops);
     }
 
-    private static StopState stop(String stationId, int sequence, int vehicleCount) {
+    private static StopState stop(String stopId, int sequence, BoardDirection direction, int vehicleCount) {
         List<ApproachingVehicle> vehicles = java.util.stream.IntStream.range(0, vehicleCount)
             .mapToObj(index -> new ApproachingVehicle("vehicle-" + index, index + 1,
                 new VehicleForecast.Available(0.8, 12.0)))
             .toList();
-        return new StopState(sequence, stationId, "강남역", BoardDirection.UP, true, vehicles);
+        return new StopState(sequence, stopId, "강남역", direction, true, vehicles);
     }
 
     private static final class MemoryRepository implements FavoriteGroupRepository {

@@ -1,4 +1,6 @@
 package com.gustler.backend.api.favorite.dto;
 
-public record FavoriteTargetRequest(String routeId, String stationId) {
+import com.gustler.backend.api.favorite.domain.FavoriteDirection;
+
+public record FavoriteTargetRequest(String routeId, String stopId, FavoriteDirection direction) {
 }
