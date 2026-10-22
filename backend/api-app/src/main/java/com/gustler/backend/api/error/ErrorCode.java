@@ -23,7 +23,6 @@ public enum ErrorCode {
     FAVORITE_GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "즐겨찾기 그룹을 찾을 수 없습니다."),
     INVALID_FAVORITE_GROUP_ORDER(HttpStatus.BAD_REQUEST, "현재 즐겨찾기 그룹 ID를 빠짐없이 한 번씩 보내야 합니다."),
     INVALID_FAVORITE_ORDER(HttpStatus.BAD_REQUEST, "현재 즐겨찾기 ID를 빠짐없이 한 번씩 보내야 합니다."),
-    FAVORITE_NOT_FOUND(HttpStatus.NOT_FOUND, "즐겨찾기를 찾을 수 없습니다."),
     FAVORITE_TARGET_AMBIGUOUS(HttpStatus.CONFLICT, "현재 노선에서 같은 정류장 방문을 하나로 정할 수 없습니다."),
     FAVORITE_TARGET_UNAVAILABLE(HttpStatus.UNPROCESSABLE_CONTENT, "현재 노선에서 승차할 수 없는 정류장입니다."),
 

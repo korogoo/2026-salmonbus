@@ -1,6 +1,7 @@
 package com.gustler.backend.api.favorite.controller;
 
 import com.gustler.backend.api.account.MemberPrincipal;
+import com.gustler.backend.api.docs.ApiDocsTags;
 import com.gustler.backend.api.favorite.InvalidFavoriteRequestException;
 import com.gustler.backend.api.favorite.application.FavoriteGroupService;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
@@ -12,6 +13,7 @@ import com.gustler.backend.api.favorite.dto.RenameFavoriteGroupRequest;
 import com.gustler.backend.api.favorite.dto.ReorderFavoriteGroupsRequest;
 import java.net.URI;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@Tag(name = ApiDocsTags.FAVORITES)
 @RequestMapping("/api/me/favorite-groups")
 @ConditionalOnProperty(name = "auth.enabled", havingValue = "true")
 public class FavoriteGroupController {

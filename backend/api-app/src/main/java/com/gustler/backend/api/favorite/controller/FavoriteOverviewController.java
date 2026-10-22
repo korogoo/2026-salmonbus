@@ -1,0 +1,54 @@
+package com.gustler.backend.api.favorite.controller;
+
+import com.gustler.backend.api.account.MemberPrincipal;
+import com.gustler.backend.api.docs.ApiDocsTags;
+import com.gustler.backend.api.favorite.application.FavoriteOverviewService;
+import com.gustler.backend.api.favorite.dto.FavoriteOverviewResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@Tag(name = ApiDocsTags.FAVORITES)
+@RequestMapping("/api/me/favorites")
+@ConditionalOnProperty(name = "auth.enabled", havingValue = "true")
+public class FavoriteOverviewController {
+    private final FavoriteOverviewService service;
+
+    public FavoriteOverviewController(FavoriteOverviewService service) {
+        this.service = service;
+    }
+
+    @GetMapping
+    @Operation(operationId = "getMyFavoriteOverview", summary = "즐겨찾기별 접근 차량 조회",
+        description = "회원이 정한 그룹과 즐겨찾기 순서대로 현재 watch의 정류장 정보와 접근 차량을 반환합니다. "
+            + "접근 차량의 필드 이름과 좌석 예보는 watch 계약을 유지하며 ETA만 추가합니다. "
+            + "세 번째 차량의 ETA는 UNAVAILABLE, SOURCE_NOT_PROVIDED입니다. 한 카드의 실패는 다른 카드를 숨기지 않습니다.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "즐겨찾기 카드 목록",
+            headers = @Header(name = "Cache-Control", description = "회원별 응답이므로 no-store",
+                schema = @Schema(type = "string")),
+            content = @Content(mediaType = "application/json",
+                schema = @Schema(implementation = FavoriteOverviewResponse.class))),
+        @ApiResponse(responseCode = "401", description = "액세스 토큰이 없거나 유효하지 않음")
+    })
+    public ResponseEntity<FavoriteOverviewResponse> get(
+        @Parameter(hidden = true) @AuthenticationPrincipal MemberPrincipal principal
+    ) {
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(FavoriteOverviewResponse.from(service.get(principal.publicId())));
+    }
+}
