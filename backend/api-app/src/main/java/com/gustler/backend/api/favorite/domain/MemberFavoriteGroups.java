@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 /** 현재 회원이 소유한 즐겨찾기 그룹의 순서와 개수 규칙이다. */
@@ -42,6 +43,39 @@ public final class MemberFavoriteGroups {
         return values.stream()
             .filter(group -> group.id().equals(id))
             .findFirst();
+    }
+
+    public MemberFavoriteGroups update(
+        FavoriteGroupId id,
+        UnaryOperator<FavoriteGroup> change
+    ) {
+        Objects.requireNonNull(id, "즐겨찾기 그룹 ID는 null일 수 없습니다.");
+        Objects.requireNonNull(change, "즐겨찾기 그룹 변경은 null일 수 없습니다.");
+        return new MemberFavoriteGroups(values.stream()
+            .map(group -> group.id().equals(id) ? change.apply(group) : group)
+            .toList());
+    }
+
+    public MemberFavoriteGroups remove(
+        FavoriteGroupId id
+    ) {
+        Objects.requireNonNull(id, "즐겨찾기 그룹 ID는 null일 수 없습니다.");
+        return new MemberFavoriteGroups(values.stream()
+            .filter(group -> !group.id().equals(id))
+            .toList());
+    }
+
+    public MemberFavoriteGroups reorder(
+        List<FavoriteGroupId> orderedIds
+    ) {
+        Objects.requireNonNull(orderedIds, "즐겨찾기 그룹 순서는 null일 수 없습니다.");
+        if (orderedIds.size() != values.size() || new HashSet<>(orderedIds).size() != orderedIds.size()
+            || !new HashSet<>(orderedIds).equals(values.stream().map(FavoriteGroup::id).collect(java.util.stream.Collectors.toSet()))) {
+            throw new IllegalArgumentException("현재 즐겨찾기 그룹 ID를 빠짐없이 한 번씩 보내야 합니다.");
+        }
+        return new MemberFavoriteGroups(orderedIds.stream()
+            .map(id -> find(id).orElseThrow())
+            .toList());
     }
 
     private void requireWithinLimit() {

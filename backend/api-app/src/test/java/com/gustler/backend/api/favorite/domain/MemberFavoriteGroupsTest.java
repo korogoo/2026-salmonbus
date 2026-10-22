@@ -2,6 +2,7 @@ package com.gustler.backend.api.favorite.domain;
 
 import static com.gustler.backend.api.favorite.domain.FavoriteDomainFixture.emptyGroup;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gustler.backend.api.favorite.FavoriteGroupLimitExceededException;
 import java.util.List;
@@ -30,6 +31,27 @@ class MemberFavoriteGroupsTest {
 
         // when & then
         assertThatThrownBy(() -> new MemberFavoriteGroups(List.of(first, otherIdWithSameName)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 현재_그룹_ID를_빠짐없이_보내면_그_순서로_바꾼다() {
+        FavoriteGroup first = emptyGroup("출근");
+        FavoriteGroup second = emptyGroup("퇴근");
+        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
+
+        MemberFavoriteGroups reordered = groups.reorder(List.of(second.id(), first.id()));
+
+        assertThat(reordered.values()).containsExactly(second, first);
+    }
+
+    @Test
+    void 그룹_정렬에_현재_ID가_빠지면_거절한다() {
+        FavoriteGroup first = emptyGroup("출근");
+        FavoriteGroup second = emptyGroup("퇴근");
+        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
+
+        assertThatThrownBy(() -> groups.reorder(List.of(first.id())))
             .isInstanceOf(IllegalArgumentException.class);
     }
 }

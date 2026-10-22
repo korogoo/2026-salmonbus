@@ -18,6 +18,10 @@ public enum ErrorCode {
 
     FAVORITE_GROUP_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "회원은 즐겨찾기 그룹을 3개까지만 만들 수 있습니다."),
     FAVORITE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "즐겨찾기 그룹에는 즐겨찾기를 2개까지만 등록할 수 있습니다."),
+    INVALID_FAVORITE_GROUP_NAME(HttpStatus.BAD_REQUEST, "즐겨찾기 그룹 이름은 공백을 제외하고 1자 이상 10자 이하여야 합니다."),
+    FAVORITE_GROUP_NAME_CONFLICT(HttpStatus.CONFLICT, "같은 이름의 즐겨찾기 그룹이 이미 있습니다."),
+    FAVORITE_GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "즐겨찾기 그룹을 찾을 수 없습니다."),
+    INVALID_FAVORITE_GROUP_ORDER(HttpStatus.BAD_REQUEST, "현재 즐겨찾기 그룹 ID를 빠짐없이 한 번씩 보내야 합니다."),
 
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다."),
     ENDPOINT_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
