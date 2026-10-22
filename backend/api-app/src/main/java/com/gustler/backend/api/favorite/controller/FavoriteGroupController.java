@@ -132,6 +132,8 @@ public class FavoriteGroupController {
         @ApiResponse(responseCode = "401", description = "액세스 토큰이 없거나 유효하지 않음",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "내 즐겨찾기 그룹을 찾을 수 없음",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "409", description = "마지막 남은 즐겨찾기 그룹은 삭제할 수 없음",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<Void> delete(

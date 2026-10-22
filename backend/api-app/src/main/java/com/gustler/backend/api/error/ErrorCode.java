@@ -21,6 +21,7 @@ public enum ErrorCode {
     INVALID_FAVORITE_GROUP_NAME(HttpStatus.BAD_REQUEST, "즐겨찾기 그룹 이름은 공백을 제외하고 1자 이상 10자 이하여야 합니다."),
     FAVORITE_GROUP_NAME_CONFLICT(HttpStatus.CONFLICT, "같은 이름의 즐겨찾기 그룹이 이미 있습니다."),
     FAVORITE_GROUP_NOT_FOUND(HttpStatus.NOT_FOUND, "즐겨찾기 그룹을 찾을 수 없습니다."),
+    LAST_FAVORITE_GROUP(HttpStatus.CONFLICT, "마지막 즐겨찾기 그룹은 삭제할 수 없습니다."),
     INVALID_FAVORITE_GROUP_ORDER(HttpStatus.BAD_REQUEST, "현재 즐겨찾기 그룹 ID를 빠짐없이 한 번씩 보내야 합니다."),
     INVALID_FAVORITE_ORDER(HttpStatus.BAD_REQUEST, "현재 즐겨찾기 ID를 빠짐없이 한 번씩 보내야 합니다."),
     FAVORITE_TARGET_AMBIGUOUS(HttpStatus.CONFLICT, "현재 노선에서 같은 정류장 방문을 하나로 정할 수 없습니다."),

@@ -5,10 +5,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.gustler.backend.api.favorite.FavoriteGroupLimitExceededException;
+import com.gustler.backend.api.favorite.LastFavoriteGroupException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MemberFavoriteGroupsTest {
+    @Test
+    void 마지막_즐겨찾기_그룹은_삭제하지_않는다() {
+        FavoriteGroup only = emptyGroup("즐겨찾기");
+        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(only));
+
+        assertThatThrownBy(() -> groups.remove(only.id()))
+            .isInstanceOf(LastFavoriteGroupException.class);
+    }
+
+    @Test
+    void 다른_그룹이_남으면_즐겨찾기_그룹을_삭제한다() {
+        FavoriteGroup first = emptyGroup("출근");
+        FavoriteGroup second = emptyGroup("퇴근");
+        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
+
+        assertThat(groups.remove(first.id()).values()).containsExactly(second);
+    }
+
     @Test
     void 즐겨찾기_그룹은_세_개까지만_만든다() {
         // given
