@@ -13,6 +13,7 @@ import com.gustler.backend.api.board.domain.StopState;
 import com.gustler.backend.api.error.ApiException;
 import com.gustler.backend.api.error.ErrorCode;
 import com.gustler.backend.api.error.UnauthenticatedException;
+import com.gustler.backend.api.favorite.FavoriteGroupNotFoundException;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.BoardSlice;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Eta;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.EtaReason;
@@ -23,6 +24,8 @@ import com.gustler.backend.api.favorite.application.FavoriteOverview.ItemStatus;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Stop;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Vehicle;
 import com.gustler.backend.api.favorite.domain.Favorite;
+import com.gustler.backend.api.favorite.domain.FavoriteGroup;
+import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.route.RouteId;
 import com.gustler.backend.api.route.domain.RouteStatus;
 import java.util.HashMap;
@@ -49,10 +52,16 @@ public class FavoriteOverviewService {
     }
 
     public FavoriteOverview get(UUID memberPublicId) {
+        return get(memberPublicId, null);
+    }
+
+    public FavoriteOverview get(UUID memberPublicId, UUID groupId) {
         var owned = repository.findByMemberPublicId(memberPublicId).orElseThrow(UnauthenticatedException::new);
         Map<String, BoardLoad> loadedBoards = new HashMap<>();
         Map<String, Optional<StationArrivalsOverview>> loadedArrivals = new HashMap<>();
-        List<Group> groups = owned.values().stream()
+        List<FavoriteGroup> selectedGroups = groupId == null ? owned.values()
+            : List.of(owned.find(new FavoriteGroupId(groupId)).orElseThrow(FavoriteGroupNotFoundException::new));
+        List<Group> groups = selectedGroups.stream()
             .map(group -> new Group(group.id().value(), group.name().value(), group.favorites().stream()
                 .map(favorite -> item(favorite, loadedBoards, loadedArrivals))
                 .toList()))

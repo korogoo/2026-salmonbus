@@ -50,6 +50,11 @@ class FavoriteApiDocsContractTest {
         assertThat(operation.path("operationId").asString()).isEqualTo("getMyFavoriteOverview");
         assertThat(operation.at("/responses/200/content/application~1json/schema/$ref").asString())
             .isEqualTo("#/components/schemas/FavoriteOverviewResponse");
+        assertThat(operation.path("parameters")).extracting(parameter -> parameter.path("name").asString())
+            .containsExactly("groupId");
+        assertThat(operation.path("parameters").get(0).path("required").asBoolean()).isFalse();
+        assertThat(operation.at("/responses/404/content/application~1json/schema/$ref").asString())
+            .isEqualTo("#/components/schemas/ErrorResponse");
     }
 
     @Test

@@ -1,8 +1,13 @@
 package com.gustler.backend.api.favorite.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.arrival.application.ArrivalQueryService;
@@ -16,6 +21,7 @@ import com.gustler.backend.api.board.domain.ForecastModel;
 import com.gustler.backend.api.board.domain.RouteHeadways;
 import com.gustler.backend.api.board.domain.StopState;
 import com.gustler.backend.api.board.domain.VehicleForecast;
+import com.gustler.backend.api.favorite.FavoriteGroupNotFoundException;
 import com.gustler.backend.api.favorite.domain.Favorite;
 import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
@@ -93,9 +99,43 @@ class FavoriteOverviewServiceTest {
             .containsExactly(ItemStatus.ERROR, ItemStatus.READY);
     }
 
+    @Test
+    void 그룹을_지정하면_해당_그룹의_항목만_조회한다() {
+        UUID selectedGroupId = UUID.randomUUID();
+        Favorite selected = favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP);
+        Favorite ignored = favorite("204000058", "277102323", FavoriteDirection.DOWN);
+        repository.groups = new MemberFavoriteGroups(List.of(
+            group(selectedGroupId, "출근", selected),
+            group(UUID.randomUUID(), "퇴근", ignored)));
+        when(boards.getBoard(any())).thenReturn(new BoardOverview(board(ROUTE_ID, STOP_ID, 1), Duration.ZERO));
+
+        FavoriteOverview overview = service.get(MEMBER_ID, selectedGroupId);
+
+        assertThat(overview.groups()).singleElement()
+            .satisfies(group -> {
+                assertThat(group.id()).isEqualTo(selectedGroupId);
+                assertThat(group.favorites()).extracting(FavoriteOverview.Item::target)
+                    .containsExactly(selected.target());
+            });
+        verify(boards).getBoard(argThat(route -> route.value().equals(ROUTE_ID)));
+        verify(boards, never()).getBoard(argThat(route -> route.value().equals(ignored.target().routeId())));
+    }
+
+    @Test
+    void 소유하지_않은_그룹을_지정하면_조회하지_않는다() {
+        repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
+
+        assertThatThrownBy(() -> service.get(MEMBER_ID, UUID.randomUUID()))
+            .isInstanceOf(FavoriteGroupNotFoundException.class);
+        verifyNoInteractions(boards, arrivals);
+    }
+
     private static MemberFavoriteGroups groups(Favorite... favorites) {
-        return new MemberFavoriteGroups(List.of(new FavoriteGroup(new FavoriteGroupId(UUID.randomUUID()),
-            new FavoriteGroupName("출근"), List.of(favorites))));
+        return new MemberFavoriteGroups(List.of(group(UUID.randomUUID(), "출근", favorites)));
+    }
+
+    private static FavoriteGroup group(UUID id, String name, Favorite... favorites) {
+        return new FavoriteGroup(new FavoriteGroupId(id), new FavoriteGroupName(name), List.of(favorites));
     }
 
     private static Favorite favorite(String routeId, String stopId, FavoriteDirection direction) {
