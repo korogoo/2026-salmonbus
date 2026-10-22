@@ -11,13 +11,16 @@ public final class FavoriteGroup {
     public static final int MAX_FAVORITES = 2;
 
     private final FavoriteGroupId id;
+    private final FavoriteGroupName name;
     private final List<Favorite> favorites;
 
     public FavoriteGroup(
         FavoriteGroupId id,
+        FavoriteGroupName name,
         List<Favorite> favorites
     ) {
         this.id = Objects.requireNonNull(id, "즐겨찾기 그룹 ID는 null일 수 없습니다.");
+        this.name = Objects.requireNonNull(name, "즐겨찾기 그룹 이름은 null일 수 없습니다.");
         this.favorites = List.copyOf(Objects.requireNonNull(favorites, "즐겨찾기 목록은 null일 수 없습니다."));
         requireWithinLimit();
         requireUniqueTargets();
@@ -25,6 +28,10 @@ public final class FavoriteGroup {
 
     public FavoriteGroupId id() {
         return id;
+    }
+
+    public FavoriteGroupName name() {
+        return name;
     }
 
     public List<Favorite> favorites() {
@@ -54,7 +61,7 @@ public final class FavoriteGroup {
         if (isFull()) {
             throw new FavoriteLimitExceededException();
         }
-        return new FavoriteGroup(id, append(favorite));
+        return new FavoriteGroup(id, name, append(favorite));
     }
 
     public FavoriteGroup remove(
@@ -67,7 +74,13 @@ public final class FavoriteGroup {
         if (remaining.size() == favorites.size()) {
             return this;
         }
-        return new FavoriteGroup(id, remaining);
+        return new FavoriteGroup(id, name, remaining);
+    }
+
+    public FavoriteGroup rename(
+        FavoriteGroupName changedName
+    ) {
+        return new FavoriteGroup(id, Objects.requireNonNull(changedName, "변경할 이름은 null일 수 없습니다."), favorites);
     }
 
     private List<Favorite> append(

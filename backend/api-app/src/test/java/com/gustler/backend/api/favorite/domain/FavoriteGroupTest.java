@@ -34,4 +34,18 @@ class FavoriteGroupTest {
         assertThat(actual).isSameAs(group);
         assertThat(actual.favorites()).hasSize(1);
     }
+
+    @Test
+    void 이름을_바꿔도_그룹_ID와_즐겨찾기는_유지한다() {
+        // given
+        FavoriteGroup group = group("출근", TARGET);
+
+        // when
+        FavoriteGroup actual = group.rename(new FavoriteGroupName("평일 출근"));
+
+        // then
+        assertThat(actual.name().value()).isEqualTo("평일 출근");
+        assertThat(actual.id()).isEqualTo(group.id());
+        assertThat(actual.favorites()).isEqualTo(group.favorites());
+    }
 }

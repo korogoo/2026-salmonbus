@@ -1,0 +1,17 @@
+package com.gustler.backend.api.favorite.application;
+
+import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.UnaryOperator;
+
+/** 회원 공개 UUID를 경계로 즐겨찾기 그룹 전체를 읽고 원자적으로 변경한다. */
+public interface FavoriteGroupRepository {
+    Optional<MemberFavoriteGroups> findByMemberPublicId(UUID memberPublicId);
+
+    /** 회원 행을 잠근 뒤 최신 집합에 변경을 적용한다. 회원이 없으면 변경하지 않고 빈 값을 반환한다. */
+    Optional<MemberFavoriteGroups> update(
+        UUID memberPublicId,
+        UnaryOperator<MemberFavoriteGroups> change
+    );
+}

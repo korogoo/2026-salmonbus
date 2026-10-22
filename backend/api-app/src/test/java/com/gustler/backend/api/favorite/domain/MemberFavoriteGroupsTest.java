@@ -21,4 +21,15 @@ class MemberFavoriteGroupsTest {
         assertThatThrownBy(() -> groups.append(emptyGroup("추가")))
             .isInstanceOf(FavoriteGroupLimitExceededException.class);
     }
+
+    @Test
+    void 같은_회원의_그룹_이름은_중복될_수_없다() {
+        // given
+        FavoriteGroup first = emptyGroup("출근");
+        FavoriteGroup otherIdWithSameName = emptyGroup("퇴근").rename(new FavoriteGroupName("출근"));
+
+        // when & then
+        assertThatThrownBy(() -> new MemberFavoriteGroups(List.of(first, otherIdWithSameName)))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
 }

@@ -19,6 +19,7 @@ public final class MemberFavoriteGroups {
         this.values = List.copyOf(Objects.requireNonNull(values, "즐겨찾기 그룹 목록은 null일 수 없습니다."));
         requireWithinLimit();
         requireUniqueIds();
+        requireUniqueNames();
     }
 
     public List<FavoriteGroup> values() {
@@ -55,6 +56,15 @@ public final class MemberFavoriteGroups {
             .toList();
         if (new HashSet<>(ids).size() != ids.size()) {
             throw new IllegalArgumentException("즐겨찾기 그룹 ID는 중복될 수 없습니다.");
+        }
+    }
+
+    private void requireUniqueNames() {
+        List<FavoriteGroupName> names = values.stream()
+            .map(FavoriteGroup::name)
+            .toList();
+        if (new HashSet<>(names).size() != names.size()) {
+            throw new IllegalArgumentException("같은 회원의 즐겨찾기 그룹 이름은 중복될 수 없습니다.");
         }
     }
 }

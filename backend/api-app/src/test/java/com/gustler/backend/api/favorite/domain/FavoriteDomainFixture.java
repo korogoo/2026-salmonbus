@@ -13,14 +13,14 @@ final class FavoriteDomainFixture {
     }
 
     static FavoriteGroup emptyGroup(String key) {
-        return new FavoriteGroup(groupId(key), List.of());
+        return new FavoriteGroup(groupId(key), new FavoriteGroupName(key), List.of());
     }
 
     static FavoriteGroup group(String key, FavoriteTarget... targets) {
         List<Favorite> favorites = java.util.stream.IntStream.range(0, targets.length)
             .mapToObj(index -> new Favorite(favoriteId(key + "-" + index), targets[index]))
             .toList();
-        return new FavoriteGroup(groupId(key), favorites);
+        return new FavoriteGroup(groupId(key), new FavoriteGroupName(key), favorites);
     }
 
     static FavoriteGroupId groupId(String key) {
