@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
 import com.gustler.backend.api.favorite.domain.FavoriteDirection;
+import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +21,8 @@ class FavoriteGroupServiceTest {
     private static final UUID MEMBER_ID = UUID.randomUUID();
     private final MemoryRepository repository = new MemoryRepository();
     private final FavoriteTargetResolver resolver = mock(FavoriteTargetResolver.class);
-    private final FavoriteGroupService service = new FavoriteGroupService(repository, resolver);
+    private final DefaultFavoriteGroupService defaultGroups = new DefaultFavoriteGroupService(repository);
+    private final FavoriteGroupService service = new FavoriteGroupService(repository, resolver, defaultGroups);
 
     @Test
     void 첫_즐겨찾기와_그룹을_한번에_만든다() {
@@ -67,6 +69,14 @@ class FavoriteGroupServiceTest {
 
         @Override
         public Optional<MemberFavoriteGroups> findByMemberPublicId(UUID memberPublicId) {
+            return Optional.of(groups);
+        }
+
+        @Override
+        public Optional<MemberFavoriteGroups> ensureDefault(UUID memberPublicId, FavoriteGroup defaultGroup) {
+            if (groups.values().isEmpty()) {
+                groups = new MemberFavoriteGroups(List.of(defaultGroup));
+            }
             return Optional.of(groups);
         }
 

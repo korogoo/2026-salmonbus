@@ -88,6 +88,14 @@ class FavoriteSelectionServiceTest {
         }
 
         @Override
+        public Optional<MemberFavoriteGroups> ensureDefault(UUID memberPublicId, FavoriteGroup defaultGroup) {
+            if (groups.values().isEmpty()) {
+                groups = new MemberFavoriteGroups(List.of(defaultGroup));
+            }
+            return Optional.of(groups);
+        }
+
+        @Override
         public Optional<MemberFavoriteGroups> update(UUID memberPublicId, UnaryOperator<MemberFavoriteGroups> change) {
             groups = change.apply(groups);
             return Optional.of(groups);

@@ -12,7 +12,6 @@ import com.gustler.backend.api.board.domain.Board;
 import com.gustler.backend.api.board.domain.StopState;
 import com.gustler.backend.api.error.ApiException;
 import com.gustler.backend.api.error.ErrorCode;
-import com.gustler.backend.api.error.UnauthenticatedException;
 import com.gustler.backend.api.favorite.FavoriteGroupNotFoundException;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.BoardSlice;
 import com.gustler.backend.api.favorite.application.FavoriteOverview.Eta;
@@ -40,13 +39,13 @@ import org.springframework.stereotype.Service;
 @Service
 public class FavoriteOverviewService {
     private static final Logger log = LoggerFactory.getLogger(FavoriteOverviewService.class);
-    private final FavoriteGroupRepository repository;
+    private final DefaultFavoriteGroupService defaultGroupService;
     private final BoardQueryService boards;
     private final ArrivalQueryService arrivals;
 
-    public FavoriteOverviewService(FavoriteGroupRepository repository, BoardQueryService boards,
+    public FavoriteOverviewService(DefaultFavoriteGroupService defaultGroupService, BoardQueryService boards,
         ArrivalQueryService arrivals) {
-        this.repository = repository;
+        this.defaultGroupService = defaultGroupService;
         this.boards = boards;
         this.arrivals = arrivals;
     }
@@ -56,7 +55,7 @@ public class FavoriteOverviewService {
     }
 
     public FavoriteOverview get(UUID memberPublicId, UUID groupId) {
-        var owned = repository.findByMemberPublicId(memberPublicId).orElseThrow(UnauthenticatedException::new);
+        var owned = defaultGroupService.ensure(memberPublicId);
         Map<String, BoardLoad> loadedBoards = new HashMap<>();
         Map<String, Optional<StationArrivalsOverview>> loadedArrivals = new HashMap<>();
         List<FavoriteGroup> selectedGroups = groupId == null ? owned.values()

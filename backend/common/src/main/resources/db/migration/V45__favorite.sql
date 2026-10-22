@@ -29,3 +29,7 @@ CREATE TABLE favorite (
     CONSTRAINT ck_favorite_direction CHECK (direction IN ('UP', 'DOWN')),
     CONSTRAINT ck_favorite_position CHECK (position BETWEEN 0 AND 1)
 );
+
+INSERT INTO favorite_group (id, member_id, name, position)
+SELECT gen_random_uuid(), id, '즐겨찾기', 0
+FROM member;

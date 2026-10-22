@@ -46,9 +46,10 @@ class FavoriteOverviewServiceTest {
     private static final String ROUTE_ID = "204000057";
     private static final String STOP_ID = "277102322";
     private final MemoryRepository repository = new MemoryRepository();
+    private final DefaultFavoriteGroupService defaultGroups = new DefaultFavoriteGroupService(repository);
     private final BoardQueryService boards = mock(BoardQueryService.class);
     private final ArrivalQueryService arrivals = mock(ArrivalQueryService.class);
-    private final FavoriteOverviewService service = new FavoriteOverviewService(repository, boards, arrivals);
+    private final FavoriteOverviewService service = new FavoriteOverviewService(defaultGroups, boards, arrivals);
 
     @Test
     void 그룹과_즐겨찾기_순서대로_최대_세_대의_노선_정류장_항목을_만든다() {
@@ -166,6 +167,14 @@ class FavoriteOverviewServiceTest {
 
         @Override
         public Optional<MemberFavoriteGroups> findByMemberPublicId(UUID memberPublicId) {
+            return Optional.of(groups);
+        }
+
+        @Override
+        public Optional<MemberFavoriteGroups> ensureDefault(UUID memberPublicId, FavoriteGroup defaultGroup) {
+            if (groups.values().isEmpty()) {
+                groups = new MemberFavoriteGroups(List.of(defaultGroup));
+            }
             return Optional.of(groups);
         }
 

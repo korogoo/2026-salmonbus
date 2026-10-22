@@ -22,14 +22,17 @@ import org.springframework.stereotype.Service;
 public class FavoriteGroupService {
     private final FavoriteGroupRepository repository;
     private final FavoriteTargetResolver targetResolver;
+    private final DefaultFavoriteGroupService defaultGroupService;
 
-    public FavoriteGroupService(FavoriteGroupRepository repository, FavoriteTargetResolver targetResolver) {
+    public FavoriteGroupService(FavoriteGroupRepository repository, FavoriteTargetResolver targetResolver,
+        DefaultFavoriteGroupService defaultGroupService) {
         this.repository = repository;
         this.targetResolver = targetResolver;
+        this.defaultGroupService = defaultGroupService;
     }
 
     public MemberFavoriteGroups findAll(UUID memberPublicId) {
-        return repository.findByMemberPublicId(memberPublicId).orElseThrow(UnauthenticatedException::new);
+        return defaultGroupService.ensure(memberPublicId);
     }
 
     public FavoriteGroup create(UUID memberPublicId, String rawName, FavoriteTarget initialFavorite) {

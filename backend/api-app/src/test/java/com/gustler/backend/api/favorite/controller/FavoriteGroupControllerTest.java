@@ -66,6 +66,19 @@ class FavoriteGroupControllerTest {
     }
 
     @Test
+    void 그룹이_없으면_조회할_때_기본_그룹을_만든다() throws Exception {
+        HttpResponse<String> found = send("GET", "/api/me/favorite-groups", null, bearer);
+
+        JsonNode groups = json.readTree(found.body()).path("groups");
+        assertSoftly(softly -> {
+            softly.assertThat(found.statusCode()).isEqualTo(200);
+            softly.assertThat(groups.size()).isEqualTo(1);
+            softly.assertThat(groups.get(0).path("name").asString()).isEqualTo("즐겨찾기");
+            softly.assertThat(groups.get(0).path("favorites").isEmpty()).isTrue();
+        });
+    }
+
+    @Test
     void 세_개가_있으면_새_그룹을_409로_거절한다() throws Exception {
         send("POST", "/api/me/favorite-groups", "{\"name\":\"출근\"}", bearer);
         send("POST", "/api/me/favorite-groups", "{\"name\":\"퇴근\"}", bearer);

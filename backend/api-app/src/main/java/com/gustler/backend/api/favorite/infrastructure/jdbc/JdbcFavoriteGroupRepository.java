@@ -81,28 +81,59 @@ public class JdbcFavoriteGroupRepository implements FavoriteGroupRepository {
 
     @Override
     @Transactional
+    public Optional<MemberFavoriteGroups> ensureDefault(
+        UUID memberPublicId,
+        FavoriteGroup defaultGroup
+    ) {
+        Objects.requireNonNull(memberPublicId, "회원 공개 ID는 null일 수 없습니다.");
+        Objects.requireNonNull(defaultGroup, "기본 즐겨찾기 그룹은 null일 수 없습니다.");
+        Optional<Long> memberId = lockMember(memberPublicId);
+        if (memberId.isEmpty()) {
+            return Optional.empty();
+        }
+
+        MemberFavoriteGroups current = findByMemberId(memberId.get());
+        if (!current.values().isEmpty()) {
+            return Optional.of(current);
+        }
+        jdbcClient.sql(INSERT_GROUP)
+            .params(defaultGroup.id().value(), memberId.get(), defaultGroup.name().value(), 0)
+            .update();
+        return Optional.of(new MemberFavoriteGroups(List.of(defaultGroup)));
+    }
+
+    @Override
+    @Transactional
     public Optional<MemberFavoriteGroups> update(
         UUID memberPublicId,
         UnaryOperator<MemberFavoriteGroups> change
     ) {
         Objects.requireNonNull(memberPublicId, "회원 공개 ID는 null일 수 없습니다.");
         Objects.requireNonNull(change, "즐겨찾기 그룹 변경은 null일 수 없습니다.");
-        Optional<Long> memberId = jdbcClient.sql("SELECT id FROM member WHERE public_id = ? FOR UPDATE")
-            .param(memberPublicId)
-            .query(Long.class)
-            .optional();
+        Optional<Long> memberId = lockMember(memberPublicId);
         if (memberId.isEmpty()) {
             return Optional.empty();
         }
 
-        MemberFavoriteGroups current = groupsOf(jdbcClient.sql(FIND_FAVORITES)
-            .param(memberId.get())
-            .query(JdbcFavoriteGroupRepository::row)
-            .list());
+        MemberFavoriteGroups current = findByMemberId(memberId.get());
         MemberFavoriteGroups changed = Objects.requireNonNull(change.apply(current),
             "변경된 즐겨찾기 그룹은 null일 수 없습니다.");
         replace(memberId.get(), changed);
         return Optional.of(changed);
+    }
+
+    private Optional<Long> lockMember(UUID memberPublicId) {
+        return jdbcClient.sql("SELECT id FROM member WHERE public_id = ? FOR UPDATE")
+            .param(memberPublicId)
+            .query(Long.class)
+            .optional();
+    }
+
+    private MemberFavoriteGroups findByMemberId(long memberId) {
+        return groupsOf(jdbcClient.sql(FIND_FAVORITES)
+            .param(memberId)
+            .query(JdbcFavoriteGroupRepository::row)
+            .list());
     }
 
     private void replace(

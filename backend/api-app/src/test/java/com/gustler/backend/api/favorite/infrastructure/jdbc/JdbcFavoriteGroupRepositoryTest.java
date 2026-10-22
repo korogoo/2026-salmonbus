@@ -62,6 +62,29 @@ class JdbcFavoriteGroupRepositoryTest {
     }
 
     @Test
+    void 기본_그룹은_여러_번_요청해도_한_개만_만든다() {
+        // given
+        UUID member = insertMember("연어하나");
+        FavoriteGroup firstCandidate = emptyGroup("즐겨찾기");
+        FavoriteGroup secondCandidate = emptyGroup("다른 이름");
+
+        // when
+        MemberFavoriteGroups first = repository.ensureDefault(member, firstCandidate).orElseThrow();
+        MemberFavoriteGroups second = repository.ensureDefault(member, secondCandidate).orElseThrow();
+
+        // then
+        assertThat(first.values()).singleElement()
+            .extracting(FavoriteGroup::id, FavoriteGroup::name)
+            .containsExactly(firstCandidate.id(), firstCandidate.name());
+        assertThat(second.values()).singleElement()
+            .extracting(FavoriteGroup::id, FavoriteGroup::name)
+            .containsExactly(firstCandidate.id(), firstCandidate.name());
+        assertThat(jdbcClient.sql("SELECT count(*) FROM favorite_group WHERE member_id = "
+                + "(SELECT id FROM member WHERE public_id = ?)")
+            .param(member).query(Long.class).single()).isEqualTo(1);
+    }
+
+    @Test
     void 회원을_삭제하면_그룹과_즐겨찾기를_연쇄_삭제하고_다른_회원_데이터는_유지한다() {
         // given
         UUID deletedMember = insertMember("연어하나");
@@ -106,6 +129,10 @@ class JdbcFavoriteGroupRepositoryTest {
                     new FavoriteTarget("204000057", "27710233" + index, FavoriteDirection.DOWN))
             )
         );
+    }
+
+    private FavoriteGroup emptyGroup(String name) {
+        return new FavoriteGroup(new FavoriteGroupId(UUID.randomUUID()), new FavoriteGroupName(name), List.of());
     }
 
     private UUID insertMember(
