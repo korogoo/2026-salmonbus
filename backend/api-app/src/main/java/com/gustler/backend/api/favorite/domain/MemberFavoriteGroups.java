@@ -82,6 +82,19 @@ public final class MemberFavoriteGroups {
             .toList());
     }
 
+    public MemberFavoriteGroups reorderAll(
+        List<FavoriteGroupOrder> orders
+    ) {
+        Objects.requireNonNull(orders, "즐겨찾기 전체 순서는 null일 수 없습니다.");
+        MemberFavoriteGroups reordered = reorder(orders.stream()
+            .map(FavoriteGroupOrder::groupId)
+            .toList());
+        for (FavoriteGroupOrder order : orders) {
+            reordered = reordered.update(order.groupId(), group -> group.reorder(order.favoriteIds()));
+        }
+        return reordered;
+    }
+
     private void requireWithinLimit() {
         if (values.size() > MAX_GROUPS) {
             throw new FavoriteGroupLimitExceededException();

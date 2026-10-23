@@ -5,12 +5,14 @@ import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
 import com.gustler.backend.api.favorite.FavoriteGroupNotFoundException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupNameException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
+import com.gustler.backend.api.favorite.InvalidFavoriteOrderException;
 import com.gustler.backend.api.favorite.InvalidFavoriteRequestException;
 import com.gustler.backend.api.favorite.domain.Favorite;
 import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupId;
 import com.gustler.backend.api.favorite.domain.FavoriteGroupName;
+import com.gustler.backend.api.favorite.domain.FavoriteGroupOrder;
 import com.gustler.backend.api.favorite.domain.FavoriteId;
 import com.gustler.backend.api.favorite.domain.FavoriteTarget;
 import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
@@ -83,6 +85,32 @@ public class FavoriteGroupService {
                 throw new InvalidFavoriteGroupOrderException();
             }
         }).orElseThrow(UnauthenticatedException::new);
+    }
+
+    public void reorderAll(UUID memberPublicId, List<Order> rawOrders) {
+        if (rawOrders == null) {
+            throw new InvalidFavoriteOrderException();
+        }
+        final List<FavoriteGroupOrder> orders;
+        try {
+            orders = rawOrders.stream()
+                .map(order -> new FavoriteGroupOrder(
+                    new FavoriteGroupId(order.groupId()),
+                    order.favoriteIds().stream().map(FavoriteId::new).toList()))
+                .toList();
+        } catch (RuntimeException exception) {
+            throw new InvalidFavoriteOrderException();
+        }
+        repository.update(memberPublicId, groups -> {
+            try {
+                return groups.reorderAll(orders);
+            } catch (IllegalArgumentException exception) {
+                throw new InvalidFavoriteOrderException();
+            }
+        }).orElseThrow(UnauthenticatedException::new);
+    }
+
+    public record Order(UUID groupId, List<UUID> favoriteIds) {
     }
 
     public FavoriteTarget targetOf(String routeId, String stopId, FavoriteDirection direction) {
