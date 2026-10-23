@@ -22,6 +22,18 @@
           "mode": "multi",
           "sort": "desc"
         }
+      },
+      "fieldConfigDefaultsCustom": {
+        "drawStyle": "line",
+        "lineInterpolation": "linear",
+        "lineWidth": 2,
+        "fillOpacity": 8,
+        "gradientMode": "none",
+        "spanNulls": false,
+        "showPoints": "auto",
+        "axisPlacement": "auto",
+        "stacking": { "mode": "none", "group": "A" },
+        "thresholdsStyle": { "mode": "line" }
       }
     },
     {
@@ -41,6 +53,18 @@
           "mode": "multi",
           "sort": "desc"
         }
+      },
+      "fieldConfigDefaultsCustom": {
+        "drawStyle": "line",
+        "lineInterpolation": "linear",
+        "lineWidth": 2,
+        "fillOpacity": 8,
+        "gradientMode": "none",
+        "spanNulls": false,
+        "showPoints": "auto",
+        "axisPlacement": "auto",
+        "stacking": { "mode": "none", "group": "A" },
+        "thresholdsStyle": { "mode": "line" }
       }
     }
   ],
