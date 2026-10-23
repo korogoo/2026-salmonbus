@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-DASHBOARD = Path(__file__).with_name("grafana-application-metrics.json")
+DASHBOARD = Path(__file__).with_name("grafana-user-monitoring-panels.json")
 
 
 class ApplicationMetricsDashboardTest(unittest.TestCase):
@@ -12,9 +12,25 @@ class ApplicationMetricsDashboardTest(unittest.TestCase):
         cls.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
         cls.panels = {panel["title"]: panel for panel in cls.dashboard["panels"]}
 
+    def test_panel_set_targets_existing_operations_dashboard(self):
+        self.assertEqual("salmonbus-prod", self.dashboard["targetDashboard"]["uid"])
+        self.assertEqual(
+            "Salmonbus 운영 | 사용자 상태와 DB 원인",
+            self.dashboard["targetDashboard"]["title"],
+        )
+        self.assertNotIn("uid", self.dashboard)
+
     def test_panel_ids_are_unique(self):
         ids = [panel["id"] for panel in self.dashboard["panels"]]
         self.assertEqual(len(ids), len(set(ids)))
+
+    def test_rds_credit_panels_are_changed_to_time_series(self):
+        updates = {
+            update["matchTitle"]: update for update in self.dashboard["panelUpdates"]
+        }
+
+        self.assertEqual("timeseries", updates["EBS IOPS 크레딧 잔량"]["type"])
+        self.assertEqual("timeseries", updates["EBS 처리량 크레딧 잔량"]["type"])
 
     def test_user_monitoring_panels_use_bounded_metrics(self):
         expected = {
