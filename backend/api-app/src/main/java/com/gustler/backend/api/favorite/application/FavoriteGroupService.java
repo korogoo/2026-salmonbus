@@ -4,7 +4,6 @@ import com.gustler.backend.api.error.UnauthenticatedException;
 import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
 import com.gustler.backend.api.favorite.FavoriteGroupNotFoundException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupNameException;
-import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
 import com.gustler.backend.api.favorite.InvalidFavoriteOrderException;
 import com.gustler.backend.api.favorite.InvalidFavoriteRequestException;
 import com.gustler.backend.api.favorite.domain.Favorite;
@@ -70,19 +69,19 @@ public class FavoriteGroupService {
 
     public void reorder(UUID memberPublicId, List<UUID> rawGroupIds) {
         if (rawGroupIds == null) {
-            throw new InvalidFavoriteGroupOrderException();
+            throw new InvalidFavoriteOrderException();
         }
         List<FavoriteGroupId> groupIds;
         try {
             groupIds = rawGroupIds.stream().map(FavoriteGroupId::new).toList();
         } catch (RuntimeException exception) {
-            throw new InvalidFavoriteGroupOrderException();
+            throw new InvalidFavoriteOrderException();
         }
         repository.update(memberPublicId, groups -> {
             try {
                 return groups.reorder(groupIds);
             } catch (IllegalArgumentException exception) {
-                throw new InvalidFavoriteGroupOrderException();
+                throw new InvalidFavoriteOrderException();
             }
         }).orElseThrow(UnauthenticatedException::new);
     }

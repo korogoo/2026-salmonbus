@@ -6,7 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.gustler.backend.api.favorite.FavoriteGroupNameConflictException;
-import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
+import com.gustler.backend.api.favorite.InvalidFavoriteOrderException;
 import com.gustler.backend.api.favorite.domain.FavoriteDirection;
 import com.gustler.backend.api.favorite.domain.FavoriteGroup;
 import com.gustler.backend.api.favorite.domain.MemberFavoriteGroups;
@@ -61,7 +61,7 @@ class FavoriteGroupServiceTest {
         service.create(MEMBER_ID, "퇴근", null);
 
         assertThatThrownBy(() -> service.reorder(MEMBER_ID, List.of(first.id().value())))
-            .isInstanceOf(InvalidFavoriteGroupOrderException.class);
+            .isInstanceOf(InvalidFavoriteOrderException.class);
     }
 
     private static final class MemoryRepository implements FavoriteGroupRepository {

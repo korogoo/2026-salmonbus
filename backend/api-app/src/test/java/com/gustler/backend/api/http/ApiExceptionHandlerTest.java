@@ -21,7 +21,6 @@ import com.gustler.backend.api.favorite.FavoriteLimitExceededException;
 import com.gustler.backend.api.favorite.FavoriteTargetAmbiguousException;
 import com.gustler.backend.api.favorite.FavoriteTargetUnavailableException;
 import com.gustler.backend.api.favorite.InvalidFavoriteGroupNameException;
-import com.gustler.backend.api.favorite.InvalidFavoriteGroupOrderException;
 import com.gustler.backend.api.favorite.InvalidFavoriteOrderException;
 import com.gustler.backend.api.favorite.LastFavoriteGroupException;
 import com.gustler.backend.api.route.InvalidRouteIdException;
@@ -69,7 +68,6 @@ class ApiExceptionHandlerTest {
             new FavoriteGroupNameConflictException(),
             new FavoriteGroupNotFoundException(),
             new LastFavoriteGroupException(),
-            new InvalidFavoriteGroupOrderException(),
             new InvalidFavoriteOrderException(),
             new FavoriteTargetAmbiguousException(),
             new FavoriteTargetUnavailableException()
