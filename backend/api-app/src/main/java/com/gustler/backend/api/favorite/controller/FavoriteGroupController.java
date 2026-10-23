@@ -49,7 +49,7 @@ public class FavoriteGroupController {
 
     @GetMapping
     @Operation(operationId = "getMyFavoriteGroups", summary = "내 즐겨찾기 그룹 조회",
-        description = "그룹과 각 그룹의 노선 정류장 항목을 저장된 순서대로 반환합니다.")
+        description = "그룹과 각 그룹의 노선 정류장 항목을 저장된 순서대로 반환합니다. 첫 번째 그룹이 대표 그룹입니다.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "즐겨찾기 그룹 목록",
             headers = @Header(name = "Cache-Control", description = "회원별 응답이므로 no-store",
