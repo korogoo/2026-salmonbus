@@ -103,7 +103,7 @@ class KakaoLoginFlowTest {
             softly.assertThat(memberCount()).isEqualTo(1);
             softly.assertThat(identityCount()).isEqualTo(1);
             softly.assertThat(favoriteGroupCount()).isEqualTo(1);
-            softly.assertThat(favoriteGroupName()).isEqualTo("즐겨찾기");
+            softly.assertThat(favoriteGroupName()).isEqualTo("출퇴근");
         });
     }
 
@@ -162,7 +162,7 @@ class KakaoLoginFlowTest {
     }
 
     @Test
-    void 다시_로그인하면_같은_회원이고_닉네임을_바꾸지_않는다() throws Exception {
+    void 다시_로그인하면_같은_회원이고_닉네임과_기본_그룹을_바꾸지_않는다() throws Exception {
         // given
         String firstId = signIn();
         String firstNickname = nickname();
@@ -175,6 +175,8 @@ class KakaoLoginFlowTest {
             softly.assertThat(secondId).isEqualTo(firstId);
             softly.assertThat(memberCount()).isEqualTo(1);
             softly.assertThat(nickname()).isEqualTo(firstNickname);
+            softly.assertThat(favoriteGroupCount()).isEqualTo(1);
+            softly.assertThat(favoriteGroupName()).isEqualTo("출퇴근");
         });
     }
 
