@@ -133,7 +133,7 @@ public class FavoriteGroupController {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "내 즐겨찾기 그룹을 찾을 수 없음",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
-        @ApiResponse(responseCode = "409", description = "마지막 남은 즐겨찾기 그룹은 삭제할 수 없음",
+        @ApiResponse(responseCode = "409", description = "첫 번째 순서인 대표 즐겨찾기 그룹은 삭제할 수 없음",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     public ResponseEntity<Void> delete(

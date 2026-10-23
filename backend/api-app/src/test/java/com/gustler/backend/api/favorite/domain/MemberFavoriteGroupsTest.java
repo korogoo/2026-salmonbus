@@ -11,21 +11,25 @@ import org.junit.jupiter.api.Test;
 
 class MemberFavoriteGroupsTest {
     @Test
-    void 마지막_즐겨찾기_그룹은_삭제하지_않는다() {
-        FavoriteGroup only = emptyGroup("즐겨찾기");
-        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(only));
-
-        assertThatThrownBy(() -> groups.remove(only.id()))
-            .isInstanceOf(LastFavoriteGroupException.class);
-    }
-
-    @Test
-    void 다른_그룹이_남으면_즐겨찾기_그룹을_삭제한다() {
+    void 첫_번째_즐겨찾기_그룹은_대표이므로_삭제하지_않는다() {
         FavoriteGroup first = emptyGroup("출근");
         FavoriteGroup second = emptyGroup("퇴근");
         MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
 
-        assertThat(groups.remove(first.id()).values()).containsExactly(second);
+        assertThatThrownBy(() -> groups.remove(first.id()))
+            .isInstanceOf(LastFavoriteGroupException.class);
+    }
+
+    @Test
+    void 순서를_바꾸면_새로운_첫_번째_그룹이_대표가_된다() {
+        FavoriteGroup first = emptyGroup("출근");
+        FavoriteGroup second = emptyGroup("퇴근");
+        MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
+        MemberFavoriteGroups reordered = groups.reorder(List.of(second.id(), first.id()));
+
+        assertThatThrownBy(() -> reordered.remove(second.id()))
+            .isInstanceOf(LastFavoriteGroupException.class);
+        assertThat(reordered.remove(first.id()).values()).containsExactly(second);
     }
 
     @Test

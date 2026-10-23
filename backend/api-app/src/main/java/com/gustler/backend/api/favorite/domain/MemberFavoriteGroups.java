@@ -61,7 +61,7 @@ public final class MemberFavoriteGroups {
         FavoriteGroupId id
     ) {
         Objects.requireNonNull(id, "즐겨찾기 그룹 ID는 null일 수 없습니다.");
-        if (values.size() == 1 && values.getFirst().id().equals(id)) {
+        if (!values.isEmpty() && values.getFirst().id().equals(id)) {
             throw new LastFavoriteGroupException();
         }
         return new MemberFavoriteGroups(values.stream()
