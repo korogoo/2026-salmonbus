@@ -41,8 +41,8 @@ public class FavoriteGroupService {
         if (initialFavorite != null) {
             targetResolver.requireAvailable(initialFavorite);
         }
-        FavoriteGroup created = new FavoriteGroup(new FavoriteGroupId(UUID.randomUUID()), name,
-            initialFavorite == null ? List.of() : List.of(new Favorite(new FavoriteId(UUID.randomUUID()), initialFavorite)));
+        List<Favorite> favorites = initialFavorites(initialFavorite);
+        FavoriteGroup created = new FavoriteGroup(new FavoriteGroupId(UUID.randomUUID()), name, favorites);
         return repository.update(memberPublicId, groups -> {
             requireUniqueName(groups, name, null);
             return groups.append(created);
@@ -90,7 +90,7 @@ public class FavoriteGroupService {
         if (rawOrders == null) {
             throw new InvalidFavoriteOrderException();
         }
-        final List<FavoriteGroupOrder> orders;
+        List<FavoriteGroupOrder> orders;
         try {
             orders = rawOrders.stream()
                 .map(order -> new FavoriteGroupOrder(
@@ -110,6 +110,11 @@ public class FavoriteGroupService {
     }
 
     public record Order(UUID groupId, List<UUID> favoriteIds) {
+        public Order {
+            if (favoriteIds != null) {
+                favoriteIds = List.copyOf(favoriteIds);
+            }
+        }
     }
 
     public FavoriteTarget targetOf(String routeId, String stopId, FavoriteDirection direction) {
@@ -128,6 +133,13 @@ public class FavoriteGroupService {
         }
     }
 
+    private static List<Favorite> initialFavorites(FavoriteTarget initialFavorite) {
+        if (initialFavorite == null) {
+            return List.of();
+        }
+        return List.of(new Favorite(new FavoriteId(UUID.randomUUID()), initialFavorite));
+    }
+
     private static void requireGroup(MemberFavoriteGroups groups, FavoriteGroupId groupId) {
         if (groups.find(groupId).isEmpty()) {
             throw new FavoriteGroupNotFoundException();
@@ -135,7 +147,7 @@ public class FavoriteGroupService {
     }
 
     private static void requireUniqueName(MemberFavoriteGroups groups, FavoriteGroupName name, FavoriteGroupId except) {
-        boolean duplicate = groups.values().stream()
+        final boolean duplicate = groups.values().stream()
             .anyMatch(group -> group.name().equals(name) && !group.id().equals(except));
         if (duplicate) {
             throw new FavoriteGroupNameConflictException();

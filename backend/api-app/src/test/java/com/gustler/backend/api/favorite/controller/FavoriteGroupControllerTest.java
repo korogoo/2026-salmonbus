@@ -27,8 +27,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -193,9 +193,9 @@ class FavoriteGroupControllerTest {
         if (body != null) {
             request.header("Content-Type", "application/json")
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
-        } else {
-            request.method(method, HttpRequest.BodyPublishers.noBody());
+            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
         }
+        request.method(method, HttpRequest.BodyPublishers.noBody());
         return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 }

@@ -10,6 +10,10 @@ public record FavoriteGroupOrder(
 ) {
     public FavoriteGroupOrder {
         Objects.requireNonNull(groupId, "즐겨찾기 그룹 ID는 null일 수 없습니다.");
-        favoriteIds = List.copyOf(Objects.requireNonNull(favoriteIds, "즐겨찾기 순서는 null일 수 없습니다."));
+        List<FavoriteId> requiredFavoriteIds = Objects.requireNonNull(
+            favoriteIds,
+            "즐겨찾기 순서는 null일 수 없습니다."
+        );
+        favoriteIds = List.copyOf(requiredFavoriteIds);
     }
 }

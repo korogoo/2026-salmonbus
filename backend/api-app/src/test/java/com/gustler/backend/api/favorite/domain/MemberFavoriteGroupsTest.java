@@ -1,11 +1,11 @@
 package com.gustler.backend.api.favorite.domain;
 
 import static com.gustler.backend.api.favorite.domain.FavoriteDomainFixture.emptyGroup;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.gustler.backend.api.favorite.FavoriteGroupLimitExceededException;
-import com.gustler.backend.api.favorite.LastFavoriteGroupException;
+import com.gustler.backend.api.favorite.RepresentativeFavoriteGroupDeletionException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +17,7 @@ class MemberFavoriteGroupsTest {
         MemberFavoriteGroups groups = new MemberFavoriteGroups(List.of(first, second));
 
         assertThatThrownBy(() -> groups.remove(first.id()))
-            .isInstanceOf(LastFavoriteGroupException.class);
+            .isInstanceOf(RepresentativeFavoriteGroupDeletionException.class);
     }
 
     @Test
@@ -28,7 +28,7 @@ class MemberFavoriteGroupsTest {
         MemberFavoriteGroups reordered = groups.reorder(List.of(second.id(), first.id()));
 
         assertThatThrownBy(() -> reordered.remove(second.id()))
-            .isInstanceOf(LastFavoriteGroupException.class);
+            .isInstanceOf(RepresentativeFavoriteGroupDeletionException.class);
         assertThat(reordered.remove(first.id()).values()).containsExactly(second);
     }
 
@@ -41,7 +41,6 @@ class MemberFavoriteGroupsTest {
             emptyGroup("주말")
         ));
 
-        // when & then
         assertThatThrownBy(() -> groups.append(emptyGroup("추가")))
             .isInstanceOf(FavoriteGroupLimitExceededException.class);
     }
@@ -52,7 +51,6 @@ class MemberFavoriteGroupsTest {
         FavoriteGroup first = emptyGroup("출근");
         FavoriteGroup otherIdWithSameName = emptyGroup("퇴근").rename(new FavoriteGroupName("출근"));
 
-        // when & then
         assertThatThrownBy(() -> new MemberFavoriteGroups(List.of(first, otherIdWithSameName)))
             .isInstanceOf(IllegalArgumentException.class);
     }
