@@ -1,0 +1,55 @@
+import json
+import unittest
+from pathlib import Path
+
+
+DASHBOARD = Path(__file__).with_name("grafana-application-metrics.json")
+
+
+class ApplicationMetricsDashboardTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dashboard = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+        cls.panels = {panel["title"]: panel for panel in cls.dashboard["panels"]}
+
+    def test_panel_ids_are_unique(self):
+        ids = [panel["id"] for panel in self.dashboard["panels"]]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_user_monitoring_panels_use_bounded_metrics(self):
+        expected = {
+            "현재 회원 수": "salmonbus_users_current",
+            "회원 수 표본 경과 시간": "salmonbus_users_snapshot_timestamp",
+            "가입 성공, 최근 24시간": "salmonbus_user_registration_total",
+            "가입 실패, 최근 24시간": "salmonbus_user_registration_total",
+            "가입 결과": "salmonbus_user_registration_total",
+            "로그인 결과": "salmonbus_user_login_total",
+        }
+
+        for title, metric in expected.items():
+            expressions = [target["expr"] for target in self.panels[title]["targets"]]
+            self.assertTrue(any(metric in expression for expression in expressions), title)
+
+    def test_http_flow_panels_use_route_templates(self):
+        favorite = self.panels["즐겨찾기 API 요청과 오류"]["targets"][0]["expr"]
+        core = self.panels["핵심 board 및 watch API 오류"]["targets"][0]["expr"]
+
+        self.assertIn('uri=~"/api/me/favorite.*"', favorite)
+        self.assertIn('/api/v1/routes/\\{routeId\\}/(board|watch)', core)
+        self.assertIn('status=~"4..|5.."', core)
+
+    def test_prometheus_queries_do_not_use_identifier_labels(self):
+        expressions = [
+            target["expr"]
+            for panel in self.dashboard["panels"]
+            for target in panel.get("targets", [])
+        ]
+        forbidden = ("user_id", "member_id", "email", "token", "group_name", "client_ip")
+
+        for expression in expressions:
+            for label in forbidden:
+                self.assertNotIn(label, expression)
+
+
+if __name__ == "__main__":
+    unittest.main()
