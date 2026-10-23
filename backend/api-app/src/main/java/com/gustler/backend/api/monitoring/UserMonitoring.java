@@ -3,6 +3,7 @@ package com.gustler.backend.api.monitoring;
 import com.gustler.backend.member.api.LoginProvider;
 import com.gustler.backend.member.api.MemberRegistrationEvents;
 import com.gustler.backend.member.api.MemberStatistics;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -35,19 +36,18 @@ public class UserMonitoring implements MemberRegistrationEvents {
         Gauge.builder("salmonbus.users.snapshot.timestamp", snapshot, value -> value.updatedAt)
             .description("Unix timestamp of the last successful current-member snapshot")
             .register(meters);
+        registerCounters();
     }
 
     @Override
     public void succeeded(LoginProvider provider) {
-        meters.counter("salmonbus.user.registration", "provider", tag(provider), "result", "success")
-            .increment();
+        registrationCounter(provider, "success").increment();
     }
 
     @Override
     public void failed(LoginProvider provider, Failure failure) {
         String result = failure.name().toLowerCase(Locale.ROOT);
-        meters.counter("salmonbus.user.registration", "provider", tag(provider), "result", result)
-            .increment();
+        registrationCounter(provider, result).increment();
         LOGGER.warn("event=user_registration status=FAILED provider={} reason={}", tag(provider), result);
     }
 
@@ -56,11 +56,7 @@ public class UserMonitoring implements MemberRegistrationEvents {
     }
 
     public void login(Optional<LoginProvider> provider, LoginResult result, MemberKind member) {
-        meters.counter("salmonbus.user.login",
-            "provider", provider.map(UserMonitoring::tag).orElse("unknown"),
-            "result", result.name().toLowerCase(Locale.ROOT),
-            "member", member.name().toLowerCase(Locale.ROOT))
-            .increment();
+        loginCounter(provider.map(UserMonitoring::tag).orElse("unknown"), result, member).increment();
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -80,6 +76,38 @@ public class UserMonitoring implements MemberRegistrationEvents {
 
     private static String tag(LoginProvider provider) {
         return provider.name().toLowerCase(Locale.ROOT);
+    }
+
+    private void registerCounters() {
+        for (LoginProvider provider : LoginProvider.values()) {
+            registrationCounter(provider, "success");
+            for (Failure failure : Failure.values()) {
+                registrationCounter(provider, failure.name().toLowerCase(Locale.ROOT));
+            }
+            registerLoginCounters(tag(provider));
+        }
+        registerLoginCounters("unknown");
+    }
+
+    private void registerLoginCounters(String provider) {
+        for (LoginResult result : LoginResult.values()) {
+            for (MemberKind member : MemberKind.values()) {
+                loginCounter(provider, result, member);
+            }
+        }
+    }
+
+    private Counter registrationCounter(LoginProvider provider, String result) {
+        return meters.counter("salmonbus.user.registration",
+            "provider", tag(provider),
+            "result", result);
+    }
+
+    private Counter loginCounter(String provider, LoginResult result, MemberKind member) {
+        return meters.counter("salmonbus.user.login",
+            "provider", provider,
+            "result", result.name().toLowerCase(Locale.ROOT),
+            "member", member.name().toLowerCase(Locale.ROOT));
     }
 
     public enum LoginResult {

@@ -11,6 +11,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -23,6 +24,22 @@ class UserMonitoringTest {
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final MutableStatistics statistics = new MutableStatistics();
     private final UserMonitoring monitoring = new UserMonitoring(meters, statistics, CLOCK);
+
+    @Test
+    void 가능한_가입과_로그인_counter_조합을_0으로_미리_등록한다() {
+        for (LoginProvider provider : LoginProvider.values()) {
+            String providerTag = provider.name().toLowerCase(Locale.ROOT);
+            assertThat(meters.get("salmonbus.user.registration")
+                .tags("provider", providerTag, "result", "success").counter().count()).isZero();
+            for (Failure failure : Failure.values()) {
+                String resultTag = failure.name().toLowerCase(Locale.ROOT);
+                assertThat(meters.get("salmonbus.user.registration")
+                    .tags("provider", providerTag, "result", resultTag).counter().count()).isZero();
+            }
+            assertLoginCountersStartAtZero(providerTag);
+        }
+        assertLoginCountersStartAtZero("unknown");
+    }
 
     @Test
     void 정해진_값만_가입과_로그인_metric_tag로_등록한다() {
@@ -86,6 +103,21 @@ class UserMonitoringTest {
                 throw failure;
             }
             return currentMembers;
+        }
+    }
+
+    private void assertLoginCountersStartAtZero(String provider) {
+        for (LoginResult result : LoginResult.values()) {
+            for (MemberKind member : MemberKind.values()) {
+                assertThat(meters.get("salmonbus.user.login")
+                    .tags(
+                        "provider", provider,
+                        "result", result.name().toLowerCase(Locale.ROOT),
+                        "member", member.name().toLowerCase(Locale.ROOT)
+                    )
+                    .counter()
+                    .count()).isZero();
+            }
         }
     }
 }

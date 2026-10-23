@@ -46,12 +46,25 @@ class ApplicationMetricsDashboardTest(unittest.TestCase):
             expressions = [target["expr"] for target in self.panels[title]["targets"]]
             self.assertTrue(any(metric in expression for expression in expressions), title)
 
+    def test_member_snapshot_panels_drop_uninitialized_samples(self):
+        current = self.panels["현재 회원 수"]["targets"][0]["expr"]
+        updated_at = self.panels["회원 수 표본 경과 시간"]["targets"][0]["expr"]
+
+        self.assertIn('salmonbus_users_current{job="salmonbus/api"} >= 0', current)
+        self.assertIn('salmonbus_users_snapshot_timestamp{job="salmonbus/api"} > 0', updated_at)
+
+    def test_counter_trend_legends_do_not_sum_overlapping_windows(self):
+        for title in ("가입 결과", "로그인 결과"):
+            calculations = self.panels[title]["options"]["legend"]["calcs"]
+            self.assertEqual([], calculations, title)
+
     def test_http_flow_panels_use_route_templates(self):
         favorite = self.panels["즐겨찾기 API 요청과 오류"]["targets"][0]["expr"]
         core = self.panels["핵심 board 및 watch API 오류"]["targets"][0]["expr"]
 
         self.assertIn('uri=~"/api/me/favorite.*"', favorite)
-        self.assertIn('/api/v1/routes/\\{routeId\\}/(board|watch)', core)
+        self.assertIn('/api/v1/routes/{routeId}/(board|watch)', core)
+        self.assertNotIn(r"\{routeId\}", core)
         self.assertIn('status=~"4..|5.."', core)
 
     def test_prometheus_queries_do_not_use_identifier_labels(self):

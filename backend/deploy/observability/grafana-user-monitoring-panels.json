@@ -2,7 +2,7 @@
   "targetDashboard": {
     "uid": "salmonbus-prod",
     "title": "Salmonbus 운영 | 사용자 상태와 DB 원인",
-    "observedVersion": 53
+    "observedVersion": 54
   },
   "panelUpdates": [
     {
@@ -105,7 +105,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(salmonbus_users_current{job=\"salmonbus/api\"})",
+          "expr": "max(salmonbus_users_current{job=\"salmonbus/api\"} >= 0)",
           "legendFormat": "회원",
           "range": false,
           "instant": true
@@ -154,7 +154,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "time() - max(salmonbus_users_snapshot_timestamp{job=\"salmonbus/api\"})",
+          "expr": "time() - max(salmonbus_users_snapshot_timestamp{job=\"salmonbus/api\"} > 0)",
           "legendFormat": "경과",
           "range": false,
           "instant": true
@@ -331,9 +331,7 @@
         "legend": {
           "displayMode": "table",
           "placement": "bottom",
-          "calcs": [
-            "sum"
-          ]
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -381,9 +379,7 @@
         "legend": {
           "displayMode": "table",
           "placement": "bottom",
-          "calcs": [
-            "sum"
-          ]
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -465,7 +461,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by(uri,status)(rate(http_server_requests_seconds_count{job=\"salmonbus/api\",uri=~\"/api/v1/routes/\\{routeId\\}/(board|watch)\",status=~\"4..|5..\"}[5m]))",
+          "expr": "sum by(uri,status)(rate(http_server_requests_seconds_count{job=\"salmonbus/api\",uri=~\"/api/v1/routes/{routeId}/(board|watch)\",status=~\"4..|5..\"}[5m]))",
           "legendFormat": "{{uri}} / {{status}}",
           "range": true,
           "instant": false
