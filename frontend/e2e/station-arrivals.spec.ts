@@ -53,9 +53,9 @@ test("펼친 목록은 watch 순서·거리·좌석을 유지하고 같은 차�
   expect(api.requests.arrivals).toBe(0);
   await targetStop(page, "UP").click();
   await expect(targetRow(page, "UP").getByRole("listitem")).toHaveText([
-    /3정류장 전\s*2분 남음\s*도착 시 5석 예상해요/,
-    /7정류장 전\s*4분 남음\s*도착 시 2석 예상해요/,
-    /10정류장 전\s*시간 정보 없음\s*도착 시 3석 예상해요/,
+    /2분 남음\s*3정류장 전\s*도착 시 5석 예상해요/,
+    /4분 남음\s*7정류장 전\s*도착 시 2석 예상해요/,
+    /시간 정보 없음\s*10정류장 전\s*도착 시 3석 예상해요/,
   ]);
   expect(api.arrivalRequests).toHaveLength(1);
   expect(api.arrivalRequests[0]!.pathname).toBe(arrivalsPath);
@@ -74,8 +74,8 @@ test("ETA에만 있는 차량과 ID가 없는 차량의 시간은 watch 차량�
   await openBoard(page);
   await targetStop(page, "UP").click();
   await expect(targetRow(page, "UP").getByRole("listitem")).toHaveText([
-    /3정류장 전\s*시간 정보 없음\s*도착 시 5석 예상해요/,
-    /7정류장 전\s*시간 정보 없음\s*도착 시 2석 예상해요/,
+    /시간 정보 없음\s*3정류장 전\s*도착 시 5석 예상해요/,
+    /시간 정보 없음\s*7정류장 전\s*도착 시 2석 예상해요/,
   ]);
 });
 
@@ -85,8 +85,8 @@ test("선택한 방문과 다른 ETA는 표시하지 않는다", async ({ page, 
   await openBoard(page);
   await targetStop(page, "UP").click();
   await expect(targetRow(page, "UP").getByRole("listitem")).toHaveText([
-    /3정류장 전\s*시간 정보 없음\s*도착 시 5석 예상해요/,
-    /7정류장 전\s*시간 정보 없음\s*도착 시 2석 예상해요/,
+    /시간 정보 없음\s*3정류장 전\s*도착 시 5석 예상해요/,
+    /시간 정보 없음\s*7정류장 전\s*도착 시 2석 예상해요/,
   ]);
 });
 
@@ -129,8 +129,8 @@ test("최초 수집 중에도 좌석을 유지하고 권장 시각 뒤 시간만
   await (await arrivalResponse).finished();
   await page.clock.runFor(1);
   await expect(targetRow(page, "UP").getByRole("listitem")).toHaveText([
-    /3정류장 전\s*시간 확인 중\s*도착 시 5석 예상해요/,
-    /7정류장 전\s*시간 확인 중\s*도착 시 2석 예상해요/,
+    /시간 확인 중\s*3정류장 전\s*도착 시 5석 예상해요/,
+    /시간 확인 중\s*7정류장 전\s*도착 시 2석 예상해요/,
   ]);
   api.data.arrivals = readyArrivals();
   await page.clock.fastForward(1_900);
@@ -165,7 +165,7 @@ test("선택 정류장과 방향을 바꾸면 이전 방문의 목록을 유지�
   expect(api.arrivalRequests[2]!.pathname).toBe("/api/v2/stations/20011/arrivals");
   expect(api.arrivalRequests[2]!.searchParams.get("stopSequence")).toBe("23");
   await expect(targetRow(page, "DOWN").getByRole("listitem")).toHaveText([
-    /2정류장 전\s*2분 남음\s*도착 시 8석 예상해요/,
+    /2분 남음\s*2정류장 전\s*도착 시 8석 예상해요/,
   ]);
 });
 
@@ -180,12 +180,12 @@ test("ETA 시간이 지나도 도착으로 추정하지 않고 snapshot 만료 �
   const vehicle = row.getByRole("listitem").nth(0);
   await expect(vehicle.getByText("1분 이내", { exact: true })).toBeVisible();
   await page.clock.fastForward(2_000);
-  await expect(vehicle).toHaveText(/3정류장 전\s*시간 정보 없음\s*도착 시 5석 예상해요/);
+  await expect(vehicle).toHaveText(/시간 정보 없음\s*3정류장 전\s*도착 시 5석 예상해요/);
   await expect(row.getByText("정류장 도착", { exact: true })).toHaveCount(0);
   await page.clock.fastForward(2_000);
   await expect(row.getByRole("listitem")).toHaveText([
-    /3정류장 전\s*시간 재확인 중\s*도착 시 5석 예상해요/,
-    /7정류장 전\s*시간 재확인 중\s*도착 시 2석 예상해요/,
+    /시간 재확인 중\s*3정류장 전\s*도착 시 5석 예상해요/,
+    /시간 재확인 중\s*7정류장 전\s*도착 시 2석 예상해요/,
   ]);
 });
 
@@ -203,8 +203,8 @@ for (const state of ["empty", "network-error"] as const) {
     await openBoard(page);
     await targetStop(page, "UP").click();
     await expect(targetRow(page, "UP").getByRole("listitem")).toHaveText([
-      /3정류장 전\s*시간 정보 없음\s*도착 시 5석 예상해요/,
-      /7정류장 전\s*시간 정보 없음\s*도착 시 2석 예상해요/,
+      /시간 정보 없음\s*3정류장 전\s*도착 시 5석 예상해요/,
+      /시간 정보 없음\s*7정류장 전\s*도착 시 2석 예상해요/,
     ]);
     expect(api.requests.arrivals).toBe(1);
     await expect(page.getByText(targetStopNames.UP, { exact: true })).toBeVisible();
