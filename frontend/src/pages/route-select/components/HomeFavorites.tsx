@@ -231,12 +231,10 @@ function FavoriteCard({ favorite, savedDirection, elapsed, onRetry }: FavoriteCa
                 return (
                   <li className={homeStyles.arrival} key={vehicle.vehicleId ?? index}>
                     <span className={homeStyles.timing}>
-                      {!arrived && (
-                        <span className={time.kind === "known" ? homeStyles.eta : homeStyles.unavailableEta}>
-                          {remainingTimeLabelOf(time)}
-                        </span>
+                      {!arrived && time.kind === "known" && (
+                        <span className={homeStyles.eta}>{remainingTimeLabelOf(time)}</span>
                       )}
-                      <span className={arrived ? homeStyles.eta : homeStyles.distance}>
+                      <span className={arrived || time.kind === "unknown" ? homeStyles.eta : homeStyles.distance}>
                         {stopsAwayLabelOf(vehicle.remainingStops)}
                       </span>
                     </span>

@@ -189,7 +189,7 @@ test("화면을 켜 둔 채 연결이 돌아오면 다음 폴링을 기다리지
   await refilled;
 
   // ETA가 복구되지 않아도 watch의 거리와 좌석은 먼저 갱신한다.
-  await expect(arrivals).toHaveText([/시간 재확인 중\s*2정류장 전\s*도착 시 9석 예상해요/]);
+  await expect(arrivals).toHaveText([/2정류장 전\s*도착 시 9석 예상해요/]);
   api.mode.arrivals = "success";
   await targetStop(page, "UP").click();
   await targetStop(page, "UP").click();

@@ -11,7 +11,6 @@ const arrival: ArrivalView = {
   level: "high",
   seatEstimate: { kind: "count", seats: 15 },
 };
-const unavailable = { available: false, label: "시간 정보 없음" };
 
 function detailsWith(seconds = 120) {
   const vehicle: ArrivalVehicle = {
@@ -87,15 +86,12 @@ describe("arrivalTimingFor", () => {
     const details = detailsWith();
     const route = details.resource.latestSuccess.body.routes[0]!;
     route.arrivals.unshift({ ...route.arrivals[0]!, vehicleId: "another-bus", ordinal: 2, remainingStops: 9 });
-    expect(arrivalTimingFor(arrival, details)).toEqual({ available: true, label: "2분 남음" });
+    expect(arrivalTimingFor(arrival, details)).toBe("2분 남음");
     expect(arrival.seatEstimate).toEqual({ kind: "count", seats: 15 });
   });
 
   it.each([0, -1, 59, 60, 61, 120, 121])("예상 시각까지 %i초 남은 경계를 처리한다", (seconds) => {
-    const expected =
-      seconds <= 0
-        ? unavailable
-        : { available: true, label: seconds <= 60 ? "1분 이내" : `${Math.ceil(seconds / 60)}분 남음` };
+    const expected = seconds <= 0 ? null : seconds <= 60 ? "1분 이내" : `${Math.ceil(seconds / 60)}분 남음`;
     expect(arrivalTimingFor(arrival, detailsWith(seconds))).toEqual(expected);
   });
 
@@ -107,17 +103,17 @@ describe("arrivalTimingFor", () => {
         ...details.selection,
         [field]: field === "stopSequence" ? 23 : "different",
       } as StationArrivalDetails["selection"];
-      expect(arrivalTimingFor(arrival, { ...details, selection })).toEqual(unavailable);
+      expect(arrivalTimingFor(arrival, { ...details, selection })).toBeNull();
     },
   );
 
   it("차량 ID가 없거나 다른 차량이거나 중복되면 순서나 거리로 추측하지 않는다", () => {
     const details = detailsWith();
-    expect(arrivalTimingFor({ ...arrival, vehicleId: null }, details)).toEqual(unavailable);
-    expect(arrivalTimingFor({ ...arrival, vehicleId: "missing" }, details)).toEqual(unavailable);
+    expect(arrivalTimingFor({ ...arrival, vehicleId: null }, details)).toBeNull();
+    expect(arrivalTimingFor({ ...arrival, vehicleId: "missing" }, details)).toBeNull();
     const vehicles = details.resource.latestSuccess.body.routes[0]!.arrivals;
     vehicles.push({ ...vehicles[0]!, ordinal: 2 });
-    expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
   });
 
   it.each([2, 4, 0, null])(
@@ -125,7 +121,7 @@ describe("arrivalTimingFor", () => {
     (remainingStops) => {
       const details = detailsWith();
       details.resource.latestSuccess.body.routes[0]!.arrivals[0]!.remainingStops = remainingStops;
-      expect(arrivalTimingFor(arrival, details)).toEqual({ available: true, label: "2분 남음" });
+      expect(arrivalTimingFor(arrival, details)).toBe("2분 남음");
       expect(arrival.stopsAway).toBe(3);
     },
   );
@@ -139,16 +135,16 @@ describe("arrivalTimingFor", () => {
   it("서버 시각의 스냅샷 만료 즉시 시간을 사용하지 않는다", () => {
     const details = detailsWith();
     details.resource.latestSuccess.clock.now = () => now + 60000;
-    expect(arrivalTimingFor(arrival, details)).toEqual({ available: false, label: "시간 재확인 중" });
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
     details.resource.latestSuccess.clock.now = () => now;
     details.resource.latestSuccess.body.reason = "STALE";
-    expect(arrivalTimingFor(arrival, details)).toEqual({ available: false, label: "시간 재확인 중" });
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
   });
 
-  it("최초 조회와 수집 중은 확인 중으로 표시한다", () => {
+  it("최초 조회와 수집 중에는 시간 문구를 표시하지 않는다", () => {
     const details = detailsWith();
-    expect(arrivalTimingFor(arrival, { ...details, resource: { status: "idle" } })?.label).toBe("시간 확인 중");
-    expect(arrivalTimingFor(arrival, { ...details, resource: { status: "pending" } })?.label).toBe("시간 확인 중");
+    expect(arrivalTimingFor(arrival, { ...details, resource: { status: "idle" } })).toBeNull();
+    expect(arrivalTimingFor(arrival, { ...details, resource: { status: "pending" } })).toBeNull();
     const collecting: StationArrivalDetails = {
       ...details,
       resource: {
@@ -170,7 +166,7 @@ describe("arrivalTimingFor", () => {
         },
       },
     };
-    expect(arrivalTimingFor(arrival, collecting)?.label).toBe("시간 확인 중");
+    expect(arrivalTimingFor(arrival, collecting)).toBeNull();
   });
 
   it("빈 ETA나 제공 불가 응답은 시간만 숨기고 watch 거리와 좌석을 변경하지 않는다", () => {
@@ -178,13 +174,13 @@ describe("arrivalTimingFor", () => {
     const body = details.resource.latestSuccess.body;
     for (const status of ["NO_PREDICTION", "UNAVAILABLE"] as const) {
       body.status = status;
-      expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+      expect(arrivalTimingFor(arrival, details)).toBeNull();
       body.status = "READY";
       body.routes[0]!.status = status;
-      expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+      expect(arrivalTimingFor(arrival, details)).toBeNull();
     }
     body.routes = [];
-    expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
     expect(arrival).toMatchObject({ stopsAway: 3, seatEstimate: { kind: "count", seats: 15 } });
   });
 
@@ -196,12 +192,12 @@ describe("arrivalTimingFor", () => {
         ...details,
         resource: { ...details.resource, latestSuccess: { ...latest, clock: null } },
       }),
-    ).toEqual(unavailable);
+    ).toBeNull();
     latest.body.routes[0]!.targetVisit.matchStatus = "UNVERIFIED";
-    expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
     latest.body.routes[0]!.targetVisit.matchStatus = "MATCHED";
     latest.body.snapshot = null;
-    expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+    expect(arrivalTimingFor(arrival, details)).toBeNull();
   });
 
   it("제공 불가이거나 잘못된 ETA 시각은 도착으로 추정하지 않는다", () => {
@@ -212,7 +208,7 @@ describe("arrivalTimingFor", () => {
     ]) {
       const details = detailsWith();
       Object.assign(details.resource.latestSuccess.body.routes[0]!.arrivals[0]!.eta, eta);
-      expect(arrivalTimingFor(arrival, details)).toEqual(unavailable);
+      expect(arrivalTimingFor(arrival, details)).toBeNull();
     }
   });
 
@@ -227,9 +223,9 @@ describe("arrivalTimingFor", () => {
           latestSuccess: details.resource.latestSuccess,
         },
       }),
-    ).toEqual({ available: true, label: "2분 남음" });
+    ).toBe("2분 남음");
     expect(
       arrivalTimingFor(arrival, { ...details, resource: { status: "loadingError", failure: { kind: "timeout" } } }),
-    ).toEqual(unavailable);
+    ).toBeNull();
   });
 });
