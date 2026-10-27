@@ -30,6 +30,7 @@ export interface EventMap {
   route_selected: {
     route_id: string;
     route_status: RouteStatus;
+    is_new: boolean;
     result_position: number;
     result_count: number;
   };
