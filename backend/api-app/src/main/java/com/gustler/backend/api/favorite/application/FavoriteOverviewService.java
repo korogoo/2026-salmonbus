@@ -26,7 +26,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.stream.IntStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -125,8 +124,8 @@ public class FavoriteOverviewService {
 
     private List<FavoriteOverview.Vehicle> vehicles(Board board, StopState stop, List<ApproachingVehicle> approaching,
         StationArrivalsOverview arrival) {
-        return IntStream.range(0, approaching.size())
-            .mapToObj(index -> vehicle(approaching.get(index), index, arrival, board.route().id(), stop.sequence()))
+        return approaching.stream()
+            .map(source -> vehicle(source, arrival, board.route().id(), stop.sequence()))
             .toList();
     }
 
@@ -152,14 +151,8 @@ public class FavoriteOverviewService {
         }
     }
 
-    private FavoriteOverview.Vehicle vehicle(ApproachingVehicle source, final int index,
+    private FavoriteOverview.Vehicle vehicle(ApproachingVehicle source,
         StationArrivalsOverview arrival, String routeId, final int stopSequence) {
-        if (index >= 2) {
-            return new FavoriteOverview.Vehicle(
-                source,
-                FavoriteOverview.Eta.unavailable(FavoriteOverview.EtaReason.SOURCE_NOT_PROVIDED)
-            );
-        }
         FavoriteOverview.Eta eta = eta(source.vehicleId(), arrival, routeId, stopSequence);
         return new FavoriteOverview.Vehicle(source, eta);
     }

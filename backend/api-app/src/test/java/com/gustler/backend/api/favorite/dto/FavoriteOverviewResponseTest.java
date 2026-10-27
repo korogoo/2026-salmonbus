@@ -31,9 +31,7 @@ class FavoriteOverviewResponseTest {
             .mapToObj(index -> new FavoriteOverview.Vehicle(
                 new ApproachingVehicle("vehicle-" + index, index + 1,
                     new VehicleForecast.Available(0.8, 12.0)),
-                FavoriteOverview.Eta.unavailable(index >= 2
-                    ? FavoriteOverview.EtaReason.SOURCE_NOT_PROVIDED
-                    : FavoriteOverview.EtaReason.ARRIVAL_UNAVAILABLE)))
+                FavoriteOverview.Eta.unavailable(FavoriteOverview.EtaReason.ARRIVAL_UNAVAILABLE)))
             .toList();
         FavoriteOverview.Item item = new FavoriteOverview.Item(UUID.randomUUID(), TARGET,
             FavoriteOverview.ItemStatus.READY, null, new FavoriteOverview.BoardSlice(route,
@@ -48,7 +46,7 @@ class FavoriteOverviewResponseTest {
         assertThat(actual.get(2).path("remainingStops").asInt()).isEqualTo(3);
         assertThat(actual.get(2).at("/forecast/status").asString()).isEqualTo("AVAILABLE");
         assertThat(actual.get(2).at("/eta/status").asString()).isEqualTo("UNAVAILABLE");
-        assertThat(actual.get(2).at("/eta/reason").asString()).isEqualTo("SOURCE_NOT_PROVIDED");
+        assertThat(actual.get(2).at("/eta/reason").asString()).isEqualTo("ARRIVAL_UNAVAILABLE");
     }
 
     @Test

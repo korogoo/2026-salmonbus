@@ -55,6 +55,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class FavoriteOverviewServiceTest {
     private static final UUID MEMBER_ID = UUID.randomUUID();
@@ -160,16 +162,17 @@ class FavoriteOverviewServiceTest {
         assertThat(vehicles).allSatisfy(vehicle ->
             assertThat(vehicle.watch().forecast()).isEqualTo(new VehicleForecast.Available(0.8, 12.0)));
         assertThat(vehicles.getFirst().eta().reason()).isEqualTo(FavoriteOverview.EtaReason.ARRIVAL_UNAVAILABLE);
-        assertThat(vehicles.get(2).eta().reason()).isEqualTo(FavoriteOverview.EtaReason.SOURCE_NOT_PROVIDED);
+        assertThat(vehicles.get(2).eta().reason()).isEqualTo(FavoriteOverview.EtaReason.ARRIVAL_UNAVAILABLE);
     }
 
-    @Test
-    void 도착_응답에_세번째_차량이_있어도_현재_ETA_제한을_유지한다() {
+    @ParameterizedTest
+    @ValueSource(strings = {"vehicle-0", "vehicle-2"})
+    void 표시_순서와_관계없이_원천과_차량_ID가_일치할_때만_ETA를_연결한다(String providedVehicleId) {
         repository.groups = groups(favorite(ROUTE_ID, STOP_ID, FavoriteDirection.UP));
         when(boards.getBoard(any())).thenReturn(new BoardOverview(board(ROUTE_ID, STOP_ID, 3), Duration.ZERO));
         Instant now = Instant.parse("2026-10-27T10:00:00Z");
         ArrivalVisit visit = new ArrivalVisit(ROUTE_ID, ROUTE_ID, 1, 1, "UP", now.minusSeconds(60));
-        Prediction source = new Prediction("vehicle-2", 1, 180, null, 3, null,
+        Prediction source = new Prediction(providedVehicleId, 1, 180, null, 3, null,
             "NOT_REPORTED", null, null, null);
         when(arrivals.get(any())).thenReturn(new StationArrivalsOverview(STOP_ID, now,
             ArrivalAvailability.READY, null, null, null,
@@ -179,10 +182,17 @@ class FavoriteOverviewServiceTest {
         List<FavoriteOverview.Vehicle> vehicles = service.get(MEMBER_ID).groups().getFirst()
             .favorites().getFirst().board().stop().approachingVehicles();
 
-        // 원천 ordinal 1/2와 watch 표시 순서는 다를 수 있다. 이 제한은 별도 수정 대상으로 남긴다.
+        // 원천 ordinal 1/2와 watch 표시 순서는 다를 수 있으므로 차량 ID로 연결한다.
         assertThat(vehicles).hasSize(3);
         assertThat(vehicles.get(2).watch().vehicleId()).isEqualTo("vehicle-2");
-        assertThat(vehicles.get(2).eta().reason()).isEqualTo(FavoriteOverview.EtaReason.SOURCE_NOT_PROVIDED);
+        assertThat(vehicles).filteredOn(vehicle -> vehicle.watch().vehicleId().equals(providedVehicleId))
+            .singleElement().satisfies(vehicle -> {
+                assertThat(vehicle.eta().status()).isEqualTo(FavoriteOverview.EtaStatus.AVAILABLE);
+                assertThat(vehicle.eta().remainingSeconds()).isEqualTo(180);
+            });
+        assertThat(vehicles).filteredOn(vehicle -> !vehicle.watch().vehicleId().equals(providedVehicleId))
+            .allSatisfy(vehicle -> assertThat(vehicle.eta().reason())
+                .isEqualTo(FavoriteOverview.EtaReason.VEHICLE_NOT_MATCHED));
     }
 
     @Test
@@ -234,7 +244,7 @@ class FavoriteOverviewServiceTest {
         assertThat(item.board().stop().approachingVehicles()).hasSize(3);
         assertThat(item.board().stop().approachingVehicles().getFirst().watch().remainingStops()).isEqualTo(1);
         assertThat(item.board().stop().approachingVehicles().get(2).eta().reason())
-            .isEqualTo(FavoriteOverview.EtaReason.SOURCE_NOT_PROVIDED);
+            .isEqualTo(FavoriteOverview.EtaReason.ARRIVAL_UNAVAILABLE);
     }
 
     @Test
