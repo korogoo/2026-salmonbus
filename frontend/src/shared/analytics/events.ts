@@ -1,6 +1,7 @@
 import type { ErrorCode } from "@/shared/api/apiError";
 import type { LoginProvider } from "@/shared/api/auth.types";
 import type { Direction, RouteStatus } from "@/shared/api/routeForecast.types";
+import type { BoardEntry } from "@/shared/routing/boardEntry";
 
 export type FailureProperties =
   | {
@@ -50,6 +51,7 @@ export interface EventMap {
     very_low_count: number;
     unavailable_count: number;
     load_ms: number;
+    entry: BoardEntry;
   };
 
   board_unavailable:
@@ -59,6 +61,22 @@ export interface EventMap {
   direction_switched: {
     route_id: string;
     to_direction: Direction;
+  };
+
+  favorite_button_clicked: {
+    route_id: string;
+    direction: Direction;
+    stop_id: string;
+    is_logged_in: boolean;
+    is_registered: boolean;
+  };
+
+  favorite_added: {
+    route_id: string;
+    direction: Direction;
+    stop_id: string;
+    group_count: number;
+    favorite_count: number;
   };
 
   stop_expanded:
