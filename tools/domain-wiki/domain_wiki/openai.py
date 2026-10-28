@@ -3,6 +3,10 @@ import urllib.error
 import urllib.request
 
 
+MAX_MODEL_INPUT_CHARACTERS = 200_000
+MAX_PATCH_BYTES = 40_000
+
+
 class OpenAIError(ValueError):
     pass
 
@@ -29,7 +33,7 @@ class OpenAIClient:
         *,
         model="gpt-6-luna",
         reasoning_effort="medium",
-        max_input_characters=60_000,
+        max_input_characters=MAX_MODEL_INPUT_CHARACTERS,
         max_output_tokens=8_000,
         transport=None,
     ):

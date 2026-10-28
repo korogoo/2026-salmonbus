@@ -23,11 +23,21 @@ class GitDiff:
     changed_paths: Tuple[str, ...]
 
 
-def read_git_diff(repository: Path, base_revision: str, head_revision: str) -> GitDiff:
+def read_git_diff(
+    repository: Path,
+    base_revision: str,
+    head_revision: str,
+    *,
+    use_merge_base: bool = False,
+) -> GitDiff:
     repository = Path(repository).resolve()
     _ensure_repository(repository)
     base_sha = _resolve_commit(repository, base_revision)
     head_sha = _resolve_commit(repository, head_revision)
+    if use_merge_base:
+        base_sha = _run_git(
+            repository, "merge-base", base_sha, head_sha
+        ).stdout.strip()
 
     names = _run_git(
         repository,

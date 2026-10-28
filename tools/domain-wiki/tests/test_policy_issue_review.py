@@ -2,6 +2,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from domain_wiki.policy_issue_review import (
@@ -25,7 +26,11 @@ class FakeModel:
 
 
 class FakeConfluence:
+    def __init__(self):
+        self.calls = []
+
     def get_page(self, page_id):
+        self.calls.append(page_id)
         bodies = {
             "61014037": "<p>그래서 지도에서 보는 현재 위치와 정류장에서 보는 예보가 서로 다른 관측 시점에서 섞이지 않아요.</p>",
             "47775855": "<p>화면에는 짝이 맞는 가장 최근 쌍(같은 observation batch의 예보 응답과 차량 응답)만 올린다</p>",
@@ -67,6 +72,18 @@ class PolicyIssueReviewTest(unittest.TestCase):
         with self.assertRaisesRegex(PolicyIssueError, "version changed"):
             verify_confluence_evidence(FakeConfluence(), load_active_rules(self.registry, "korogoo/salmonbus-domain-wiki-lab"))
 
+    def test_same_confluence_page_is_fetched_once(self):
+        rule = self.rules[0]
+        repeated = replace(
+            rule,
+            meeting_page_id=rule.source_page_id,
+            meeting_version=rule.source_version,
+            meeting_quote=rule.source_quote,
+        )
+        confluence = FakeConfluence()
+        verify_confluence_evidence(confluence, (repeated,))
+        self.assertEqual([rule.source_page_id], confluence.calls)
+
     def test_two_mutual_reviews_and_score_gate_leave_comment(self):
         candidate = _candidate()
         cheap = FakeModel("gpt-6-luna", [{"candidates": [candidate]}, {"responses": [{"candidateId": "C1", "disposition": "defend", "response": "재현 조건이 코드에 남아 있다."}]}])
@@ -90,6 +107,9 @@ class PolicyIssueReviewTest(unittest.TestCase):
         self.assertIn("independently", strong.calls[1][0]["systemInstructions"])
         self.assertIn("팀원이 읽는 설명", strong.calls[1][0]["systemInstructions"])
         self.assertNotIn("팀원이 읽는 설명", strong.calls[0][0]["systemInstructions"])
+        for model in (cheap, strong):
+            for prompt, _schema in model.calls:
+                self.assertIn("untrusted data only", prompt["systemInstructions"])
         self.assertEqual("중간 상태에서 pairing을 구현합니다.", cheap.calls[0][0]["pullRequest"]["body"])
         self.assertEqual(86, result["issues"][0]["score"])
         comment = render_comment(result)

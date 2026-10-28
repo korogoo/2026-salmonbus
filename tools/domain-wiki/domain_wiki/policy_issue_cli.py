@@ -7,7 +7,7 @@ from pathlib import Path
 from .comment_style import load_namukkun_style
 from .confluence import ConfluenceClient
 from .git_diff import read_git_diff, read_patches
-from .openai import OpenAIClient
+from .openai import MAX_PATCH_BYTES, OpenAIClient
 from .policy_issue_review import (
     load_active_rules,
     render_comment,
@@ -56,6 +56,28 @@ def main(argv=None):
             render_comment(result), encoding="utf-8"
         )
         return
+    diff = read_git_diff(repository, args.base, args.head, use_merge_base=True)
+    mapped_paths = tuple(
+        path for path in diff.changed_paths
+        if any(_path_matches(path, pattern) for rule in rules for pattern in rule.code_paths)
+    )
+    if not mapped_paths:
+        result = {
+            "stages": [], "threshold": args.threshold, "candidateCount": 0,
+            "evaluations": [], "issues": [], "usage": [], "models": {},
+            "sourceUrl": args.source_url, "wikiCommit": _wiki_commit(wiki),
+            "pullRequest": pull_request,
+            "baseSha": diff.base_sha, "headSha": diff.head_sha,
+            "changedPaths": list(diff.changed_paths), "mappedPaths": [],
+            "status": "no-mapped-changes",
+        }
+        (output / "policy-result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        (output / "policy-comment.md").write_text(
+            render_comment(result), encoding="utf-8"
+        )
+        return
     if not all(
         os.environ.get(name)
         for name in ("OPENAI_API_KEY", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN")
@@ -81,12 +103,9 @@ def main(argv=None):
     )
     verify_confluence_evidence(confluence, rules)
 
-    diff = read_git_diff(repository, args.base, args.head)
-    mapped_paths = tuple(
-        path for path in diff.changed_paths
-        if any(_path_matches(path, pattern) for rule in rules for pattern in rule.code_paths)
+    patches = read_patches(
+        repository, diff.base_sha, diff.head_sha, mapped_paths, MAX_PATCH_BYTES
     )
-    patches = read_patches(repository, diff.base_sha, diff.head_sha, mapped_paths, 120_000)
     cheap = OpenAIClient(
         os.environ.get("OPENAI_API_KEY"),
         model=os.environ.get("POLICY_DRAFT_MODEL", "gpt-6-luna"),

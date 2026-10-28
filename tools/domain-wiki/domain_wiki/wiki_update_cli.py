@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .confluence import ConfluenceClient
 from .git_diff import read_git_diff, read_patches
-from .openai import OpenAIClient
+from .openai import MAX_PATCH_BYTES, OpenAIClient
 from .wiki_update import (
     apply_confirmed_updates,
     render_wiki_result,
@@ -34,15 +34,17 @@ def main(argv=None):
     bootstrap_changed = initialize_wiki(wiki, seed)
     registry = _read_json(seed / "Wiki-Document-Registry.json")
     documents = _read_documents(wiki, registry)
-    pull_request = _read_json(Path(args.pull_request_context))
-    discussion = _read_json(Path(args.discussion))
+    pull_request = _read_pull_request_context(Path(args.pull_request_context))
+    discussion = _read_discussion(Path(args.discussion))
     diff = read_git_diff(repository, args.base, args.head)
     mapped_paths = tuple(
         path for path in diff.changed_paths
         if any(_path_matches(path, pattern) for pattern in registry["codePaths"])
     )
-    patches = read_patches(repository, diff.base_sha, diff.head_sha, mapped_paths, 180_000)
-    evidence = _read_meeting_evidence(registry)
+    patches = read_patches(
+        repository, diff.base_sha, diff.head_sha, mapped_paths, MAX_PATCH_BYTES
+    )
+    evidence = _read_meeting_evidence(registry) if mapped_paths else []
     cheap = OpenAIClient(
         os.environ.get("OPENAI_API_KEY"),
         model=os.environ.get("POLICY_DRAFT_MODEL", "gpt-6-luna"),
@@ -63,7 +65,16 @@ def main(argv=None):
         discussion=discussion,
         meeting_evidence=evidence,
     )
-    ai_changed = apply_confirmed_updates(wiki, documents, result["accepted"])
+    ai_changed, skipped = apply_confirmed_updates(
+        wiki, documents, result["accepted"]
+    )
+    if skipped:
+        skipped_ids = {item.get("proposalId") for item in skipped}
+        result["accepted"] = [
+            item for item in result["accepted"]
+            if item.get("proposalId") not in skipped_ids
+        ]
+        result["rejected"].extend(skipped)
     changed = sorted(set(bootstrap_changed + ai_changed))
     result.update(
         {
@@ -108,6 +119,8 @@ def initialize_wiki(wiki, seed):
 def _read_documents(wiki, registry):
     documents = []
     for path in registry["documents"]:
+        if path == "Policy-Registry.json":
+            continue
         target = wiki / path
         documents.append({"path": path, "content": target.read_text(encoding="utf-8")})
     return documents
@@ -140,6 +153,43 @@ def _read_meeting_evidence(registry):
 
 def _read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _read_pull_request_context(path):
+    raw = _read_json(path)
+    return {
+        "title": _clip(raw.get("title", ""), 500),
+        "body": _clip(raw.get("body", ""), 20_000),
+        "number": raw.get("number"),
+        "url": raw.get("url"),
+    }
+
+
+def _read_discussion(path, max_characters=20_000, max_body_characters=4_000):
+    raw = _read_json(path)
+    if not isinstance(raw, list):
+        return []
+    compact = []
+    remaining = max_characters
+    for item in raw:
+        if not isinstance(item, dict) or remaining <= 0:
+            continue
+        body = _clip(item.get("body", ""), min(max_body_characters, remaining))
+        remaining -= len(body)
+        user = item.get("user") if isinstance(item.get("user"), dict) else {}
+        compact.append(
+            {
+                "user": {"login": user.get("login")},
+                "body": body,
+                "path": item.get("path"),
+                "state": item.get("state"),
+            }
+        )
+    return compact
+
+
+def _clip(value, limit):
+    return str(value or "")[:limit]
 
 
 def _path_matches(path, pattern):
