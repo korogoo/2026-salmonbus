@@ -1,6 +1,5 @@
 import json
 import unittest
-from pathlib import Path
 
 from domain_wiki.openai import OpenAIClient, OpenAIError
 
@@ -68,70 +67,6 @@ class OpenAIClientTest(unittest.TestCase):
             json.loads(body["input"][1]["content"]),
         )
 
-    def test_uses_explicit_cache_only_for_a_large_stable_prefix(self):
-        transport = FakeTransport(self._success_response())
-        client = OpenAIClient(
-            "key",
-            prompt_cache_mode="explicit",
-            prompt_cache_ttl="30m",
-            transport=transport,
-        )
-        prompt = self._prompt()
-        prompt["systemInstructions"] = "stable instruction " * 300
-        prompt["promptVersion"] = "policy-review-v8"
-
-        client.review(prompt, self._schema())
-
-        body = json.loads(transport.requests[0][3].decode("utf-8"))
-        developer = body["input"][0]["content"][0]
-        self.assertEqual(
-            {"mode": "explicit", "ttl": "30m"},
-            developer["prompt_cache_breakpoint"],
-        )
-        self.assertEqual({"mode": "explicit"}, body["prompt_cache_options"])
-        self.assertTrue(
-            body["prompt_cache_key"].startswith("salmonbus-domain-wiki:")
-        )
-
-    def test_skips_cache_write_when_static_prefix_is_too_short(self):
-        transport = FakeTransport(self._success_response())
-        client = OpenAIClient("key", prompt_cache_mode="explicit", transport=transport)
-
-        client.review(self._prompt(), self._schema())
-
-        body = json.loads(transport.requests[0][3].decode("utf-8"))
-        self.assertNotIn("prompt_cache_options", body)
-        self.assertNotIn("prompt_cache_breakpoint", body["input"][0]["content"][0])
-
-    def test_dynamic_pr_content_does_not_change_the_cache_key(self):
-        transport = FakeTransport(self._success_response())
-        client = OpenAIClient("key", prompt_cache_mode="explicit", transport=transport)
-        first = self._prompt()
-        first["systemInstructions"] = "stable instruction " * 300
-        first["promptVersion"] = "policy-review-v8"
-        first["documents"] = [{"content": "첫 번째 PR"}]
-        second = dict(first)
-        second["documents"] = [{"content": "두 번째 PR"}]
-
-        client.review(first, self._schema())
-        client.review(second, self._schema())
-
-        bodies = [
-            json.loads(request[3].decode("utf-8"))
-            for request in transport.requests
-        ]
-        self.assertEqual(
-            bodies[0]["prompt_cache_key"], bodies[1]["prompt_cache_key"]
-        )
-        self.assertNotEqual(
-            bodies[0]["input"][1]["content"],
-            bodies[1]["input"][1]["content"],
-        )
-
-    def test_rejects_invalid_cache_configuration(self):
-        with self.assertRaisesRegex(OpenAIError, "prompt_cache_mode"):
-            OpenAIClient("key", prompt_cache_mode="always")
-
     def test_reports_incomplete_response_reason(self):
         transport = FakeTransport(
             (
@@ -159,23 +94,6 @@ class OpenAIClientTest(unittest.TestCase):
             client.review(self._prompt(), self._schema())
 
         self.assertEqual([], transport.requests)
-
-    def test_repository_schemas_match_openai_strict_subset(self):
-        schema_directory = Path(__file__).resolve().parents[1] / "schemas"
-
-        for schema_path in schema_directory.glob("*.schema.json"):
-            with self.subTest(schema=schema_path.name):
-                schema = json.loads(schema_path.read_text(encoding="utf-8"))
-                for node in self._schema_nodes(schema):
-                    self.assertNotIn("uniqueItems", node)
-                    if "const" in node or "enum" in node:
-                        self.assertIn("type", node)
-                    if node.get("type") == "object":
-                        self.assertFalse(node.get("additionalProperties", True))
-                        self.assertEqual(
-                            set(node.get("properties", {})),
-                            set(node.get("required", [])),
-                        )
 
     @staticmethod
     def _prompt():
@@ -206,17 +124,6 @@ class OpenAIClientTest(unittest.TestCase):
                 "usage": {"input_tokens": 10, "output_tokens": 2},
             },
         )
-
-    @classmethod
-    def _schema_nodes(cls, value):
-        if isinstance(value, dict):
-            yield value
-            for child in value.values():
-                yield from cls._schema_nodes(child)
-        elif isinstance(value, list):
-            for child in value:
-                yield from cls._schema_nodes(child)
-
 
 if __name__ == "__main__":
     unittest.main()

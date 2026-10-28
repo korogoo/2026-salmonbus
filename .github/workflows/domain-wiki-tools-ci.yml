@@ -3,8 +3,18 @@ name: DOMAIN-WIKI-TOOLS-CI
 on:
   pull_request:
     branches: [dev, main]
+    paths:
+      - tools/domain-wiki/**
+      - .github/workflows/domain-policy-review.yml
+      - .github/workflows/domain-wiki-tools-ci.yml
+      - .github/workflows/domain-wiki-update.yml
   push:
     branches: [dev, main]
+    paths:
+      - tools/domain-wiki/**
+      - .github/workflows/domain-policy-review.yml
+      - .github/workflows/domain-wiki-tools-ci.yml
+      - .github/workflows/domain-wiki-update.yml
   workflow_dispatch:
 
 permissions:

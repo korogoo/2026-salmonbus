@@ -1,4 +1,3 @@
-import hashlib
 import json
 import urllib.error
 import urllib.request
@@ -32,9 +31,6 @@ class OpenAIClient:
         reasoning_effort="medium",
         max_input_characters=60_000,
         max_output_tokens=8_000,
-        prompt_cache_mode="off",
-        prompt_cache_ttl="30m",
-        prompt_cache_namespace="salmonbus-domain-wiki",
         transport=None,
     ):
         if not api_key:
@@ -44,13 +40,6 @@ class OpenAIClient:
         self.reasoning_effort = reasoning_effort
         self.max_input_characters = max_input_characters
         self.max_output_tokens = max_output_tokens
-        if prompt_cache_mode not in {"off", "explicit"}:
-            raise OpenAIError("prompt_cache_mode must be off or explicit")
-        if prompt_cache_ttl not in {"30m", "12h"}:
-            raise OpenAIError("prompt_cache_ttl must be 30m or 12h")
-        self.prompt_cache_mode = prompt_cache_mode
-        self.prompt_cache_ttl = prompt_cache_ttl
-        self.prompt_cache_namespace = prompt_cache_namespace
         self.transport = transport or UrlLibTransport()
 
     def review(self, prompt_payload, schema):
@@ -77,19 +66,12 @@ class OpenAIClient:
             for key, value in schema.items()
             if key not in {"$schema", "$id", "title"}
         }
-        developer_content = {"type": "input_text", "text": instructions}
-        cache_enabled = self.prompt_cache_mode == "explicit" and len(instructions) >= 4_096
-        if cache_enabled:
-            developer_content["prompt_cache_breakpoint"] = {
-                "mode": "explicit",
-                "ttl": self.prompt_cache_ttl,
-            }
         request_body = {
             "model": self.model,
             "input": [
                 {
                     "role": "developer",
-                    "content": [developer_content],
+                    "content": [{"type": "input_text", "text": instructions}],
                 },
                 {"role": "user", "content": serialized},
             ],
@@ -105,12 +87,6 @@ class OpenAIClient:
             "max_output_tokens": self.max_output_tokens,
             "store": False,
         }
-        if cache_enabled:
-            request_body["prompt_cache_key"] = self._prompt_cache_key(
-                prompt_payload,
-                response_schema,
-            )
-            request_body["prompt_cache_options"] = {"mode": "explicit"}
         status, response = self.transport.request(
             "POST",
             "https://api.openai.com/v1/responses",
@@ -144,22 +120,6 @@ class OpenAIClient:
             "cacheWrite30mInputTokens": write_details.get("ttl_30m_tokens", 0),
             "cacheWrite12hInputTokens": write_details.get("ttl_12h_tokens", 0),
         }
-
-    def _prompt_cache_key(self, prompt_payload, response_schema):
-        identity = json.dumps(
-            {
-                "namespace": self.prompt_cache_namespace,
-                "model": self.model,
-                "promptVersion": prompt_payload.get("promptVersion"),
-                "schema": response_schema,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        digest = hashlib.sha256(identity).hexdigest()[:24]
-        return f"{self.prompt_cache_namespace}:{digest}"
-
 
 def _output_text(response):
     texts = []
