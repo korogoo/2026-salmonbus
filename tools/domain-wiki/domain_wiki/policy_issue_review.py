@@ -247,18 +247,35 @@ def run_issue_review(
 
 
 def render_comment(result):
-    lines = [
-        "<!-- salmonbus-policy-issue-review -->",
-        f"## 확인이 필요한 문제 {len(result['issues'])}건",
-        "",
-    ]
+    completed_without_issues = (
+        not result["issues"]
+        and result.get("candidateCount") == 0
+        and not result.get("status")
+        and result.get("stages", [])[-1:] == ["review-2"]
+    )
+    if completed_without_issues:
+        lines = [
+            "<!-- salmonbus-policy-issue-review -->",
+            "음~~~ 어디~ 보자~?",
+            "",
+            "문제가...없네..?",
+            "",
+            "# 해가 서쪽에서 뜨겄어~?",
+            "",
+        ]
+    else:
+        lines = [
+            "<!-- salmonbus-policy-issue-review -->",
+            f"## 확인이 필요한 문제 {len(result['issues'])}건",
+            "",
+        ]
     if result.get("status") == "no-active-policy":
         lines.append("현재 Git Wiki에 활성화된 정책이 없어 코드 검수를 실행하지 않았어요.")
     elif result.get("status") == "no-mapped-changes":
         lines.append("활성 정책과 연결된 코드가 바뀌지 않아 AI 검수를 실행하지 않았어요.")
     elif result.get("status") == "credentials-missing":
         lines.append("활성 정책은 있지만 API 비밀값이 없어 이번 검수를 실행하지 못했어요.")
-    elif not result["issues"]:
+    elif not result["issues"] and not completed_without_issues:
         lines.append("지금 바로 수정할 문제는 찾지 못했어요.")
     rejected = [item for item in result.get("evaluations", []) if not item["accepted"]]
     if rejected:

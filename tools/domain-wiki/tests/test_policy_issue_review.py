@@ -142,7 +142,32 @@ class PolicyIssueReviewTest(unittest.TestCase):
         )
         self.assertEqual([], result["issues"])
         self.assertIn("counterevidence", result["evaluations"][0]["gateFailures"])
-        self.assertIn("반대 근거 미해소", render_comment(result))
+        comment = render_comment(result)
+        self.assertIn("반대 근거 미해소", comment)
+        self.assertNotIn("문제가...없네..?", comment)
+        self.assertNotIn("해가 서쪽에서 뜨겄어~?", comment)
+
+    def test_completed_review_without_candidates_uses_namukkun_result(self):
+        result = {
+            "stages": ["discover", "review-1", "author-response", "review-2"],
+            "issues": [], "evaluations": [], "models": {}, "threshold": 80,
+            "candidateCount": 0,
+        }
+        comment = render_comment(result)
+        self.assertIn("음~~~ 어디~ 보자~?", comment)
+        self.assertIn("문제가...없네..?", comment)
+        self.assertIn("# 해가 서쪽에서 뜨겄어~?", comment)
+
+    def test_skipped_review_does_not_claim_there_is_no_problem(self):
+        result = {
+            "status": "no-active-policy", "stages": [], "issues": [],
+            "evaluations": [], "models": {}, "threshold": 80,
+            "candidateCount": 0,
+        }
+        comment = render_comment(result)
+        self.assertIn("활성화된 정책이 없어", comment)
+        self.assertNotIn("문제가...없네..?", comment)
+        self.assertNotIn("해가 서쪽에서 뜨겄어~?", comment)
 
     def test_same_model_is_rejected(self):
         with self.assertRaisesRegex(PolicyIssueError, "must be different"):
