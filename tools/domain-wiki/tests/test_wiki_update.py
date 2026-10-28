@@ -42,6 +42,12 @@ class WikiUpdateTest(unittest.TestCase):
         self.assertEqual(["Home.md", "Policy.md"], changed)
         self.assertEqual("# 정책 Wiki\n", (self.wiki / "Home.md").read_text())
 
+    def test_initialized_wiki_does_not_restore_a_missing_seed_document(self):
+        (self.wiki / "Home.md").write_text("# 운영 중인 정책 Wiki\n", encoding="utf-8")
+        changed = initialize_wiki(self.wiki, self.seed)
+        self.assertEqual([], changed)
+        self.assertFalse((self.wiki / "Policy.md").exists())
+
     def test_two_reviews_gate_and_apply_exact_replacement(self):
         proposal = {
             "proposalId": "W1", "document": "Policy.md",

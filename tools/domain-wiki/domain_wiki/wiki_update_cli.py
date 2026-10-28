@@ -85,15 +85,21 @@ def main(argv=None):
 
 
 def initialize_wiki(wiki, seed):
+    existing = sorted(path for path in wiki.iterdir() if path.is_file())
+    is_empty = not existing
+    is_test_home_only = (
+        [path.name for path in existing] == ["Home.md"]
+        and existing[0].read_text(encoding="utf-8").strip() == "테스트입니다"
+    )
+    if not (is_empty or is_test_home_only):
+        return []
+
     changed = []
     for source in sorted(seed.glob("*")):
         if source.name == "Wiki-Document-Registry.json" or not source.is_file():
             continue
         target = wiki / source.name
-        if not target.exists():
-            shutil.copyfile(source, target)
-            changed.append(source.name)
-        elif source.name == "Home.md" and target.read_text(encoding="utf-8").strip() == "테스트입니다":
+        if not target.exists() or source.name == "Home.md":
             shutil.copyfile(source, target)
             changed.append(source.name)
     return changed
