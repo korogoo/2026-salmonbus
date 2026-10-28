@@ -423,7 +423,7 @@ for (const [status, label] of [
   ["PREPARING", "도착 예보를 준비하고 있어요"],
   ["UNAVAILABLE", "현재 노선에서 이 정류장을 이용할 수 없어요"],
   ["AMBIGUOUS", "승차할 정류장을 다시 확인해 주세요"],
-  ["ERROR", "이 즐겨찾기의 정보를 불러오지 못했어요"],
+  ["ERROR", "정류장 정보를 불러오지 못했어요"],
 ] as const) {
   test(`홈의 ${status} 항목도 유지하고 상태를 안내한다`, async ({ page, favorites, api }) => {
     const stop = api.data.watch.stops.find((stop) => stop.boardingAllowed)!;
@@ -433,7 +433,13 @@ for (const [status, label] of [
     await page.goto("/");
     const panel = page.getByRole("tabpanel");
     await expect(panel.getByText(label, { exact: true })).toBeVisible();
-    await expect(panel.getByRole("link")).toContainText(status === "NO_VEHICLE" ? stop.name : "정류장 정보 없음");
+    if (status === "NO_VEHICLE") {
+      await expect(panel.getByRole("link")).toContainText(stop.name);
+    } else {
+      await expect(panel.getByRole("link")).toHaveCount(0);
+      await expect(panel.getByText("노선 정보 없음", { exact: true })).toHaveCount(0);
+      await expect(panel.getByText("정류장 정보 없음", { exact: true })).toHaveCount(0);
+    }
     if (status === "ERROR") {
       favorites.statuses[saved.id] = "READY";
       await panel.getByRole("button", { name: "다시 확인하기", exact: true }).click();
@@ -444,7 +450,32 @@ for (const [status, label] of [
   });
 }
 
-test("표시 정보가 생략된 항목도 정상 카드와 함께 남기고 저장한 방면으로 이동한다", async ({ page, favorites, api }) => {
+for (const width of [320, 425]) {
+  test(`구분이 필요한 즐겨찾기 두 개는 ${width}px에서 저장한 방면을 표시한다`, async ({ page, favorites, api }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const up = api.data.watch.stops.find((stop) => stop.direction === "UP" && stop.boardingAllowed)!;
+    const down = api.data.watch.stops.find((stop) => stop.direction === "DOWN" && stop.boardingAllowed)!;
+    const first = storedFavorite({ routeId, stopId: up.stopId, direction: "UP" });
+    const second = storedFavorite({ routeId, stopId: down.stopId, direction: "DOWN" }, 5);
+    favorites.groups[0]!.favorites = [first, second];
+    favorites.statuses[first.id] = "AMBIGUOUS";
+    favorites.statuses[second.id] = "AMBIGUOUS";
+    await page.goto("/");
+    const panel = page.getByRole("tabpanel");
+    await expect(panel.getByText("승차할 정류장을 다시 확인해 주세요", { exact: true })).toHaveCount(2);
+    const cards = panel.getByRole("listitem");
+    await expect(cards).toHaveCount(2);
+    await expect(cards.first().getByText("상행", { exact: true })).toBeVisible();
+    await expect(cards.last().getByText("하행", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("link")).toHaveCount(0);
+    await page.getByRole("button", { name: "그룹과 즐겨찾기 순서 편집", exact: true }).click();
+    const editor = page.getByRole("region", { name: "즐겨찾기 편집", exact: true });
+    await expect(editor.getByText("상행", { exact: true })).toBeVisible();
+    await expect(editor.getByText("하행", { exact: true })).toBeVisible();
+  });
+}
+
+test("정보가 없는 항목은 안내 카드로 남기고 정상 카드는 저장한 방면으로 이동한다", async ({ page, favorites, api }) => {
   const up = api.data.watch.stops.find((stop) => stop.direction === "UP" && stop.boardingAllowed)!;
   const down = api.data.watch.stops.find((stop) => stop.direction === "DOWN" && stop.boardingAllowed)!;
   const unavailable = storedFavorite({ routeId, stopId: down.stopId, direction: "DOWN" });
@@ -452,15 +483,16 @@ test("표시 정보가 생략된 항목도 정상 카드와 함께 남기고 저
   favorites.statuses[unavailable.id] = "UNAVAILABLE";
   await page.goto("/");
   const panel = page.getByRole("tabpanel");
-  await expect(panel.getByRole("link")).toHaveCount(2);
+  await expect(panel.getByRole("link")).toHaveCount(1);
   await expect(panel.getByText(up.name, { exact: true })).toBeVisible();
-  const fallback = panel.getByRole("link").filter({ hasText: "정류장 정보 없음" });
-  await expect(fallback).toContainText("노선 정보 없음");
-  await expect(fallback).toContainText("하행");
-  await expect(fallback).toHaveAttribute("href", `/routes/${routeId}?direction=DOWN&stopId=${down.stopId}`);
+  await expect(panel.getByText("현재 노선에서 이 정류장을 이용할 수 없어요", { exact: true })).toBeVisible();
+  await expect(panel.getByText("노선 정보 없음", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("정류장 정보 없음", { exact: true })).toHaveCount(0);
+  const ready = panel.getByRole("link");
+  await expect(ready).toHaveAttribute("href", `/routes/${routeId}?direction=UP&stopId=${up.stopId}`);
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await fallback.click();
-  await expect(page).toHaveURL(`/routes/${routeId}?direction=DOWN&stopId=${down.stopId}`);
+  await ready.click();
+  await expect(page).toHaveURL(`/routes/${routeId}?direction=UP&stopId=${up.stopId}`);
 
   await page.goto(`/mypage/groups/${defaultGroupId}`);
   await expect(page.getByText("노선 정보 없음", { exact: true }).first()).toBeVisible();
