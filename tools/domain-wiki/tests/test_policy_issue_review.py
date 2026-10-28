@@ -77,12 +77,19 @@ class PolicyIssueReviewTest(unittest.TestCase):
             repository=self.root, head_sha=self.head, wiki_commit="abc123",
             source_url="https://github.com/woowacourse-teams/2026-salmonbus/pull/106",
             pull_request={"title": "같은 observation batch만 표시", "body": "중간 상태에서 pairing을 구현합니다."},
+            comment_style={
+                "boundary": "human fields only",
+                "instructions": "팀원이 읽는 설명 뒤에 밈을 붙인다.",
+                "memes": "대충 하면~? 꼭 두 번 일한다~",
+            },
         )
         self.assertEqual(["discover", "review-1", "author-response", "review-2"], result["stages"])
         self.assertEqual(2, len(cheap.calls))
         self.assertEqual(2, len(strong.calls))
         self.assertIn("scoringRubric", strong.calls[0][0])
         self.assertIn("independently", strong.calls[1][0]["systemInstructions"])
+        self.assertIn("팀원이 읽는 설명", strong.calls[1][0]["systemInstructions"])
+        self.assertNotIn("팀원이 읽는 설명", strong.calls[0][0]["systemInstructions"])
         self.assertEqual("중간 상태에서 pairing을 구현합니다.", cheap.calls[0][0]["pullRequest"]["body"])
         self.assertEqual(86, result["issues"][0]["score"])
         comment = render_comment(result)
@@ -90,6 +97,7 @@ class PolicyIssueReviewTest(unittest.TestCase):
         self.assertIn("### 버스 위치 없이 새 예보만 보일 수 있어요", comment)
         self.assertIn("**어떤 때 생기나요?**", comment)
         self.assertIn("**어떻게 바꾸면 좋을까요?**", comment)
+        self.assertEqual(1, comment.count("대충 하면~? 꼭 두 번 일한다~"))
         self.assertNotIn("후보 1개를 두 번 검수", comment)
         human = comment.split("<details>", 1)[0]
         self.assertNotIn("POL-DSP-001-R2", human)
@@ -171,6 +179,7 @@ def _assessment(score, final=False, unresolved=False):
             "humanExplanation": "현재 화면은 같은 시점에 확인한 버스 위치와 예보를 함께 보여줍니다. 새 예보만 먼저 여러 번 도착하면 기존 정보가 사라지고, 새 예보만 화면에 나올 수 있어요.",
             "humanTrigger": "버스 위치와 예보가 함께 보이는 동안 새 예보만 두 번 연속 먼저 도착하면 생깁니다.",
             "humanSuggestion": "새 정보의 짝이 완성될 때까지 기존 버스 위치와 예보를 유지해 주세요. 같은 순서로 응답이 도착하는 테스트도 추가하면 좋겠습니다.",
+            "humanMeme": "대충 하면~? 꼭 두 번 일한다~",
         })
     return {"assessments": [item]}
 

@@ -4,6 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from .comment_style import load_namukkun_style
 from .confluence import ConfluenceClient
 from .git_diff import read_git_diff, read_patches
 from .openai import OpenAIClient
@@ -24,6 +25,10 @@ def main(argv=None):
     parser.add_argument("--source-url", required=True)
     parser.add_argument("--pull-request-context", required=True)
     parser.add_argument("--wiki-directory", required=True)
+    parser.add_argument(
+        "--comment-style-directory",
+        default=str(Path(__file__).resolve().parents[1] / "skills" / "namukkun"),
+    )
     parser.add_argument("--output-directory", default=".domain-wiki/output")
     parser.add_argument("--threshold", type=int, default=80)
     args = parser.parse_args(argv)
@@ -92,6 +97,7 @@ def main(argv=None):
         model=os.environ.get("POLICY_REVIEW_MODEL", "gpt-6.1-sol"),
         reasoning_effort=os.environ.get("POLICY_REVIEW_REASONING", "high"),
     )
+    comment_style = load_namukkun_style(args.comment_style_directory)
     wiki_commit = _wiki_commit(wiki)
     result = run_issue_review(
         cheap_client=cheap,
@@ -103,6 +109,7 @@ def main(argv=None):
         wiki_commit=wiki_commit,
         source_url=args.source_url,
         pull_request=pull_request,
+        comment_style=comment_style,
         threshold=args.threshold,
     )
     result.update({

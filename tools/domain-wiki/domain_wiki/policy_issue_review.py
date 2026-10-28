@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .comment_style import NAMUKKUN_MEMES
+
 
 class PolicyIssueError(ValueError):
     pass
@@ -128,7 +130,7 @@ def verify_confluence_evidence(client, rules):
 
 def run_issue_review(
     *, cheap_client, strong_client, rules, patches, repository, head_sha,
-    wiki_commit, source_url, pull_request=None, threshold=80,
+    wiki_commit, source_url, pull_request=None, comment_style=None, threshold=80,
 ):
     if cheap_client.model == strong_client.model:
         raise PolicyIssueError("draft and review models must be different")
@@ -154,6 +156,7 @@ def run_issue_review(
         _prompt(
             "review-2",
             {**context, "candidates": candidates, "review": review1, "response": response},
+            comment_style=comment_style,
         ),
         _assessment_schema(final=True),
     )
@@ -204,6 +207,7 @@ def run_issue_review(
                     "humanExplanation": final.get("humanExplanation", candidate.get("impact", "")),
                     "humanTrigger": final.get("humanTrigger", candidate.get("condition", "")),
                     "humanSuggestion": final.get("humanSuggestion", final.get("finalComment", "")),
+                    "humanMeme": final.get("humanMeme", ""),
                     "reviewRationale": final.get("rationale", ""),
                     "wikiCommit": wiki_commit,
                     "sourceUrl": source_url,
@@ -219,6 +223,13 @@ def run_issue_review(
                     },
                 }
             )
+    meme_kept = False
+    for issue in issues:
+        meme = issue.get("humanMeme", "")
+        if not meme_kept and meme in NAMUKKUN_MEMES:
+            meme_kept = True
+        else:
+            issue["humanMeme"] = ""
     return {
         "stages": ["discover", "review-1", "author-response", "review-2"],
         "threshold": threshold,
@@ -262,8 +273,14 @@ def render_comment(result):
     if not result["issues"]:
         lines.extend(_ai_details(result))
         return "\n".join(lines) + "\n"
+    meme_used = False
     for issue in result["issues"]:
         scores = issue["scores"]
+        suggestion = issue["humanSuggestion"]
+        meme = issue.get("humanMeme", "")
+        if not meme_used and meme in NAMUKKUN_MEMES:
+            suggestion = f"{suggestion}\n\n{meme}"
+            meme_used = True
         lines.extend(
             [
                 f"### {issue['humanTitle']}",
@@ -276,7 +293,7 @@ def render_comment(result):
                 "",
                 "**어떻게 바꾸면 좋을까요?**",
                 "",
-                issue["humanSuggestion"],
+                suggestion,
                 "",
                 "<details>",
                 "<summary>검토 근거</summary>",
@@ -313,7 +330,10 @@ def _ai_details(result):
             "threshold": result.get("threshold"),
             "candidateCount": result.get("candidateCount"),
             "evaluations": result.get("evaluations"),
-            "issues": result.get("issues"),
+            "issues": [
+                {key: value for key, value in issue.items() if key != "humanMeme"}
+                for issue in result.get("issues", [])
+            ],
         },
     }
     serialized = json.dumps(payload, ensure_ascii=False, indent=2).replace("`", "\\u0060")
@@ -371,7 +391,7 @@ def _rule_payload(rule):
     }
 
 
-def _prompt(stage, payload):
+def _prompt(stage, payload, comment_style=None):
     instructions = {
         "discover": (
             "Find concrete policy violations in changed code only. Do not score. "
@@ -405,6 +425,17 @@ def _prompt(stage, payload):
             "use metaphors, vague wording, or repeat the same conclusion across fields."
         ),
     }[stage]
+    if stage == "review-2" and comment_style:
+        instructions += (
+            "\n\nAfter the verdict is fixed, apply the following trusted team comment "
+            "style only to the human fields. Put no meme inside humanSuggestion. "
+            "Choose one exact catalog phrase for humanMeme or return an empty string.\n"
+            + comment_style["boundary"]
+            + "\n\nSKILL:\n"
+            + comment_style["instructions"]
+            + "\n\nMEME CATALOG:\n"
+            + comment_style["memes"]
+        )
     return {"promptVersion": "policy-issue-review-v1", "stage": stage, "systemInstructions": instructions, **payload}
 
 
@@ -438,10 +469,12 @@ def _assessment_schema(final=False):
             "humanExplanation": {"type": "string"},
             "humanTrigger": {"type": "string"},
             "humanSuggestion": {"type": "string"},
+            "humanMeme": {"type": "string", "enum": ["", *NAMUKKUN_MEMES]},
         })
         required.extend([
             "unresolvedCounterevidence", "finalComment", "humanTitle",
             "humanExplanation", "humanTrigger", "humanSuggestion",
+            "humanMeme",
         ])
     item = {"type": "object", "additionalProperties": False, "required": required, "properties": properties}
     return {"type": "object", "additionalProperties": False, "required": ["assessments"], "properties": {"assessments": {"type": "array", "items": item}}}
