@@ -136,17 +136,30 @@ PR이 머지되면 최종 코드와 PR 대화를 다시 읽습니다. 그 내용
 
 Confluence 회의록은 결정 근거로만 읽습니다. 자동으로 수정하지 않습니다. 다음 PR부터는 갱신된 Git Wiki를 다시 읽기 때문에, 새 코드도 최신 정책과 문서를 기준으로 검수할 수 있습니다.
 
-Lab의 현재 구현은 머지 후 Confluence 도메인 문서를 수정하고 `gpt-6-luna`를 두 번 호출합니다. 위 그림은 실제 저장소에 적용할 목표 흐름입니다. Git Wiki 갱신과 `gpt-6.1-sol` 교차 검수는 아직 구현하고 검증해야 합니다.
+실제 저장소 구현은 Confluence에 쓰기 기능을 제공하지 않습니다. PR 검수와 머지 후
+Wiki 변경안 모두 `gpt-6-luna`가 초안을 만들고 `gpt-6.1-sol`이 두 번 검수합니다.
+머지 후에는 허용 목록에 있는 Wiki 문서의 현재 문장과 바꿀 문장을 정확히 지정하고,
+현재 문장이 한 번만 존재할 때만 변경합니다.
+
+구현 코드는 아래 경로에서 확인할 수 있습니다.
+
+- `tools/domain-wiki/domain_wiki/policy_issue_review.py`: 정책 위반 후보, 채점, 2회 검수, PR 댓글
+- `tools/domain-wiki/domain_wiki/wiki_update.py`: Wiki 변경 후보, 2회 검수, 확정된 문장 교체
+- `tools/domain-wiki/wiki-seed/`: 머지 시 초기화할 AI용 Wiki 문서
+- `.github/workflows/domain-policy-review.yml`: PR이 열릴 때 실행하는 정책 검수
+- `.github/workflows/domain-wiki-update.yml`: `dev` 머지 뒤 실행하는 Git Wiki 갱신
 
 ## 확인 사항
 
 - [x] Lab에서 실제 PR의 중간 커밋을 복사해 정책 위반 후보를 검수했습니다.
 - [x] 100점을 받은 후보가 사람용 설명과 AI용 JSON을 포함한 댓글로 작성되는 것을 확인했습니다.
 - [x] Lab 도구의 단위 테스트 146개와 GitHub `review`, `test` 검사를 통과했습니다.
-- [ ] 실제 저장소용 브랜치에서 정책 검수 단위 테스트를 통과했습니다.
-- [ ] 실제 저장소의 Git Wiki 정책을 읽고 80점 미만 후보가 댓글에서 제외되는지 확인했습니다.
-- [ ] PR이 머지되면 확정된 변경만 Git Wiki에 반영되는지 확인했습니다.
-- [ ] 검수 결과가 확정되지 않으면 Git Wiki를 수정하지 않는지 확인했습니다.
+- [x] 실제 저장소용 브랜치에서 정책 검수와 Wiki 갱신 단위 테스트 17개를 통과했습니다.
+- [x] 80점 미만 후보가 정책 위반 댓글에서 제외되고 탈락 이유로 기록되는지 단위 테스트로 확인했습니다.
+- [x] 확정된 변경만 허용된 Git Wiki 문서에 반영되는지 단위 테스트로 확인했습니다.
+- [x] 반대 근거가 남은 변경 후보는 Git Wiki를 수정하지 않는지 단위 테스트로 확인했습니다.
+- [ ] 실제 저장소에서 PR 댓글 워크플로를 실행하지 않았습니다.
+- [ ] 실제 `dev` 머지로 Git Wiki가 갱신되는지는 아직 확인하지 않았습니다.
 - [x] 기존 빌드와 배포 흐름에 영향을 주지 않는지 확인했습니다.
 
 ## 참고 사항
@@ -156,12 +169,14 @@ Lab에서는 실제 Salmonbus PR의 base/head SHA를 복사해 원본 코드를 
 - [Lab 정책 검수 예시](https://github.com/korogoo/salmonbus-domain-wiki-lab/pull/26#issuecomment-6440220511)
 - [Lab 구현 브랜치](https://github.com/korogoo/salmonbus-domain-wiki-lab/tree/lab/tools/domain-wiki)
 
-실제 저장소에 적용하기 전에 아래 설정이 필요합니다.
+실제 저장소에서 AI 검수를 실행하려면 아래 설정이 필요합니다.
 
-- Git Wiki의 활성 정책에 실제 저장소를 적용 대상으로 등록합니다.
+- Git Wiki의 정책은 우선 `draft`로 게시합니다. FE·BE 승인 뒤에만 `active`로 바꿉니다.
 - `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`, `OPENAI_API_KEY`를 저장소 Secret으로 등록합니다.
-- 워크플로에 PR 댓글과 Git Wiki 갱신에 필요한 최소 권한을 부여합니다.
 - 외부 fork의 코드는 실행하지 않고, base 브랜치의 검수 코드만 신뢰해서 실행하는 조건을 유지합니다.
+
+2026-10-28 확인 결과 세 Secret은 아직 등록되지 않았습니다. Secret이 없어도 머지 시
+Wiki 기본 문서는 만들 수 있지만, 모델을 호출하는 PR 검수와 머지 문서 검수는 건너뜁니다.
 
 로컬 Backend 전체 빌드는 Colima가 Ryuk의 Docker 소켓 마운트를 지원하지 않아 `TESTCONTAINERS_RYUK_DISABLED=true`로 실행했습니다. 테스트용 PostgreSQL 컨테이너는 그대로 사용했고, 전체 빌드와 배포 패키징, 배포 리허설 169개 검사가 통과했습니다.
 
