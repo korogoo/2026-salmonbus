@@ -166,4 +166,3 @@ Lab에서는 실제 Salmonbus PR의 base/head SHA를 복사해 원본 코드를 
 로컬 Backend 전체 빌드는 Colima가 Ryuk의 Docker 소켓 마운트를 지원하지 않아 `TESTCONTAINERS_RYUK_DISABLED=true`로 실행했습니다. 테스트용 PostgreSQL 컨테이너는 그대로 사용했고, 전체 빌드와 배포 패키징, 배포 리허설 169개 검사가 통과했습니다.
 
 실제 구현에서는 정책 검수와 머지 후 Git Wiki 갱신까지 다룹니다. 회의록 자동 수정과 `namukkun` 공유 스킬은 포함하지 않습니다.
-
