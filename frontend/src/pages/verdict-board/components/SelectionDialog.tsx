@@ -1,10 +1,12 @@
 import { useState, type SubmitEvent } from "react";
 import type { FavoriteTarget } from "@/shared/api/favorites.types";
 import { createFavoriteGroup } from "@/shared/api/favorites.api";
+import { maskedPropsFor } from "@/shared/analytics/maskedProps";
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
 import { FavoritesNotice } from "@/shared/components/FavoritesNotice";
 import { useFavorites } from "@/shared/hooks/useFavorites";
 import { useFavoriteAction } from "@/shared/hooks/useFavoriteAction";
+import { playHaptic } from "@/shared/haptic/haptic";
 import * as buttons from "@/shared/styles/button.css";
 import * as formStyles from "@/shared/styles/form.css";
 import {
@@ -67,7 +69,7 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
         </p>
       )}
       {groups.map((group) => (
-        <label className={`${styles.choice} amp-mask`} key={group.id}>
+        <label {...maskedPropsFor(styles.choice)} key={group.id}>
           <span>{group.name}</span>
           <span className={styles.choiceCount}>
             {favoriteCountFor(group, target, ids)} / {MAX_FAVORITES_PER_GROUP}
@@ -76,14 +78,15 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
             type="checkbox"
             checked={ids.includes(group.id)}
             disabled={busy}
-            onChange={(event) =>
-              setChosen(event.target.checked ? [...ids, group.id] : ids.filter((id) => id !== group.id))
-            }
+            onChange={(event) => {
+              setChosen(event.target.checked ? [...ids, group.id] : ids.filter((id) => id !== group.id));
+              playHaptic("selection");
+            }}
           />
         </label>
       ))}
       {creating ? (
-        <form className={`${styles.createGroup} amp-mask`} onSubmit={(event) => void createGroup(event)}>
+        <form {...maskedPropsFor(styles.createGroup)} onSubmit={(event) => void createGroup(event)}>
           <label htmlFor="favorite-group-name">그룹 이름</label>
           <input
             id="favorite-group-name"
@@ -178,7 +181,7 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
               busy || refreshingGroups || resource.status !== "success" || groups.length === 0 || full || missing
             }
             onClick={() =>
-              void run(() => saveSelections(ids)).then((ok) => {
+              void run(() => saveSelections(ids), { resultHaptic: true }).then((ok) => {
                 if (ok) onSaved();
               })
             }

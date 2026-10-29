@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { deleteFavorite, saveFavoriteOrder, saveGroupOrder } from "@/shared/api/favorites.api";
 import type { FavoriteGroup, HomeFavorite, SavedFavorite } from "@/shared/api/favorites.types";
 import { latestSuccessOf } from "@/shared/api/polledResource";
+import { maskedPropsFor } from "@/shared/analytics/maskedProps";
 import { EmptyFavoriteGroup } from "@/shared/components/EmptyFavoriteGroup";
 import { RouteBadge } from "@/shared/components/RouteBadge";
 import { visuallyHidden } from "@/shared/styles/accessibility.css";
@@ -87,7 +88,7 @@ export function FavoriteEditor({ onClose, initialGroupId, initialFavorites }: Fa
       onClose(true);
       return;
     }
-    const ok = await run(async () => {
+    const saveChanges = async () => {
       let completed = 0;
       const persist = async (change: FavoriteOrderChange) => {
         const result = await (change.groupId === null
@@ -118,13 +119,13 @@ export function FavoriteEditor({ onClose, initialGroupId, initialFavorites }: Fa
         result = await persist(change);
       }
       return result;
-    });
-    if (ok) onClose(true);
+    };
+    if (await run(saveChanges, { resultHaptic: true })) onClose(true);
   }
   return (
     <section
       ref={editor}
-      className={`${styles.editor} amp-mask`}
+      {...maskedPropsFor(styles.editor)}
       aria-label="즐겨찾기 편집"
       aria-busy={summaries.status === "pending" && !hasGroupDetails}
       onKeyDown={(event) => {

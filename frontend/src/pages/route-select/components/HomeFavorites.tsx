@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState, type Keyboard
 import { Link } from "react-router";
 import type { FavoriteStatus, FavoriteTarget, HomeFavorite } from "@/shared/api/favorites.types";
 import { latestSuccessOf } from "@/shared/api/polledResource";
+import { maskedPropsFor } from "@/shared/analytics/maskedProps";
 import { SeatCountBadge } from "@/shared/components/SeatCountBadge";
 import { toSeatEstimate, toSeatLevel } from "@/shared/utils/seatGrade";
 import { seatLabelOf } from "@/shared/utils/seatLabelOf";
@@ -13,6 +14,7 @@ import { remainingTimeLabelOf } from "@/shared/utils/remainingTimeLabelOf";
 import { boardEntryStateFor } from "@/shared/routing/boardEntry";
 import { boardPathFor, favoritePath } from "@/shared/routing/paths";
 import { useFavorites, useHomeFavorites } from "@/shared/hooks/useFavorites";
+import { playHaptic } from "@/shared/haptic/haptic";
 import { FavoritesNotice, FavoritesRetryButton } from "@/shared/components/FavoritesNotice";
 import { FavoriteEditor } from "@/shared/components/favorite-editor/FavoriteEditor";
 import { Notice } from "@/shared/components/Notice";
@@ -62,6 +64,7 @@ export function HomeFavorites() {
     if (latest !== null) setPrevious({ groupId: group?.id, latest });
     setAnimateGroup(true);
     setSelected(id);
+    playHaptic("selection");
   };
   function handleGroupTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     const next =
@@ -158,13 +161,13 @@ export function HomeFavorites() {
     resource.status === "loadingError" ? resource : group && summary.status === "loadingError" ? summary : null;
   if (loadingError) {
     return (
-      <section className="amp-mask" aria-label="내 즐겨찾기">
+      <section {...maskedPropsFor()} aria-label="내 즐겨찾기">
         <FavoritesNotice home resource={loadingError} onRetry={resource.status === "loadingError" ? reload : retry} />
       </section>
     );
   }
   return (
-    <section className={`${homeStyles.section} amp-mask`} aria-label="내 즐겨찾기">
+    <section {...maskedPropsFor(homeStyles.section)} aria-label="내 즐겨찾기">
       <FavoritesNotice resource={resource} onRetry={reload} />
       {groups.length > 0 && (
         <div className={homeStyles.tabs}>

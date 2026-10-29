@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
+import { maskedPropsFor } from "@/shared/analytics/maskedProps";
 import { AccountLayout } from "@/shared/components/AccountLayout";
 import { useStillOnScreen } from "@/shared/routing/stillOnScreen";
+import { useResultHaptic } from "@/shared/haptic/haptic";
 import { LoginButton } from "@/shared/components/LoginButton";
 import { useAuth } from "@/shared/hooks/useAuth";
 import { authErrorOf } from "@/shared/utils/authErrorOf";
@@ -55,6 +57,7 @@ export function NicknamePage() {
 
 function NicknameForm({ current }: { current: string }) {
   const isStillOnScreen = useStillOnScreen();
+  const playResultHaptic = useResultHaptic();
   const { changeNickname } = useAuth();
   const navigate = useNavigate();
   const [nickname, setNickname] = useState(current);
@@ -69,6 +72,7 @@ function NicknameForm({ current }: { current: string }) {
     setError(null);
     const result = await changeNickname(nickname);
     setBusy(false);
+    playResultHaptic(result.ok);
     if (!result.ok) {
       setError(authErrorOf(result.failure));
       return;
@@ -78,7 +82,7 @@ function NicknameForm({ current }: { current: string }) {
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="amp-mask">
+    <form onSubmit={(event) => void submit(event)} {...maskedPropsFor()}>
       <label className={styles.label} htmlFor="nickname">
         닉네임
       </label>
