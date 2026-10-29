@@ -8,11 +8,14 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
@@ -47,6 +50,36 @@ public class JdbcRouteOperations implements RouteOperations {
             .param(routeId)
             .query(this::map)
             .optional();
+    }
+
+    List<RouteOperation> readSnapshot(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT * FROM route_operation ORDER BY source_route_id"
+        )) {
+            statement.setQueryTimeout(5);
+            try (ResultSet rows = statement.executeQuery()) {
+                List<RouteOperation> operations = new ArrayList<>();
+                while (rows.next()) {
+                    operations.add(map(rows, 0));
+                }
+                return List.copyOf(operations);
+            }
+        }
+    }
+
+    Optional<RouteOperation> readSnapshot(Connection connection, String routeId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT * FROM route_operation WHERE source_route_id=?"
+        )) {
+            statement.setQueryTimeout(5);
+            statement.setString(1, routeId);
+            try (ResultSet rows = statement.executeQuery()) {
+                if (rows.next()) {
+                    return Optional.of(map(rows, 0));
+                }
+                return Optional.empty();
+            }
+        }
     }
 
     @Override
@@ -524,7 +557,7 @@ public class JdbcRouteOperations implements RouteOperations {
     public void acknowledge(String routeId, final long revision) {
         jdbcClient.sql(
                 "UPDATE route_operation SET applied_revision=?,applied_at=CURRENT_TIMESTAMP"
-                    + " WHERE source_route_id=? AND revision=?")
+                    + " WHERE source_route_id=? AND revision=? AND applied_revision<>revision")
             .params(revision, routeId, revision)
             .update();
     }

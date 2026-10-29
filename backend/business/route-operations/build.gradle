@@ -1,6 +1,7 @@
 plugins { id 'java-library' }
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.postgresql:postgresql'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation testFixtures(project(':common'))
     testRuntimeOnly 'org.springframework.boot:spring-boot-flyway'

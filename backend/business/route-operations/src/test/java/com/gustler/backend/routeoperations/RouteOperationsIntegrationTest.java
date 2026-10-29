@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** Uses the shared PostgreSQL fixture, no additional database server per test. */
 @SpringBootTest(
     classes = RouteOperationsIntegrationTest.Config.class,
-    properties = "route-operations.enabled=true")
+    properties = {"route-operations.enabled=true", "route-operations.notifications-enabled=false"})
 class RouteOperationsIntegrationTest {
     private static final String ID = "228000184";
 
