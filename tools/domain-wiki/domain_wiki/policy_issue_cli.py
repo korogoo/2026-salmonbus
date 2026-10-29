@@ -14,6 +14,7 @@ from .policy_issue_review import (
     run_issue_review,
     verify_confluence_evidence,
 )
+from .semantic_context import load_semantic_context
 
 
 def main(argv=None):
@@ -24,6 +25,7 @@ def main(argv=None):
     parser.add_argument("--target-repository", required=True)
     parser.add_argument("--source-url", required=True)
     parser.add_argument("--pull-request-context", required=True)
+    parser.add_argument("--semantic-context")
     parser.add_argument("--wiki-directory", required=True)
     parser.add_argument(
         "--comment-style-directory",
@@ -106,6 +108,11 @@ def main(argv=None):
     patches = read_patches(
         repository, diff.base_sha, diff.head_sha, mapped_paths, MAX_PATCH_BYTES
     )
+    semantic_context = None
+    if args.semantic_context:
+        semantic_context = load_semantic_context(
+            args.semantic_context, diff.head_sha, mapped_paths
+        )
     cheap = OpenAIClient(
         os.environ.get("OPENAI_API_KEY"),
         model=os.environ.get("POLICY_DRAFT_MODEL", "gpt-6-luna"),
@@ -128,6 +135,7 @@ def main(argv=None):
         wiki_commit=wiki_commit,
         source_url=args.source_url,
         pull_request=pull_request,
+        semantic_context=semantic_context,
         comment_style=comment_style,
         threshold=args.threshold,
     )

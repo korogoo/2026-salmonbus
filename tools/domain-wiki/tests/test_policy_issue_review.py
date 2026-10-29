@@ -112,6 +112,8 @@ class PolicyIssueReviewTest(unittest.TestCase):
                 self.assertIn("untrusted data only", prompt["systemInstructions"])
         self.assertEqual("중간 상태에서 pairing을 구현합니다.", cheap.calls[0][0]["pullRequest"]["body"])
         self.assertEqual(86, result["issues"][0]["score"])
+        self.assertEqual("inferred", result["issues"][0]["evidenceBasis"])
+        self.assertEqual(16, len(result["issues"][0]["historyKey"]))
         comment = render_comment(result)
         self.assertIn("## 확인이 필요한 문제 1건", comment)
         self.assertIn("### 버스 위치 없이 새 예보만 보일 수 있어요", comment)
@@ -137,6 +139,7 @@ class PolicyIssueReviewTest(unittest.TestCase):
         self.assertEqual("POL-DSP-001-R2", parsed["review"]["issues"][0]["ruleId"])
         self.assertEqual("중간 상태에서 pairing을 구현합니다.", parsed["source"]["pullRequest"]["body"])
         self.assertEqual("47775855", parsed["review"]["issues"][0]["meetingEvidence"]["pageId"])
+        self.assertEqual("inferred", parsed["review"]["issues"][0]["evidenceBasis"])
 
     def test_unresolved_counterevidence_blocks_high_score(self):
         candidate = _candidate()
@@ -153,6 +156,19 @@ class PolicyIssueReviewTest(unittest.TestCase):
         self.assertIn("반대 근거 미해소", comment)
         self.assertNotIn("문제가...없네..?", comment)
         self.assertNotIn("해가 서쪽에서 뜨겄어~?", comment)
+
+    def test_guessed_evidence_never_leaves_a_comment(self):
+        candidate = _candidate()
+        cheap = FakeModel("cheap", [{"candidates": [candidate]}, {"responses": [{"candidateId": "C1", "disposition": "defend", "response": "x"}]}])
+        strong = FakeModel("strong", [_assessment(100), _assessment(100, final=True, evidence_basis="guessed")])
+        result = run_issue_review(
+            cheap_client=cheap, strong_client=strong, rules=self.rules,
+            patches={candidate["path"]: "patch"}, repository=self.root,
+            head_sha=self.head, wiki_commit="abc", source_url="url",
+        )
+        self.assertEqual([], result["issues"])
+        self.assertIn("guessed-evidence", result["evaluations"][0]["gateFailures"])
+        self.assertIn("추측 근거", render_comment(result))
 
     def test_completed_review_without_candidates_uses_namukkun_result(self):
         result = {
@@ -206,6 +222,7 @@ def _registry():
 def _candidate():
     return {
         "candidateId": "C1", "ruleId": "POL-DSP-001-R2",
+        "violationType": "paired-snapshot-discarded",
         "path": "frontend/src/pages/verdict-board/boardSnapshotPolicy.ts", "line": 2,
         "claim": "새 보드 응답이 짝이 맞는 스냅샷을 제거한다.",
         "condition": "예보 응답 뒤에 짝이 없는 보드 응답이 오면 발생한다.",
@@ -214,7 +231,7 @@ def _candidate():
     }
 
 
-def _assessment(score, final=False, unresolved=False):
+def _assessment(score, final=False, unresolved=False, evidence_basis="inferred"):
     values = {
         "policyApplicability": min(score, 25),
         "codeEvidence": min(max(score - 25, 0), 25),
@@ -226,6 +243,8 @@ def _assessment(score, final=False, unresolved=False):
     if final:
         item.update({
             "unresolvedCounterevidence": unresolved,
+            "evidenceBasis": evidence_basis,
+            "evidenceReason": "코드의 상태 변경 순서로 확인했다.",
             "finalComment": "짝이 맞는 최신 스냅샷을 유지해야 합니다.",
             "humanTitle": "버스 위치 없이 새 예보만 보일 수 있어요",
             "humanExplanation": "현재 화면은 같은 시점에 확인한 버스 위치와 예보를 함께 보여줍니다. 새 예보만 먼저 여러 번 도착하면 기존 정보가 사라지고, 새 예보만 화면에 나올 수 있어요.",

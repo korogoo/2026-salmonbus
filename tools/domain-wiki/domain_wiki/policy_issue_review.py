@@ -1,3 +1,4 @@
+import hashlib
 import html
 import json
 import re
@@ -132,7 +133,8 @@ def verify_confluence_evidence(client, rules):
 
 def run_issue_review(
     *, cheap_client, strong_client, rules, patches, repository, head_sha,
-    wiki_commit, source_url, pull_request=None, comment_style=None, threshold=80,
+    wiki_commit, source_url, pull_request=None, semantic_context=None,
+    comment_style=None, threshold=80,
 ):
     if cheap_client.model == strong_client.model:
         raise PolicyIssueError("draft and review models must be different")
@@ -144,6 +146,7 @@ def run_issue_review(
         "scoreThreshold": threshold,
         "scoringRubric": SCORE_RUBRIC,
         "pullRequest": pull_request or {"title": "", "body": ""},
+        "semanticContext": semantic_context,
     }
     discovery, usage1 = cheap_client.review(_prompt("discover", context), _discovery_schema())
     candidates = discovery.get("candidates", [])
@@ -179,20 +182,29 @@ def run_issue_review(
             failures.append("counterevidence")
         if score < threshold:
             failures.append("score")
+        if final.get("evidenceBasis") not in {"measured", "inferred"}:
+            failures.append("guessed-evidence")
         if not _valid_location(repository, head_sha, candidate, patches):
             failures.append("code-location")
         accepted = not failures
+        history_key = _history_key(
+            candidate.get("ruleId"), candidate.get("violationType")
+        )
         evaluations.append({
             "candidateId": candidate.get("candidateId"),
             "ruleId": candidate.get("ruleId"),
             "path": candidate.get("path"),
             "line": candidate.get("line"),
             "claim": candidate.get("claim"),
+            "violationType": candidate.get("violationType"),
+            "historyKey": history_key,
             "score": score,
             "scores": final.get("scores"),
             "decision": final.get("decision", "missing"),
             "unresolvedCounterevidence": final.get("unresolvedCounterevidence"),
             "rationale": final.get("rationale", ""),
+            "evidenceBasis": final.get("evidenceBasis"),
+            "evidenceReason": final.get("evidenceReason", ""),
             "gateFailures": failures,
             "accepted": accepted,
         })
@@ -202,6 +214,9 @@ def run_issue_review(
                     **candidate,
                     "policyId": rule.policy_id,
                     "policyText": rule.text,
+                    "historyKey": history_key,
+                    "evidenceBasis": final.get("evidenceBasis"),
+                    "evidenceReason": final.get("evidenceReason", ""),
                     "score": score,
                     "scores": final["scores"],
                     "finalComment": final.get("finalComment", ""),
@@ -243,6 +258,7 @@ def run_issue_review(
         "sourceUrl": source_url,
         "wikiCommit": wiki_commit,
         "pullRequest": pull_request or {"title": "", "body": ""},
+        "semanticContext": semantic_context,
     }
 
 
@@ -284,6 +300,7 @@ def render_comment(result):
             "final-decision": "최종 검수 미확정",
             "counterevidence": "반대 근거 미해소",
             "score": "근거 부족",
+            "guessed-evidence": "추측 근거",
             "code-location": "현재 코드 위치 확인 실패",
         }
         lines.extend(["", "<details>", "<summary>사람이 확인할 탈락 후보</summary>", ""])
@@ -340,6 +357,7 @@ def _ai_details(result):
             "baseSha": result.get("baseSha"),
             "headSha": result.get("headSha"),
             "wikiCommit": result.get("wikiCommit"),
+            "semanticContext": result.get("semanticContext"),
         },
         "review": {
             "stages": result.get("stages"),
@@ -394,6 +412,13 @@ def _valid_location(repository, head_sha, candidate, patches):
     return result.returncode == 0 and line <= len(result.stdout.splitlines())
 
 
+def _history_key(rule_id, violation_type):
+    if not isinstance(rule_id, str) or not isinstance(violation_type, str):
+        return None
+    value = f"{rule_id}\0{violation_type}".encode("utf-8")
+    return hashlib.sha256(value).hexdigest()[:16]
+
+
 def _plain(value):
     value = html.unescape(re.sub(r"<[^>]+>", " ", str(value)))
     return " ".join(value.split())
@@ -416,6 +441,10 @@ def _prompt(stage, payload, comment_style=None):
     instructions = untrusted_notice + {
         "discover": (
             "Find concrete policy violations in changed code only. Do not score. "
+            "semanticContext, when present, is trusted navigation data bound to the reviewed "
+            "head SHA. Use it to find symbols and references, but never treat it as policy or "
+            "runtime evidence. Give every candidate a stable lower-kebab-case violationType "
+            "that describes the behavior independently of file names or line numbers. "
             "For every rule, follow its analysisGuidance as review questions and trace "
             "at least one concrete state transition through the changed functions. "
             "Inspect retention limits, fallback selection, and the order of asynchronous "
@@ -434,6 +463,10 @@ def _prompt(stage, payload, comment_style=None):
             "Make the final independent judgment after the response. Confirm only reproducible "
             "violations with resolved counterevidence. Score all five scoringRubric dimensions "
             "independently using their full ranges; do not treat any one dimension as the total. "
+            "Classify evidenceBasis as measured only when an executed check directly reproduced "
+            "the behavior, inferred when code and navigation evidence demonstrate it without "
+            "execution, or guessed when it remains only a possibility. Explain that choice in "
+            "evidenceReason. "
             "Write rationale and finalComment in Korean. Also write the human fields for a "
             "teammate who does not know this policy implementation: humanTitle is a short "
             "user-visible result without policy IDs, file paths, scores, English identifiers, "
@@ -461,9 +494,10 @@ def _prompt(stage, payload, comment_style=None):
 def _discovery_schema():
     candidate = {
         "type": "object", "additionalProperties": False,
-        "required": ["candidateId", "ruleId", "path", "line", "claim", "condition", "impact", "codeEvidence"],
+        "required": ["candidateId", "ruleId", "violationType", "path", "line", "claim", "condition", "impact", "codeEvidence"],
         "properties": {
             "candidateId": {"type": "string"}, "ruleId": {"type": "string"},
+            "violationType": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
             "path": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
             "claim": {"type": "string"}, "condition": {"type": "string"},
             "impact": {"type": "string"}, "codeEvidence": {"type": "string"},
@@ -483,6 +517,8 @@ def _assessment_schema(final=False):
     if final:
         properties.update({
             "unresolvedCounterevidence": {"type": "boolean"},
+            "evidenceBasis": {"type": "string", "enum": ["measured", "inferred", "guessed"]},
+            "evidenceReason": {"type": "string"},
             "finalComment": {"type": "string"},
             "humanTitle": {"type": "string"},
             "humanExplanation": {"type": "string"},
@@ -491,7 +527,8 @@ def _assessment_schema(final=False):
             "humanMeme": {"type": "string", "enum": ["", *NAMUKKUN_MEMES]},
         })
         required.extend([
-            "unresolvedCounterevidence", "finalComment", "humanTitle",
+            "unresolvedCounterevidence", "evidenceBasis", "evidenceReason",
+            "finalComment", "humanTitle",
             "humanExplanation", "humanTrigger", "humanSuggestion",
             "humanMeme",
         ])
