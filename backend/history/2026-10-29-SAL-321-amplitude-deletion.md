@@ -35,7 +35,7 @@ SQL 조회 시 공개 ID를 화면이나 로그에 출력하지 않고 대기 �
 
 ## 병행 작업과 마이그레이션
 
-`codex/route-operations`가 V47을 사용하므로 이 작업은 V48을 사용한다. V48이 먼저 운영 DB에 적용된 뒤 V47을 뒤늦게 합치면 Flyway의 순서 검증에 걸릴 수 있다. 병합 및 배포 전에 V47 선적용 여부를 확인하거나 아직 적용하지 않은 마이그레이션 번호를 조정해야 한다.
+CI의 연속 번호 검사에 맞춰 이 변경은 V47을 사용한다. 먼저 작성한 V48은 V47 공백 때문에 검증에 실패했다. 아직 병합하지 않은 `codex/route-operations`도 V47을 사용하므로, 두 작업을 합칠 때 병합 순서에 맞춰 아직 배포하지 않은 번호와 마이그레이션 순서 테스트 대상을 조정한다.
 
 `codex/SAL-318-ci-fix`와 `application.yml`, `test-baseline.properties`가 겹친다. 다른 브랜치의 변경은 이 작업으로 복사하지 않았다. 단순화 후 이 작업의 테스트 증가분은 api-app 14개, member 5개다. 합칠 때 각 브랜치의 증가분을 더하고 전체 실행 결과와 대조한다.
 
@@ -49,3 +49,10 @@ SQL 조회 시 공개 ID를 화면이나 로그에 출력하지 않고 대기 �
 - dev/운영 키 등록, dev Amplitude 실연동, Session Replay 삭제는 미확인이다.
 
 근거: [SAL-321](https://higgs95.atlassian.net/browse/SAL-321), [Amplitude User Privacy API](https://www.amplitude.com/docs/apis/analytics/user-privacy).
+
+## PR #215 CI 실패 수정
+
+- 원격 CI에서 테스트 5개가 실패했다. MigrationOrderTest 4개는 V47 공백과 이전 작업을 가리키던 테스트 대상 목록이 원인이었다. 마이그레이션을 V47로 바꾸고 대상 목록을 analytics_deletion으로 맞췄다.
+- AppleLoginConfigurationTest 1개는 애플 탈퇴 설정에 필요한 AmplitudeDeletionJob을 시험용 컨텍스트에 등록하지 않아 실패했다. 모의 객체를 등록했다.
+- 포크 PR의 읽기 전용 토큰으로 테스트 결과 체크 생성이 거절됐다. 포크에서만 action-junit-report의 annotate_only를 켜 로그와 잡 요약을 유지한다. 테스트 실행이나 실패 판정은 건드리지 않는다.
+- 로컬 빌드와 테스트는 CPU 중단 후 다시 실행하지 않았다. 수정한 커밋의 검증은 원격 CI 결과로 별도 확인한다.
