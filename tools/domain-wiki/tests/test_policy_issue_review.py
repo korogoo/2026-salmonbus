@@ -119,15 +119,22 @@ class PolicyIssueReviewTest(unittest.TestCase):
         self.assertIn("**어떻게 바꾸면 좋을까요?**", comment)
         self.assertEqual(1, comment.count("대충 하면~? 꼭 두 번 일한다~"))
         self.assertNotIn("후보 1개를 두 번 검수", comment)
-        human = comment.split("<details>", 1)[0]
+        prose = comment.split("<details>", 1)[0]
+        human = comment.split("<summary>AI와 로컬 도구용 검증 데이터</summary>", 1)[0]
         self.assertNotIn("POL-DSP-001-R2", human)
-        self.assertNotIn("boardSnapshotPolicy.ts", human)
+        self.assertNotIn("86/100", human)
+        self.assertNotIn("항목별 점수", human)
+        self.assertNotIn("boardSnapshotPolicy.ts", prose)
+        self.assertIn("boardSnapshotPolicy.ts", human)
+        self.assertIn("팀에서 정한 동작", human)
         self.assertIn("<summary>AI와 로컬 도구용 검증 데이터</summary>", comment)
         data = comment.split("<!-- policy-review-ai-data:start -->", 1)[1]
         data = data.split("<!-- policy-review-ai-data:end -->", 1)[0]
         data = data.split("```json", 1)[1].split("```", 1)[0]
         parsed = json.loads(data)
         self.assertEqual("salmonbus-policy-review", parsed["kind"])
+        self.assertEqual(86, parsed["review"]["issues"][0]["score"])
+        self.assertEqual("POL-DSP-001-R2", parsed["review"]["issues"][0]["ruleId"])
         self.assertEqual("중간 상태에서 pairing을 구현합니다.", parsed["source"]["pullRequest"]["body"])
         self.assertEqual("47775855", parsed["review"]["issues"][0]["meetingEvidence"]["pageId"])
 

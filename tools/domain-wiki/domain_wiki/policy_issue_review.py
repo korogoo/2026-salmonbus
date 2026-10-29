@@ -283,20 +283,19 @@ def render_comment(result):
             "active-rule": "활성 정책 불일치",
             "final-decision": "최종 검수 미확정",
             "counterevidence": "반대 근거 미해소",
-            "score": "80점 미만",
+            "score": "근거 부족",
             "code-location": "현재 코드 위치 확인 실패",
         }
         lines.extend(["", "<details>", "<summary>사람이 확인할 탈락 후보</summary>", ""])
         for item in rejected:
             reasons = ", ".join(labels[value] for value in item["gateFailures"])
-            lines.append(f"- `{item['candidateId']}` / `{item['ruleId']}` / {item['score']}/100 / {reasons}: {item['rationale']}")
+            lines.append(f"- {reasons}: {item['rationale']}")
         lines.extend(["", "</details>", ""])
     if not result["issues"]:
         lines.extend(_ai_details(result))
         return "\n".join(lines) + "\n"
     meme_used = False
     for issue in result["issues"]:
-        scores = issue["scores"]
         suggestion = issue["humanSuggestion"]
         meme = issue.get("humanMeme", "")
         if not meme_used and meme in NAMUKKUN_MEMES:
@@ -320,10 +319,7 @@ def render_comment(result):
                 "<summary>검토 근거</summary>",
                 "",
                 f"- 코드: `{issue['path']}:{issue['line']}`",
-                f"- 정책: `{issue['ruleId']}`",
-                f"- 점수: {issue['score']}/100",
-                "- 항목별 점수: " + ", ".join(f"{key} {scores[key]}/{limit}" for key, limit in SCORE_LIMITS.items()),
-                f"- 정책 문장: {issue['policyText']}",
+                f"- 팀에서 정한 동작: {issue['policyText']}",
                 f"- [원본 PR]({issue['sourceUrl']})",
                 "",
                 "</details>",
