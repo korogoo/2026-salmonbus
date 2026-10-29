@@ -11,6 +11,7 @@ import {
   MAX_FAVORITE_GROUPS,
   MAX_FAVORITES_PER_GROUP,
   exceedsFavoriteLimit,
+  favoriteCountFor,
   groupNameError,
   selectedGroups,
 } from "@/shared/utils/favoritePolicy";
@@ -69,7 +70,7 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
         <label className={`${styles.choice} amp-mask`} key={group.id}>
           <span>{group.name}</span>
           <span className={styles.choiceCount}>
-            {group.favorites.length} / {MAX_FAVORITES_PER_GROUP}
+            {favoriteCountFor(group, target, ids)} / {MAX_FAVORITES_PER_GROUP}
           </span>
           <input
             type="checkbox"
@@ -106,14 +107,6 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
           </p>
           <div className={formStyles.actions}>
             <button
-              className={buttons.primary}
-              disabled={
-                busy || invalidName !== null || groups.length >= MAX_FAVORITE_GROUPS || resource.status !== "success"
-              }
-            >
-              {busy ? "만드는 중…" : "만들기"}
-            </button>
-            <button
               className={buttons.secondary}
               type="button"
               disabled={busy}
@@ -124,6 +117,14 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
               }}
             >
               돌아가기
+            </button>
+            <button
+              className={buttons.primary}
+              disabled={
+                busy || invalidName !== null || groups.length >= MAX_FAVORITE_GROUPS || resource.status !== "success"
+              }
+            >
+              {busy ? "만드는 중…" : "만들기"}
             </button>
           </div>
         </form>
@@ -168,6 +169,9 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
       )}
       {!creating && (
         <div className={formStyles.actions}>
+          <button className={buttons.secondary} disabled={busy} onClick={onClose}>
+            취소
+          </button>
           <button
             className={buttons.primary}
             disabled={
@@ -180,9 +184,6 @@ export function SelectionDialog({ target, onClose, onSaved }: SelectionDialogPro
             }
           >
             {busy ? "저장 중…" : "저장"}
-          </button>
-          <button className={buttons.secondary} disabled={busy} onClick={onClose}>
-            취소
           </button>
         </div>
       )}
