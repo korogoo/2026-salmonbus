@@ -11,14 +11,14 @@ import com.gustler.backend.member.api.SignInWithSocialAccount;
 import com.gustler.backend.member.api.WithdrawMember;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.http.HttpClient;
-import java.time.Clock;
 import java.time.Duration;
+import java.time.Clock;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -105,16 +105,20 @@ public class SocialLoginConfiguration {
         AmplitudeDeletionJob analytics,
         MeterRegistry meters
     ) {
+        AppleRevokeClient revokeClient = new AppleRevokeClient(
+            providerRestClient(), properties.apple().clientId(), properties.apple().revokeUri(), clientSecret);
+        return new AppleWithdrawal(withdrawMember, revokeClient, meters, analytics);
+    }
+
+    /** 제공자 API 를 부르는 클라이언트. 제공자가 응답하지 않아도 요청 스레드가 매달리지 않게 제한 시간을 둔다. */
+    static RestClient providerRestClient() {
         HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(PROVIDER_CONNECT_TIMEOUT)
             .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(PROVIDER_READ_TIMEOUT);
-        AppleRevokeClient revokeClient = new AppleRevokeClient(
-            RestClient.builder().requestFactory(requestFactory).build(),
-            properties.apple().clientId(), properties.apple().revokeUri(), clientSecret);
-        return new AppleWithdrawal(withdrawMember, revokeClient, meters, analytics);
+        return RestClient.builder().requestFactory(requestFactory).build();
     }
 
     @Bean
