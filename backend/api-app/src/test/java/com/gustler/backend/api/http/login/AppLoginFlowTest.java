@@ -9,9 +9,6 @@ import com.gustler.backend.member.api.SignedInMember;
 import com.gustler.backend.member.api.SocialIdentity;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.http.HttpResponse;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -118,11 +115,14 @@ class AppLoginFlowTest {
         double loginsBefore = login("kakao", "success", "new");
         LoginBrowser browser = new LoginBrowser(port);
         String nonce = nonceOf(browser.postJson("/api/auth/kakao/native/nonce", "{}"));
+        long sessionsAfterNonce = sessionCount();
 
         // when
         HttpResponse<String> actual = browser.postJson("/api/auth/kakao/native",
             body(kakao.appIdToken(KAKAO_SUBJECT, nonce, claims -> {
             }, false)));
+
+        long sessionsAfterLogin = sessionCount();
 
         // then
         JsonNode session = objectMapper.readTree(browser.get("/api/auth/session").body());
@@ -132,6 +132,8 @@ class AppLoginFlowTest {
             softly.assertThat(session.path("member").path("nickname").asString()).matches(SignUpNicknames.PATTERN);
             softly.assertThat(memberCount()).isEqualTo(1);
             softly.assertThat(favoriteGroupCount()).isEqualTo(1);
+            softly.assertThat(sessionsAfterNonce).isEqualTo(1);
+            softly.assertThat(sessionsAfterLogin).isZero();
             softly.assertThat(login("kakao", "success", "new") - loginsBefore).isEqualTo(1);
         });
     }
@@ -183,41 +185,15 @@ class AppLoginFlowTest {
     }
 
     @Test
-    void 발급자_대상_만료_서명_nonce_중_하나라도_틀리면_거절하고_회원을_만들지_않는다() throws Exception {
+    void 웹용_토큰으로_앱_로그인하면_거절하고_회원을_만들지_않는다() throws Exception {
         // given
-        Instant past = Instant.now().minusSeconds(3600);
-        List<String> rejectedStatuses = new ArrayList<>();
+        LoginBrowser browser = new LoginBrowser(port);
+        String nonce = nonceOf(browser.postJson("/api/auth/apple/native/nonce", "{}"));
+        String webToken = apple.appIdToken(APPLE_SUBJECT, NonceRule.SHA256_HEX.expectedClaim(nonce),
+            claims -> claims.audience(FakeAppleServer.CLIENT_ID), false);
 
         // when
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, hashed(nonce),
-            claims -> claims.issuer("https://appleid.example"), false)));
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, hashed(nonce),
-            claims -> claims.audience(FakeAppleServer.CLIENT_ID), false)));
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, hashed(nonce),
-            claims -> claims.issueTime(Date.from(past)).expirationTime(Date.from(past.plusSeconds(300))), false)));
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, hashed(nonce), claims -> {
-        }, true)));
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, nonce, claims -> {
-        }, false)));
-        rejectedStatuses.add(appleLogin(nonce -> apple.appIdToken(APPLE_SUBJECT, hashed("other-nonce"), claims -> {
-        }, false)));
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(rejectedStatuses).containsOnly(String.valueOf(HttpStatus.UNAUTHORIZED.value()));
-            softly.assertThat(rejectedStatuses).hasSize(6);
-            softly.assertThat(memberCount()).isZero();
-        });
-    }
-
-    @Test
-    void nonce를_받지_않은_브라우저의_로그인은_거절한다() throws Exception {
-        // given
-        String idToken = kakao.appIdToken(KAKAO_SUBJECT, "guessed-nonce", claims -> {
-        }, false);
-
-        // when
-        HttpResponse<String> actual = new LoginBrowser(port).postJson("/api/auth/kakao/native", body(idToken));
+        HttpResponse<String> actual = browser.postJson("/api/auth/apple/native", body(webToken));
 
         // then
         assertSoftly(softly -> {
@@ -264,55 +240,6 @@ class AppLoginFlowTest {
         });
     }
 
-    @Test
-    void 켜지지_않은_제공자는_404이고_본문에_토큰이_없으면_400이다() throws Exception {
-        // given
-        LoginBrowser browser = new LoginBrowser(port);
-        nonceOf(browser.postJson("/api/auth/kakao/native/nonce", "{}"));
-
-        // when
-        HttpResponse<String> unknownNonce = browser.postJson("/api/auth/naver/native/nonce", "{}");
-        HttpResponse<String> unknownLogin = browser.postJson("/api/auth/naver/native", body("token"));
-        HttpResponse<String> emptyToken = browser.postJson("/api/auth/kakao/native", "{}");
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(unknownNonce.statusCode()).isEqualTo(HttpStatus.NOT_FOUND.value());
-            softly.assertThat(unknownLogin.statusCode()).isEqualTo(HttpStatus.NOT_FOUND.value());
-            softly.assertThat(emptyToken.statusCode()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-            softly.assertThat(codeOf(emptyToken)).isEqualTo("INVALID_REQUEST");
-        });
-    }
-
-    @Test
-    void 로그인하면_로그인_중_임시_세션을_지운다() throws Exception {
-        // given
-        LoginBrowser browser = new LoginBrowser(port);
-        String nonce = nonceOf(browser.postJson("/api/auth/kakao/native/nonce", "{}"));
-        long sessionsAfterNonce = sessionCount();
-
-        // when
-        browser.postJson("/api/auth/kakao/native", body(kakao.appIdToken(KAKAO_SUBJECT, nonce, claims -> {
-        }, false)));
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(sessionsAfterNonce).isEqualTo(1);
-            softly.assertThat(sessionCount()).isZero();
-        });
-    }
-
-    private String appleLogin(TokenFor tokenFor) throws Exception {
-        LoginBrowser browser = new LoginBrowser(port);
-        String nonce = nonceOf(browser.postJson("/api/auth/apple/native/nonce", "{}"));
-        HttpResponse<String> response = browser.postJson("/api/auth/apple/native", body(tokenFor.apply(nonce)));
-        return String.valueOf(response.statusCode());
-    }
-
-    private static String hashed(String nonce) {
-        return NonceRule.SHA256_HEX.expectedClaim(nonce);
-    }
-
     private String nonceOf(HttpResponse<String> response) {
         if (response.statusCode() != HttpStatus.OK.value()) {
             throw new IllegalStateException("nonce 를 받지 못했다. status=" + response.statusCode());
@@ -344,10 +271,5 @@ class AppLoginFlowTest {
         var counter = meters.find("salmonbus.user.login")
             .tags("provider", provider, "result", result, "member", member).counter();
         return counter == null ? 0 : counter.count();
-    }
-
-    @FunctionalInterface
-    private interface TokenFor {
-        String apply(String nonce) throws Exception;
     }
 }

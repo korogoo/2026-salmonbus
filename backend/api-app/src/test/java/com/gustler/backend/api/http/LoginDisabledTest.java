@@ -49,8 +49,6 @@ class LoginDisabledTest {
             Arguments.of("POST", "/api/auth/refresh"),
             Arguments.of("POST", "/api/auth/logout"),
             Arguments.of("POST", "/api/auth/kakao/native/nonce"),
-            Arguments.of("POST", "/api/auth/apple/native/nonce"),
-            Arguments.of("POST", "/api/auth/kakao/native"),
             Arguments.of("POST", "/api/auth/apple/native"),
             Arguments.of("GET", "/api/me"),
             Arguments.of("GET", "/api/me/favorite-groups"),

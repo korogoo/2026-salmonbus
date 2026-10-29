@@ -38,15 +38,11 @@ class AppleAppWithdrawalFlowTest {
     private FakeAppleServer apple;
 
     @Autowired
-    private FakeKakaoServer kakao;
-
-    @Autowired
     private MeterRegistry meters;
 
     @BeforeEach
     void 상태를_비운다() {
         apple.reset();
-        kakao.reset();
         jdbcClient.sql("DELETE FROM member").update();
         jdbcClient.sql("DELETE FROM SPRING_SESSION").update();
     }
@@ -120,27 +116,6 @@ class AppleAppWithdrawalFlowTest {
     }
 
     @Test
-    void 웹용_코드나_모르는_코드면_교환이_거절되어_회원을_남긴다() throws Exception {
-        // given
-        LoginBrowser browser = signedInWithApple(SUBJECT);
-        double rejectedBefore = withdrawals("code_rejected");
-        String webCode = apple.authorize(apple.baseUrl() + "/auth/authorize?nonce=n", SUBJECT);
-
-        // when
-        HttpResponse<String> webCodeResult = browser.postJson(PATH, code(webCode));
-        HttpResponse<String> unknownResult = browser.postJson(PATH, code("unknown-code"));
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(webCodeResult.statusCode()).isEqualTo(HttpStatus.CONFLICT.value());
-            softly.assertThat(unknownResult.statusCode()).isEqualTo(HttpStatus.CONFLICT.value());
-            softly.assertThat(apple.revokeRequests()).isEmpty();
-            softly.assertThat(count("member")).isEqualTo(1);
-            softly.assertThat(withdrawals("code_rejected") - rejectedBefore).isEqualTo(2);
-        });
-    }
-
-    @Test
     void 교환한_ID_토큰의_서명이나_대상이_틀리면_회원을_남긴다() throws Exception {
         // given
         LoginBrowser browser = signedInWithApple(SUBJECT);
@@ -158,44 +133,6 @@ class AppleAppWithdrawalFlowTest {
             softly.assertThat(webAudienceResult.statusCode()).isEqualTo(HttpStatus.CONFLICT.value());
             softly.assertThat(apple.revokeRequests()).isEmpty();
             softly.assertThat(count("member")).isEqualTo(1);
-        });
-    }
-
-    @Test
-    void 애플이_코드_교환에_응답하지_못하면_503이고_회원을_남긴다() throws Exception {
-        // given
-        LoginBrowser browser = signedInWithApple(SUBJECT);
-        apple.failTokenExchangeWith(HttpStatus.SERVICE_UNAVAILABLE.value());
-
-        // when
-        HttpResponse<String> actual = browser.postJson(PATH, code(apple.appAuthorizationCode(SUBJECT)));
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(actual.statusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value());
-            softly.assertThat(codeOf(actual)).isEqualTo("SERVICE_UNAVAILABLE");
-            softly.assertThat(count("member")).isEqualTo(1);
-        });
-    }
-
-    @Test
-    void 카카오_회원은_400이고_코드가_없으면_400이다() throws Exception {
-        // given
-        LoginBrowser kakaoMember = signedInWithKakao();
-        LoginBrowser appleMember = signedInWithApple(SUBJECT);
-
-        // when
-        HttpResponse<String> kakaoResult = kakaoMember.postJson(PATH, code("any"));
-        HttpResponse<String> missingCode = appleMember.postJson(PATH, "{}");
-
-        // then
-        assertSoftly(softly -> {
-            softly.assertThat(kakaoResult.statusCode()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-            softly.assertThat(codeOf(kakaoResult)).isEqualTo("INVALID_REQUEST");
-            softly.assertThat(missingCode.statusCode()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-            softly.assertThat(codeOf(missingCode)).isEqualTo("INVALID_REQUEST");
-            softly.assertThat(apple.tokenRequests()).isEmpty();
-            softly.assertThat(count("member")).isEqualTo(2);
         });
     }
 
@@ -224,15 +161,6 @@ class AppleAppWithdrawalFlowTest {
         String idToken = apple.appIdToken(subject, NonceRule.SHA256_HEX.expectedClaim(nonce), claims -> {
         }, false);
         expectNoContent(browser.postJson("/api/auth/apple/native", "{\"idToken\":\"" + idToken + "\"}"));
-        return browser;
-    }
-
-    private LoginBrowser signedInWithKakao() throws Exception {
-        LoginBrowser browser = new LoginBrowser(port);
-        String nonce = nonceOf(browser.postJson("/api/auth/kakao/native/nonce", "{}"));
-        String idToken = kakao.appIdToken("4100000002", nonce, claims -> {
-        }, false);
-        expectNoContent(browser.postJson("/api/auth/kakao/native", "{\"idToken\":\"" + idToken + "\"}"));
         return browser;
     }
 

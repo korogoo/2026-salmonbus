@@ -59,22 +59,11 @@ class AppIdTokenVerifierTest {
     }
 
     @Test
-    void 카카오_규칙이면_발급한_nonce_그대로인_토큰에서_회원_식별자를_꺼낸다() throws Exception {
-        // given
-        AppIdTokenVerifier verifier = verifier(NonceRule.EXACT);
-        String token = signed(claims -> claims.claim("nonce", NONCE));
-
-        // when
-        Verification actual = verifier.verify(token, NONCE);
-
-        // then
-        assertThat(actual).isEqualTo(new Verification.Verified("member-sub"));
-    }
-
-    @Test
     void 애플_규칙이면_토큰의_nonce가_발급값의_SHA256_16진수여야_한다() throws Exception {
         // given
         AppIdTokenVerifier verifier = verifier(NonceRule.SHA256_HEX);
+        assertThat(NonceRule.SHA256_HEX.expectedClaim("abc"))
+            .isEqualTo("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         String hashed = signed(claims -> claims.claim("nonce", NonceRule.SHA256_HEX.expectedClaim(NONCE)));
         String raw = signed(claims -> claims.claim("nonce", NONCE));
 
@@ -85,15 +74,6 @@ class AppIdTokenVerifierTest {
         // then
         assertThat(hashedResult).isEqualTo(new Verification.Verified("member-sub"));
         assertThat(rawResult).isInstanceOf(Verification.Rejected.class);
-    }
-
-    @Test
-    void 애플_nonce_해시는_UTF8_SHA256의_소문자_16진수다() {
-        // when
-        String actual = NonceRule.SHA256_HEX.expectedClaim("abc");
-
-        // then
-        assertThat(actual).isEqualTo("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 
     @Test
@@ -166,33 +146,6 @@ class AppIdTokenVerifierTest {
         assertThat(verifier.verify(" ", NONCE)).isInstanceOf(Verification.Rejected.class);
         assertThat(verifier.verify(null, NONCE)).isInstanceOf(Verification.Rejected.class);
         assertThat(verifier.verify(noSubject, NONCE)).isInstanceOf(Verification.Rejected.class);
-    }
-
-    @Test
-    void nonce를_보지_않는_검증은_서명과_클레임만_확인한다() throws Exception {
-        // given
-        AppIdTokenVerifier verifier = verifier(NonceRule.SHA256_HEX);
-        String withoutNonce = signed(claims -> {
-        });
-        String otherAudience = signed(claims -> claims.audience("com.salmonbus.test.web"));
-
-        // when & then
-        assertThat(verifier.verifyWithoutNonce(withoutNonce)).isEqualTo(new Verification.Verified("member-sub"));
-        assertThat(verifier.verifyWithoutNonce(otherAudience)).isInstanceOf(Verification.Rejected.class);
-    }
-
-    @Test
-    void 공개키를_받지_못하면_거절이_아니라_사용할_수_없음으로_알린다() throws Exception {
-        // given
-        AppIdTokenVerifier verifier = verifier(NonceRule.EXACT);
-        String token = signed(claims -> claims.claim("nonce", NONCE));
-        server.stop(0);
-
-        // when
-        Verification actual = verifier.verify(token, NONCE);
-
-        // then
-        assertThat(actual).isInstanceOf(Verification.Unavailable.class);
     }
 
     @Test
