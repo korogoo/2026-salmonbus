@@ -122,9 +122,6 @@ function InServiceSection({ ref, routes, onSelect }: InServiceSectionProps) {
               <span className={styles.stops}>
                 {route.startStopName} ↔ {route.endStopName}
               </span>
-              {route.serviceNotice && !route.serviceNotice.forecastAllowed &&
-                <span>{route.serviceNotice.message || "좌석 예보 일시 중단"}</span>}
-              {route.serviceNotice?.reason === "PLANNED" && <span>{route.serviceNotice.message}</span>}
               {route.isNew && (
                 <span className={styles.newBadge} data-new-badge>
                   {NEW_BADGE}

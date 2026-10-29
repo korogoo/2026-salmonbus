@@ -18,7 +18,7 @@ import {
   type ExpandableStopView,
 } from "./displayPolicy";
 import { liveVehicleViewsFor } from "./liveVehiclePolicy";
-import { liveMotionDurationOf, useFreshLiveVehicles, useFreshWatch } from "../hooks/useFreshLiveVehicles";
+import { liveMotionDurationOf, useFreshLiveVehicles } from "../hooks/useFreshLiveVehicles";
 import { useLiveVehicleMotion } from "../hooks/useLiveVehicleMotion";
 import { useStationArrivals } from "../hooks/useStationArrivals";
 import { stopSelectionFrom, type StopSelection } from "./stopSelection";
@@ -66,7 +66,6 @@ function RouteBoard({ routeId }: { routeId: Board["route"]["id"] }) {
   const watchResource = usePolledRequest(loadRouteWatch, routeId);
   const latestWatch = latestSuccessOf(watchResource);
   const freshLiveVehicles = useFreshLiveVehicles(latestWatch);
-  const watchIsFresh = useFreshWatch(latestWatch);
   const motionDurationMs = liveMotionDurationOf(watchResource);
   const [preferredDirection, setPreferredDirection] = useState<Direction | null>(() =>
     search.get("direction") === "UP" ? "UP" : search.get("direction") === "DOWN" ? "DOWN" : null,
@@ -91,13 +90,6 @@ function RouteBoard({ routeId }: { routeId: Board["route"]["id"] }) {
       },
       { replace: true },
     );
-  }
-
-  if (state.status === "ready" && !watchIsFresh) {
-    return <main className={styles.noticePage}>
-      <BoardBackLink />
-      <p role="status">최신 예보를 확인하고 있어요</p>
-    </main>;
   }
 
   if (state.status === "ready" && screen.kind === "forecast") {

@@ -18,7 +18,6 @@ interface MockApi {
   requests: Record<Endpoint, number>;
   arrivalRequests: URL[];
   cacheMaxAgeSeconds: number;
-  serviceState: "ON" | "OFF" | "WARMING_UP";
 }
 
 export const test = base.extend<{ api: MockApi }>({
@@ -40,24 +39,12 @@ export const test = base.extend<{ api: MockApi }>({
         requests: { routes: 0, watch: 0, geometry: 0, arrivals: 0 },
         arrivalRequests: [],
         cacheMaxAgeSeconds: pollIntervalMs / 1_000,
-        serviceState: "ON",
       };
 
       await api.route(async (route) => {
         const request = route.request();
         const url = new URL(request.url());
         const path = url.pathname;
-        const serviceRoute = /^\/api\/v1\/routes\/([0-9]{9})\/service-status$/.exec(path)?.[1];
-        if (serviceRoute !== undefined && request.method() === "GET") {
-          const now = await page.evaluate(() => Date.now());
-          await route.fulfill({ status: 200, headers: { "Cache-Control": "no-store", Date: new Date(now).toUTCString() },
-            json: { routeId: serviceRoute, managed: true, state: api.serviceState,
-              forecastAllowed: api.serviceState === "ON", collectionEnabled: true,
-              reason: api.serviceState === "OFF" ? "STRIKE" : "NORMAL", message: "", sourceUrl: "",
-              checkedAt: new Date(now).toISOString(), validUntil: new Date(now + 30000).toISOString() } });
-          return;
-        }
-
         if (path === "/api/auth/session") {
           await route.fulfill({
             status: 404,
