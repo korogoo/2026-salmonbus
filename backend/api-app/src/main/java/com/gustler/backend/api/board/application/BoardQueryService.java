@@ -58,6 +58,7 @@ public class BoardQueryService {
     private final BoardQueryRepository boardQueryRepository;
     private final BoardFreshnessPolicy freshnessPolicy;
     private final BoardCachePolicy cachePolicy;
+    private RouteOperations operations;
 
     @Autowired(required = false)
     public void setOperations(RouteOperations value) {

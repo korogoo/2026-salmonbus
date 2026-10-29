@@ -24,6 +24,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DelegatingDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -64,7 +65,9 @@ class RouteOperationListenerIntegrationTest {
 
     @AfterEach
     void stop() {
-        listener.stop();
+        if (listener != null) {
+            listener.stop();
+        }
     }
 
     @Test
@@ -155,7 +158,7 @@ class RouteOperationListenerIntegrationTest {
         new ApplicationContextRunner()
             .withUserConfiguration(RouteOperationsConfiguration.class)
             .withPropertyValues("route-operations.enabled=true")
-            .withBean(DataSource.class, () -> dataSource)
+            .withBean(DataSource.class, () -> new DelegatingDataSource(dataSource))
             .withBean(JdbcClient.class, () -> jdbc)
             .withBean(PlatformTransactionManager.class, () -> transactions)
             .run(context -> {
