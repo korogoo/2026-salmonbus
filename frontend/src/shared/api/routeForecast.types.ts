@@ -8,6 +8,7 @@ export interface RouteCore {
   startStopName: string;
   endStopName: string;
   status: RouteStatus;
+  serviceNotice?: import("./routeService.types").RouteServiceStatus;
 }
 
 export type RouteSummary = RouteCore;

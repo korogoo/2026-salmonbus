@@ -1,3 +1,4 @@
+import { RouteServiceGate } from "@/shared/components/RouteServiceGate";
 import { directionLabelOf } from "@/shared/utils/directionLabelOf";
 import { stopsAwayLabelOf } from "@/shared/utils/stopsAwayLabelOf";
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent } from "react";
@@ -229,7 +230,7 @@ export function HomeFavorites() {
           )}
           <ul ref={list} className={homeStyles.list}>
             {favorites.map((favorite) => (
-              <FavoriteCard
+              <ControlledFavoriteCard
                 key={favorite.id}
                 favorite={favorite}
                 displayStopName={nameLabels[favorite.id] ?? favorite.stop.name ?? ""}
@@ -254,6 +255,14 @@ interface FavoriteCardProps {
   savedDirection: FavoriteTarget["direction"] | null;
   elapsed: number;
   onRetry: () => void;
+}
+
+function ControlledFavoriteCard(props: FavoriteCardProps) {
+  return <li><RouteServiceGate routeId={props.favorite.route.id}>
+    {Number.isFinite(props.elapsed) && props.elapsed < 30 ?
+      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}><FavoriteCard {...props} /></ul> :
+      <p role="status">최신 예보를 확인하고 있어요</p>}
+  </RouteServiceGate></li>;
 }
 
 function FavoriteCard({ favorite, displayStopName, savedDirection, elapsed, onRetry }: FavoriteCardProps) {

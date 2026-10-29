@@ -1,11 +1,11 @@
 import type { RouteSummary } from "@/shared/api/routeForecast.types";
 
 export interface InServiceRoute extends RouteSummary {
-  status: "FORECAST_READY";
+  status: "FORECAST_READY" | "PREPARING";
 }
 
 export function isInService(route: RouteSummary): route is InServiceRoute {
-  return route.status === "FORECAST_READY";
+  return route.status === "FORECAST_READY" || route.serviceNotice !== undefined;
 }
 
 export function searchDigitsFrom(text: string): string {

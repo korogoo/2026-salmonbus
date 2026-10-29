@@ -8,7 +8,8 @@ import java.util.Objects;
 /**
  * 현재 공개 노선 목록을 응답 형식으로 변환한 값이다.
  */
-@Schema(requiredProperties = {"routes"})
+@Schema(requiredProperties = {
+})
 public record RouteListResponse(
     @Schema(description = "현재 판본이 있는 노선 목록. 빈 배열도 정상 응답")
     List<RouteSummary> routes
@@ -19,10 +20,18 @@ public record RouteListResponse(
     }
 
     public static RouteListResponse from(RouteOverview overview) {
-        List<RouteSummary> routes = overview.routes()
-            .stream()
-            .map(currentRoute -> RouteSummary.from(currentRoute.route(), currentRoute.status()))
-            .toList();
+        List<RouteSummary> routes =
+            overview.routes().stream()
+                .map(
+                    currentRoute ->
+                        new RouteSummary(
+                            currentRoute.route().id(),
+                            currentRoute.route().displayName(),
+                            currentRoute.route().startStopName(),
+                            currentRoute.route().endStopName(),
+                            currentRoute.status(),
+                            currentRoute.serviceNotice()))
+                .toList();
 
         return new RouteListResponse(routes);
     }
