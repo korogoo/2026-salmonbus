@@ -27,6 +27,9 @@ class AmplitudeDeletionConfigurationTest {
 
     @Test
     void 꺼져_있으면_키_없이_기동한다() {
-        context.run(actual -> assertThat(actual).doesNotHaveBean(AmplitudeDeletionJob.class));
+        context.withPropertyValues("auth.enabled=true").run(actual -> {
+            assertThat(actual).hasSingleBean(AmplitudeDeletionJob.class);
+            assertThat(actual).doesNotHaveBean(AmplitudeDeletionClient.class);
+        });
     }
 }

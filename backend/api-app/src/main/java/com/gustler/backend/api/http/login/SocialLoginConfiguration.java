@@ -1,5 +1,6 @@
 package com.gustler.backend.api.http.login;
 
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
 import com.gustler.backend.api.account.token.AccessTokens;
 import com.gustler.backend.api.account.token.AuthCookies;
 import com.gustler.backend.api.account.token.WithdrawalTickets;
@@ -10,14 +11,14 @@ import com.gustler.backend.member.api.SignInWithSocialAccount;
 import com.gustler.backend.member.api.WithdrawMember;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.net.http.HttpClient;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -101,6 +102,7 @@ public class SocialLoginConfiguration {
         LoginProperties properties,
         AppleClientAssertion clientSecret,
         WithdrawMember withdrawMember,
+        AmplitudeDeletionJob analytics,
         MeterRegistry meters
     ) {
         HttpClient httpClient = HttpClient.newBuilder()
@@ -112,7 +114,7 @@ public class SocialLoginConfiguration {
         AppleRevokeClient revokeClient = new AppleRevokeClient(
             RestClient.builder().requestFactory(requestFactory).build(),
             properties.apple().clientId(), properties.apple().revokeUri(), clientSecret);
-        return new AppleWithdrawal(withdrawMember, revokeClient, meters);
+        return new AppleWithdrawal(withdrawMember, revokeClient, meters, analytics);
     }
 
     @Bean
