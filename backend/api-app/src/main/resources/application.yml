@@ -145,9 +145,9 @@ management:
         add-additional-paths: true
 
 # dev는 프로젝트 852649, 운영은 852648의 키를 각각 주입한다.
-# 꺼져 있어도 탈퇴 요청은 저장하며, 켜면 남은 요청부터 재시도한다.
+# 로그인 기능을 켜면 삭제 요청도 기본으로 전송한다. 인증 키는 서버에서 주입한다.
 analytics:
   amplitude:
-    enabled: ${AMPLITUDE_DELETION_ENABLED:false}
+    enabled: true
     api-key: ${AMPLITUDE_API_KEY:}
     secret-key: ${AMPLITUDE_SECRET_KEY:}

@@ -13,22 +13,22 @@ class AmplitudeDeletionConfigurationTest {
         .withBean(AnalyticsDeletions.class, () -> mock(AnalyticsDeletions.class));
 
     @Test
-    void 켰는데_키가_없으면_기동하지_않는다() {
-        context.withPropertyValues("auth.enabled=true", "analytics.amplitude.enabled=true")
+    void 로그인만_켜도_키가_없으면_기동하지_않는다() {
+        context.withPropertyValues("auth.enabled=true")
             .run(actual -> assertThat(actual).hasFailed());
     }
 
     @Test
     void 키를_환경_설정으로_받아_삭제_작업을_등록한다() {
-        context.withPropertyValues("auth.enabled=true", "analytics.amplitude.enabled=true",
+        context.withPropertyValues("auth.enabled=true",
                 "analytics.amplitude.api-key=key", "analytics.amplitude.secret-key=secret")
             .run(actual -> assertThat(actual).hasSingleBean(AmplitudeDeletionJob.class));
     }
 
     @Test
-    void 꺼져_있으면_키_없이_기동한다() {
-        context.withPropertyValues("auth.enabled=true").run(actual -> {
-            assertThat(actual).hasSingleBean(AmplitudeDeletionJob.class);
+    void 로그인을_꺼두면_키_없이_기동한다() {
+        context.withPropertyValues("auth.enabled=false").run(actual -> {
+            assertThat(actual).doesNotHaveBean(AmplitudeDeletionJob.class);
             assertThat(actual).doesNotHaveBean(AmplitudeDeletionClient.class);
         });
     }

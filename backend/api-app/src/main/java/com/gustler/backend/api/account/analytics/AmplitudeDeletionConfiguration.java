@@ -16,7 +16,7 @@ import org.springframework.web.client.RestClient;
 @EnableConfigurationProperties(AmplitudeDeletionProperties.class)
 public class AmplitudeDeletionConfiguration {
     @Bean
-    @ConditionalOnProperty(name = "analytics.amplitude.enabled", havingValue = "true")
+    @ConditionalOnProperty(name = "analytics.amplitude.enabled", havingValue = "true", matchIfMissing = true)
     AmplitudeDeletionClient amplitudeDeletionClient(AmplitudeDeletionProperties properties) {
         properties.requireComplete();
         HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
