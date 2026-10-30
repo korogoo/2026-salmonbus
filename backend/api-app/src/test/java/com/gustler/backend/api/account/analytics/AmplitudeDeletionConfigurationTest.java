@@ -22,13 +22,13 @@ class AmplitudeDeletionConfigurationTest {
     void 키를_환경_설정으로_받아_삭제_작업을_등록한다() {
         context.withPropertyValues("auth.enabled=true",
                 "analytics.amplitude.api-key=key", "analytics.amplitude.secret-key=secret")
-            .run(actual -> assertThat(actual).hasSingleBean(AmplitudeDeletionJob.class));
+            .run(actual -> assertThat(actual).hasSingleBean(AmplitudeDeletionProcessor.class));
     }
 
     @Test
     void 로그인을_꺼두면_키_없이_기동한다() {
         context.withPropertyValues("auth.enabled=false").run(actual -> {
-            assertThat(actual).doesNotHaveBean(AmplitudeDeletionJob.class);
+            assertThat(actual).doesNotHaveBean(AmplitudeDeletionProcessor.class);
             assertThat(actual).doesNotHaveBean(AmplitudeDeletionClient.class);
         });
     }

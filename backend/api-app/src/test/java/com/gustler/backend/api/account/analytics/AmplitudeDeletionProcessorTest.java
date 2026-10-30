@@ -10,10 +10,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
-class AmplitudeDeletionJobTest {
+class AmplitudeDeletionProcessorTest {
     private final AnalyticsDeletions deletions = mock(AnalyticsDeletions.class);
     private final AmplitudeDeletionClient client = mock(AmplitudeDeletionClient.class);
-    private final AmplitudeDeletionJob job = new AmplitudeDeletionJob(deletions,
+    private final AmplitudeDeletionProcessor job = new AmplitudeDeletionProcessor(deletions,
         new StaticListableBeanFactory(Map.of("client", client)).getBeanProvider(AmplitudeDeletionClient.class));
 
     @Test
@@ -37,7 +37,7 @@ class AmplitudeDeletionJobTest {
 
     @Test
     void 전송을_꺼두면_대기_기록을_처리하지_않는다() {
-        AmplitudeDeletionJob disabled = new AmplitudeDeletionJob(deletions,
+        AmplitudeDeletionProcessor disabled = new AmplitudeDeletionProcessor(deletions,
             new StaticListableBeanFactory().getBeanProvider(AmplitudeDeletionClient.class));
         disabled.attempt(UUID.randomUUID());
         disabled.retry();

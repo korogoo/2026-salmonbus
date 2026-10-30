@@ -26,10 +26,10 @@ public class AmplitudeDeletionConfiguration {
     }
 
     @Bean
-    AmplitudeDeletionJob amplitudeDeletionJob(
+    AmplitudeDeletionProcessor amplitudeDeletionProcessor(
         AnalyticsDeletions deletions,
         ObjectProvider<AmplitudeDeletionClient> client
     ) {
-        return new AmplitudeDeletionJob(deletions, client);
+        return new AmplitudeDeletionProcessor(deletions, client);
     }
 }

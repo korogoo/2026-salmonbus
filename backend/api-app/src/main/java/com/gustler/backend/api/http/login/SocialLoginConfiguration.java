@@ -1,6 +1,6 @@
 package com.gustler.backend.api.http.login;
 
-import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionProcessor;
 import com.gustler.backend.api.account.token.AccessTokens;
 import com.gustler.backend.api.account.token.AuthCookies;
 import com.gustler.backend.api.account.token.WithdrawalTickets;
@@ -102,7 +102,7 @@ public class SocialLoginConfiguration {
         LoginProperties properties,
         AppleClientAssertion clientSecret,
         WithdrawMember withdrawMember,
-        AmplitudeDeletionJob analytics,
+        AmplitudeDeletionProcessor analytics,
         MeterRegistry meters
     ) {
         AppleRevokeClient revokeClient = new AppleRevokeClient(

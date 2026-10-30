@@ -8,7 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionProcessor;
 import com.gustler.backend.member.api.LoginProvider;
 import com.gustler.backend.member.api.MemberIdentity;
 import com.gustler.backend.member.api.ProviderUnlink;
@@ -26,7 +26,7 @@ class AppleWithdrawalTest {
 
     private final WithdrawMember withdrawMember = mock(WithdrawMember.class);
     private final AppleRevokeClient revokeClient = mock(AppleRevokeClient.class);
-    private final AmplitudeDeletionJob analytics = mock(AmplitudeDeletionJob.class);
+    private final AmplitudeDeletionProcessor analytics = mock(AmplitudeDeletionProcessor.class);
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final AppleWithdrawal withdrawal = new AppleWithdrawal(withdrawMember, revokeClient, meters, analytics);
 

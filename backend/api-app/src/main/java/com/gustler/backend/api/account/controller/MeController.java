@@ -5,7 +5,7 @@ import com.gustler.backend.api.account.NicknameInvalidException;
 import com.gustler.backend.api.account.NicknameTakenException;
 import com.gustler.backend.api.account.NotAppleMemberException;
 import com.gustler.backend.api.account.ReauthRequiredException;
-import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionProcessor;
 import com.gustler.backend.api.account.dto.AppleWithdrawalRequest;
 import com.gustler.backend.api.account.dto.AppleWithdrawalResponse;
 import com.gustler.backend.api.account.dto.MyProfileResponse;
@@ -80,7 +80,7 @@ public class MeController {
     private final ChangeNickname changeNickname;
     private final WithdrawMember withdrawMember;
     private final ProviderUnlinkRunner unlinkRunner;
-    private final AmplitudeDeletionJob analytics;
+    private final AmplitudeDeletionProcessor analytics;
     private final AuthCookies authCookies;
     private final WithdrawalTickets withdrawalTickets;
     private final RefreshTokens refreshTokens;
@@ -90,7 +90,7 @@ public class MeController {
         ChangeNickname changeNickname,
         WithdrawMember withdrawMember,
         ProviderUnlinkRunner unlinkRunner,
-        AmplitudeDeletionJob analytics,
+        AmplitudeDeletionProcessor analytics,
         AuthCookies authCookies,
         WithdrawalTickets withdrawalTickets,
         RefreshTokens refreshTokens

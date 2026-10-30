@@ -1,6 +1,6 @@
 package com.gustler.backend.api.http.login;
 
-import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionProcessor;
 import com.gustler.backend.api.account.token.AccessTokens;
 import com.gustler.backend.api.account.token.AuthCookies;
 import com.gustler.backend.api.favorite.application.DefaultFavoriteGroupService;
@@ -44,7 +44,7 @@ public class AppLoginConfiguration {
         Clock clock,
         ObjectProvider<AppleClientAssertion> appleClientAssertion,
         WithdrawMember withdrawMember,
-        AmplitudeDeletionJob analytics,
+        AmplitudeDeletionProcessor analytics,
         MeterRegistry meters,
         ObjectMapper objectMapper
     ) {

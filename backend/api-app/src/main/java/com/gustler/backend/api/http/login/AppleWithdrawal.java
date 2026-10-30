@@ -1,6 +1,6 @@
 package com.gustler.backend.api.http.login;
 
-import com.gustler.backend.api.account.analytics.AmplitudeDeletionJob;
+import com.gustler.backend.api.account.analytics.AmplitudeDeletionProcessor;
 import com.gustler.backend.member.api.MemberIdentity;
 import com.gustler.backend.member.api.ProviderUnlink;
 import com.gustler.backend.member.api.WithdrawMember;
@@ -24,13 +24,13 @@ final class AppleWithdrawal {
     private final WithdrawMember withdrawMember;
     private final AppleRevokeClient revokeClient;
     private final MeterRegistry meters;
-    private final AmplitudeDeletionJob analytics;
+    private final AmplitudeDeletionProcessor analytics;
 
     AppleWithdrawal(
         WithdrawMember withdrawMember,
         AppleRevokeClient revokeClient,
         MeterRegistry meters,
-        AmplitudeDeletionJob analytics
+        AmplitudeDeletionProcessor analytics
     ) {
         this.withdrawMember = withdrawMember;
         this.revokeClient = revokeClient;

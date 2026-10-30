@@ -59,3 +59,9 @@ CI의 연속 번호 검사에 맞춰 이 변경은 V47을 사용한다. 먼저 �
 ## 삭제 전송 기본 활성화
 
 사용자 요청으로 AMPLITUDE_DELETION_ENABLED 환경 변수 연결을 없애고 전송 기본값을 true로 바꿨다. AMPLITUDE_API_KEY와 AMPLITUDE_SECRET_KEY는 서버 비밀 설정으로 유지한다. API 통합 테스트에서만 전송을 비활성화한다. 서버 키 등록과 실제 API 재시작은 수행하지 않았다.
+
+## 리뷰 반영과 인증 키 확인 (2026-10-30)
+
+즉시 전송과 주기 재시도를 같이 맡는 클래스 이름을 AmplitudeDeletionProcessor로 바꿨다. 외부 호출 중 DB 연결과 행 잠금을 유지하는 구조는 이번 범위에서 유지하며, 임대 후 외부 호출 방식과 반복 실패 감지는 후속 과제로 둔다. 심각한 성능 저하를 실측한 결과는 없다.
+
+운영 서버의 /etc/salmonbus/api.env와 실행 중인 salmonbus-api 프로세스에서 AMPLITUDE_API_KEY, AMPLITUDE_SECRET_KEY 모두 미등록임을 읽기 전용으로 확인했다. 비밀값은 출력하지 않았으며 서버 설정과 서비스를 변경하지 않았다. dev 서버는 미확인이다. 기본 활성화된 새 코드를 운영에 배포하기 전에 운영 프로젝트 852648의 API Key와 Secret Key를 등록해야 한다. dev는 프로젝트 852649의 키 쌍을 사용한다. 프론트용 WEBPACK_AMPLITUDE_API_KEY만으로는 서버 삭제 API를 인증할 수 없다.

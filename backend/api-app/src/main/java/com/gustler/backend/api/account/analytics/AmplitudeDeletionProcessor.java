@@ -8,12 +8,12 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /** 탈퇴 호출자가 즉시 시도하고, 남은 요청은 주기 작업이 다시 처리한다. */
-public final class AmplitudeDeletionJob {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AmplitudeDeletionJob.class);
+public final class AmplitudeDeletionProcessor {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AmplitudeDeletionProcessor.class);
     private final AnalyticsDeletions deletions;
     private final ObjectProvider<AmplitudeDeletionClient> clients;
 
-    public AmplitudeDeletionJob(AnalyticsDeletions deletions, ObjectProvider<AmplitudeDeletionClient> clients) {
+    public AmplitudeDeletionProcessor(AnalyticsDeletions deletions, ObjectProvider<AmplitudeDeletionClient> clients) {
         this.deletions = deletions;
         this.clients = clients;
     }
